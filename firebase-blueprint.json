@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "transactions": {
+      "title": "Transactions",
+      "description": "Petty cash inward and outward transactions",
+      "type": "object",
+      "properties": {
+        "txn_code": { "type": "string" },
+        "date": { "type": "string" },
+        "type": { "type": "string" },
+        "amount": { "type": "number" },
+        "category_id": { "type": "number" },
+        "merchant": { "type": "string" },
+        "reference": { "type": "string" },
+        "description": { "type": "string" },
+        "remarks": { "type": "string" },
+        "payment_type": { "type": "string" },
+        "recorded_by": { "type": "string" },
+        "status": { "type": "string" },
+        "receipt_name": { "type": "string" },
+        "receipt_size": { "type": "string" }
+      },
+      "required": ["date", "type", "amount", "reference", "description"]
+    },
+    "categories": {
+      "title": "Categories",
+      "description": "Expense categories",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "budget": { "type": "number" }
+      },
+      "required": ["name"]
+    },
+    "audit_logs": {
+      "title": "Audit Logs",
+      "description": "System audit trail logs",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
+    }
+  }
+}

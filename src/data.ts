@@ -1,0 +1,219 @@
+import { Transaction, CategoryLimit, ActivityLog, User, AppSettings } from './types';
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  currencySymbol: '₹',
+  dateFormat: 'DD/MM/YYYY',
+  timezone: 'Asia/Kolkata (IST, UTC+05:30)'
+};
+
+export const MOCK_USERS: User[] = [
+  {
+    username: 'admin',
+    empId: 'OEPL-101',
+    fullName: 'Sarah Jenkins',
+    role: 'ADMIN',
+    password: 'admin123',
+    avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120'
+  },
+  {
+    username: 'custodian',
+    empId: 'OEPL-102',
+    fullName: 'David Vance',
+    role: 'CUSTODIAN',
+    password: 'custodian123',
+    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120'
+  },
+  {
+    username: 'auditor',
+    empId: 'OEPL-103',
+    fullName: 'Elena Rostova',
+    role: 'AUDITOR',
+    password: 'auditor123',
+    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=120'
+  }
+];
+
+export const MOCK_CATEGORIES: CategoryLimit[] = [
+  { id: 'CAT-001', name: 'Cash Source', color: '#10b981', budget: 50000, spent: 0, type: 'IN' },
+  { id: 'CAT-002', name: 'Bank Withdrawal', color: '#06b6d4', budget: 50000, spent: 0, type: 'IN' },
+  { id: 'CAT-003', name: 'Labour Charges', color: '#ec4899', budget: 5000, spent: 4000, type: 'OUT' },
+  { id: 'CAT-004', name: 'Rent & Advertising', color: '#3b82f6', budget: 3000, spent: 2100, type: 'OUT' },
+  { id: 'CAT-005', name: 'Electrical & Materials', color: '#f59e0b', budget: 2500, spent: 1329, type: 'OUT' },
+  { id: 'CAT-006', name: 'Chemicals & Delivery', color: '#10b981', budget: 2000, spent: 1082, type: 'OUT' },
+  { id: 'CAT-007', name: 'Travel & Site Visits', color: '#8b5cf6', budget: 1500, spent: 525, type: 'OUT' },
+  { id: 'CAT-008', name: 'Miscellaneous', color: '#6b7280', budget: 500, spent: 0, type: 'OUT' }
+];
+
+export const INITIAL_TRANSACTIONS: Transaction[] = [
+  {
+    id: 'TXN-2026-001',
+    date: '2026-05-15',
+    type: 'OUT',
+    amount: 700.00,
+    category: 'Rent & Advertising',
+    merchant: 'Chandrasekar',
+    reference: 'OW-001',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Solar Advertisement Banner Rent for April\' 26 - May\' 26',
+    receiptName: 'Parthiban given May month - settled',
+    receiptSize: 'Local',
+    editHistory: [
+      {
+        timestamp: '2026-05-16 11:30:22',
+        editedBy: 'Sarah Jenkins',
+        changes: [
+          { field: 'Paid To', oldValue: 'Mohan K', newValue: 'Chandrasekar' },
+          { field: 'Amount', oldValue: '₹500.00', newValue: '₹700.00' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'TXN-2026-002',
+    date: '2026-06-15',
+    type: 'IN',
+    amount: 5000.00,
+    category: 'Cash Source',
+    merchant: 'Parthiban',
+    reference: 'IW-001',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Initial Amount from Parthiban',
+    receiptName: 'initial_deposit.pdf',
+    receiptSize: '154 KB'
+  },
+  {
+    id: 'TXN-2026-003',
+    date: '2026-06-15',
+    type: 'IN',
+    amount: 5500.00,
+    category: 'Cash Source',
+    merchant: 'ATM Withdrawal',
+    reference: 'IW-002',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'ATM withdraw by Mohan',
+    receiptName: 'atm_receipt.png',
+    receiptSize: '88 KB'
+  },
+  {
+    id: 'TXN-2026-004',
+    date: '2026-06-15',
+    type: 'OUT',
+    amount: 700.00,
+    category: 'Rent & Advertising',
+    merchant: 'Chandrasekar',
+    reference: 'OW-002',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Solar Advertisement Banner Rent for May\'26 - June\' 26',
+    receiptName: 'Parthiban given May month - settled',
+    receiptSize: 'Local'
+  },
+  {
+    id: 'TXN-2026-005',
+    date: '2026-07-08',
+    type: 'OUT',
+    amount: 1329.00,
+    category: 'Electrical & Materials',
+    merchant: 'Mohan K',
+    reference: 'OW-003',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Gland purchase by Mohan #',
+    receiptName: 'gland_invoice.pdf',
+    receiptSize: '245 KB'
+  },
+  {
+    id: 'TXN-2026-006',
+    date: '2026-07-08',
+    type: 'OUT',
+    amount: 525.00,
+    category: 'Travel & Site Visits',
+    merchant: 'Mohan K',
+    reference: 'OW-004',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Taxi charges by Mohan for Anna Nagar Site visit',
+    receiptName: 'OEPL to Anna Nagar site & Anna Nagar to OEPL',
+    receiptSize: 'Local'
+  },
+  {
+    id: 'TXN-2026-007',
+    date: '2026-07-08',
+    type: 'OUT',
+    amount: 4000.00,
+    category: 'Labour Charges',
+    merchant: 'Mohan K',
+    reference: 'OW-005',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Solar Labour Charges for unloading Solar equipment',
+    receiptName: 'Anna Nagar site (30 panel + inverters)',
+    receiptSize: 'Local'
+  },
+  {
+    id: 'TXN-2026-008',
+    date: '2026-07-14',
+    type: 'IN',
+    amount: 2500.00,
+    category: 'Cash Source',
+    merchant: 'Cash Deposit',
+    reference: 'IW-003',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Rejected amount from 1.5L cash deposit',
+    receiptName: 'deposit_slip.png',
+    receiptSize: '112 KB'
+  },
+  {
+    id: 'TXN-2026-009',
+    date: '2026-07-14',
+    type: 'OUT',
+    amount: 1082.00,
+    category: 'Chemicals & Delivery',
+    merchant: 'Mohan K',
+    reference: 'OW-006',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Saint Gobain - Chemical delivery by Mohan #',
+    receiptName: 'chemical_invoice.pdf',
+    receiptSize: '315 KB'
+  },
+  {
+    id: 'TXN-2026-010',
+    date: '2026-07-17',
+    type: 'OUT',
+    amount: 700.00,
+    category: 'Rent & Advertising',
+    merchant: 'Chandrasekar',
+    reference: 'OW-007',
+    recordedBy: 'Mohan K',
+    status: 'APPROVED',
+    description: 'Solar Ad. banner rent - June\'26 - July\' 26',
+    receiptName: 'rent_banner_july.png',
+    receiptSize: '124 KB'
+  }
+];
+
+export const INITIAL_LOGS: ActivityLog[] = [
+  {
+    id: 'LOG-001',
+    timestamp: '2026-07-14 11:24:10',
+    user: 'David Vance',
+    role: 'CUSTODIAN',
+    action: 'TXN_CREATE',
+    details: 'Logged ₹1,082.00 expense (Chemicals & Delivery) to Mohan K',
+    ipAddress: '192.168.1.112'
+  }
+];
+
+export const MOCK_MONTHLY_TRENDS = [
+  { month: 'Feb 2026', inflow: 0, outflow: 0 },
+  { month: 'Mar 2026', inflow: 0, outflow: 0 },
+  { month: 'Apr 2026', inflow: 0, outflow: 0 },
+  { month: 'May 2026', inflow: 0, outflow: 700 },
+  { month: 'Jun 2026', inflow: 10500, outflow: 700 },
+  { month: 'Jul 2026', inflow: 2500, outflow: 7636 }
+];

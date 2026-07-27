@@ -1,0 +1,6 @@
+{
+  "name": "Petty Cash Register",
+  "description": "A modern, secure corporate petty cash ledger and register system featuring real-time analytics, user roles, transaction logs, and a downloadable production-ready PHP/Apache package with full deployment documentation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
