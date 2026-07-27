@@ -184,10 +184,55 @@ export default function App() {
     };
   }, []);
 
+  // Fetch user public IP address for accurate audit log tracking
+  const [userIpAddress, setUserIpAddress] = useState<string>('Detecting...');
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPublicIp = async () => {
+      try {
+        const res = await fetch('https://api.ipify.org?format=json');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.ip && isMounted) {
+            setUserIpAddress(data.ip);
+            return;
+          }
+        }
+      } catch (e) {
+        // Retry with secondary provider
+      }
+
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.ip && isMounted) {
+            setUserIpAddress(data.ip);
+            return;
+          }
+        }
+      } catch (e) {
+        // Fallback
+      }
+
+      if (isMounted) {
+        setUserIpAddress('127.0.0.1');
+      }
+    };
+
+    fetchPublicIp();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Helper for adding Audit Log to Firestore
   const addLog = (action: string, details: string) => {
     if (!currentUser) return;
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
+    const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -195,7 +240,7 @@ export default function App() {
       role: currentUser.role,
       action,
       details,
-      ipAddress: '192.168.1.' + Math.floor(Math.random() * 200 + 10)
+      ipAddress: effectiveIp
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn('Log save error:', e));
@@ -207,16 +252,17 @@ export default function App() {
     
     // Add Login Audit log
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
+    const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
     const newLog: ActivityLog = {
       id: logId,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      timestamp: new Date().toISOString(),
       user: user.fullName,
       role: user.role,
       action: 'LOGIN_SUCCESS',
       details: 'Successfully authenticated into financial register node',
-      ipAddress: '192.168.1.' + Math.floor(Math.random() * 200 + 10)
+      ipAddress: effectiveIp
     };
-    setLogs([newLog, ...logs]);
+    setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
     setActiveTab('DASHBOARD');
   };
@@ -225,16 +271,17 @@ export default function App() {
   const handleLogout = () => {
     if (currentUser) {
       const logId = `LOG-0${Date.now().toString().slice(-5)}`;
+      const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
       const newLog: ActivityLog = {
         id: logId,
-        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        timestamp: new Date().toISOString(),
         user: currentUser.fullName,
         role: currentUser.role,
         action: 'LOGOUT',
         details: 'Terminated session and flushed security tokens',
-        ipAddress: '192.168.1.' + Math.floor(Math.random() * 200 + 10)
+        ipAddress: effectiveIp
       };
-      setLogs([newLog, ...logs]);
+      setLogs(prev => [newLog, ...prev]);
       setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
     }
     setCurrentUser(null);
