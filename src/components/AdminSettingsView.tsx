@@ -196,15 +196,19 @@ export default function AdminSettingsView({
     return localStorage.getItem('petty_cash_email_subject_new') || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
   });
   const [emailBodyNew, setEmailBodyNew] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_email_body_new') || 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    const saved = localStorage.getItem('petty_cash_email_body_new');
+    if (!saved || !saved.includes('{attachment}')) {
+      return 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    }
+    return saved;
   });
   const [emailSubjectEdit, setEmailSubjectEdit] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_email_subject_edit') || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified - {amount} ({category})';
+    return localStorage.getItem('petty_cash_email_subject_edit') || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
   });
   const [emailBodyEdit, setEmailBodyEdit] = useState<string>(() => {
     const saved = localStorage.getItem('petty_cash_email_body_edit');
-    if (!saved || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
-      return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nUpdated Details:\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+    if (!saved || !saved.includes('{attachment}') || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
+      return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
     return saved;
   });
@@ -1560,7 +1564,7 @@ export default function AdminSettingsView({
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
-                      {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{balance}'].map((tag) => (
+                      {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
                         <button
                           key={`new-email-${tag}`}
                           type="button"
@@ -1713,18 +1717,45 @@ export default function AdminSettingsView({
                                       let valClass = 'text-slate-700 font-medium';
                                       if (line.key.toLowerCase().includes('amount')) {
                                         valClass = 'text-red-600 font-bold';
-                                      } else if (line.key.toLowerCase().includes('balance')) {
-                                        valClass = 'text-emerald-700 font-bold';
                                       } else if (line.key.toLowerCase().includes('changed')) {
                                         valClass = 'text-blue-600 font-semibold';
                                       }
+
+                                      let valNode: React.ReactNode = line.value;
+                                      if (line.key.toLowerCase().includes('attachment')) {
+                                        if (line.value.includes('<a') || line.value.toUpperCase().startsWith('YES')) {
+                                          valNode = (
+                                            <a href="#" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline cursor-pointer hover:text-blue-800">
+                                              YES
+                                            </a>
+                                          );
+                                        } else {
+                                          valNode = 'NO';
+                                        }
+                                      } else if (line.value.includes('<strong>') || line.value.includes('<b>')) {
+                                        valNode = <span dangerouslySetInnerHTML={{ __html: line.value }} />;
+                                      }
+
                                       return (
                                         <div key={`line-${lIdx}`}>
                                           <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                          <span className={valClass}>{line.value}</span>
+                                          <span className={valClass}>{valNode}</span>
                                         </div>
                                       );
                                     })}
+                                  </div>
+                                );
+                              }
+
+                              if (block.type === 'balance') {
+                                const line = block.lines ? block.lines[0] : null;
+                                const keyText = line ? line.key : 'Current Cash Balance';
+                                const valText = line ? line.value : (block.text ? block.text.replace(/^.*:\s*/, '') : '');
+
+                                return (
+                                  <div key={`preview-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
+                                    <span className="text-slate-900 font-bold">{keyText}:</span>
+                                    <span className="text-emerald-700 font-extrabold text-sm">{valText}</span>
                                   </div>
                                 );
                               }
@@ -1742,6 +1773,16 @@ export default function AdminSettingsView({
                                   <p key={`preview-block-${idx}`} className="text-xs italic text-slate-400 my-3">
                                     {block.text}
                                   </p>
+                                );
+                              }
+
+                              if (block.text && (block.text.includes('<strong>') || block.text.includes('<b>'))) {
+                                return (
+                                  <p
+                                    key={`preview-block-${idx}`}
+                                    className="text-sm text-slate-700 leading-relaxed whitespace-pre-line"
+                                    dangerouslySetInnerHTML={{ __html: block.text }}
+                                  />
                                 );
                               }
 

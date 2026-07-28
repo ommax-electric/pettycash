@@ -5,7 +5,7 @@
  */
 
 export interface ParsedEmailBlock {
-  type: 'paragraph' | 'callout' | 'signoff' | 'note';
+  type: 'paragraph' | 'callout' | 'balance' | 'signoff' | 'note';
   text?: string;
   lines?: { key: string; value: string; raw: string }[];
 }
@@ -41,9 +41,35 @@ export function parseBodyTextToBlocks(rawText: string): ParsedEmailBlock[] {
     const isKeyValueBlock = lines.length > 0 && keyValueLines.every(kv => kv !== null);
 
     if (isKeyValueBlock) {
+      const nonNullLines = keyValueLines.filter((kv): kv is { key: string; value: string; raw: string } => kv !== null);
+      
+      const detailsLines = nonNullLines.filter(l => !l.key.toLowerCase().includes('balance'));
+      const balanceLines = nonNullLines.filter(l => l.key.toLowerCase().includes('balance'));
+
+      if (detailsLines.length > 0) {
+        blocks.push({
+          type: 'callout',
+          lines: detailsLines
+        });
+      }
+
+      if (balanceLines.length > 0) {
+        for (const bLine of balanceLines) {
+          blocks.push({
+            type: 'balance',
+            lines: [bLine],
+            text: bLine.raw
+          });
+        }
+      }
+    } else if (trimmedBlock.toLowerCase().startsWith('current cash balance:') || trimmedBlock.toLowerCase().startsWith('cash balance:')) {
+      const colonIdx = trimmedBlock.indexOf(':');
+      const keyStr = colonIdx > 0 ? trimmedBlock.substring(0, colonIdx).trim() : 'Current Cash Balance';
+      const valStr = colonIdx > 0 ? trimmedBlock.substring(colonIdx + 1).trim() : trimmedBlock;
       blocks.push({
-        type: 'callout',
-        lines: keyValueLines.filter((kv): kv is { key: string; value: string; raw: string } => kv !== null)
+        type: 'balance',
+        lines: [{ key: keyStr, value: valStr, raw: trimmedBlock }],
+        text: trimmedBlock
       });
     } else if (trimmedBlock.toLowerCase().startsWith('thank') || trimmedBlock.toLowerCase().startsWith('regards')) {
       blocks.push({
@@ -76,6 +102,8 @@ export function substituteSampleTags(
 ): string {
   if (!templateText) return '';
 
+  const sampleAttachmentLink = `<a href="#" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>`;
+
   return templateText
     .replace(/\{voucher_id\}/g, 'VOUCHER-104')
     .replace(/\{amount\}/g, `${currencySymbol}3,500.00`)
@@ -83,8 +111,9 @@ export function substituteSampleTags(
     .replace(/\{category\}/g, 'Office Supplies')
     .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
     .replace(/\{date\}/g, '2026-07-28')
+    .replace(/\{attachment\}/g, sampleAttachmentLink)
     .replace(/\{balance\}/g, `${currencySymbol}12,500.00`)
-    .replace(/\{changed_fields\}/g, 'Amount and Category')
+    .replace(/\{changed_fields\}/g, '<strong>Amount and Category</strong>')
     .replace(/\{updated_by\}/g, 'Anita (Admin)');
 }
 
@@ -103,20 +132,38 @@ export function buildModernHtmlEmailFromText(
         let valueStyle = 'color: #334155;';
         if (line.key.toLowerCase().includes('amount')) {
           valueStyle = 'color: #ef4444; font-weight: 700;';
-        } else if (line.key.toLowerCase().includes('balance')) {
-          valueStyle = 'color: #059669; font-weight: 700;';
         } else if (line.key.toLowerCase().includes('changed')) {
           valueStyle = 'color: #2563eb; font-weight: 600;';
         }
-        return `<div style="margin-bottom: 6px;"><strong style="color: #0f172a; font-weight: 700;">${line.key}:</strong> <span style="${valueStyle}">${line.value}</span></div>`;
+
+        let valueContent = line.value;
+        if (line.key.toLowerCase().includes('attachment')) {
+          if (line.value.toUpperCase().startsWith('YES') && !line.value.includes('<a')) {
+            valueContent = `<a href="#" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>`;
+          }
+        }
+
+        return `<div style="margin-bottom: 6px;"><strong style="color: #0f172a; font-weight: 700;">${line.key}:</strong> <span style="${valueStyle}">${valueContent}</span></div>`;
       }).join('');
 
       return `
-      <!-- Details Callout Box -->
+      <!-- Details Callout Box (Red Left Border) -->
       <div style="background-color: #f8fafc; border-left: 4px solid #ef4444; border-radius: 12px; padding: 18px 20px; margin: 20px 0;">
         <div style="font-size: 14px; line-height: 1.7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
           ${lineHtml}
         </div>
+      </div>`;
+    }
+
+    if (block.type === 'balance') {
+      const line = block.lines ? block.lines[0] : null;
+      const keyText = line ? line.key : 'Current Cash Balance';
+      const valText = line ? line.value : (block.text ? block.text.replace(/^.*:\s*/, '') : '');
+
+      return `
+      <!-- Current Cash Balance Box (No Red Left Border) -->
+      <div style="background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; padding: 14px 18px; margin: 20px 0; font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <strong style="color: #0f172a; font-weight: 700;">${keyText}:</strong> <span style="color: #059669; font-weight: 800;">${valText}</span>
       </div>`;
     }
 

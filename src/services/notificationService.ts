@@ -192,23 +192,33 @@ export async function sendEmailNotification(
     const updaterName = currentUser ? `${currentUser.fullName}` : 'Admin';
     const formattedAmount = `${appSettings.currencySymbol}${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+    const hasAttachment = Boolean(txn.receiptUrl || txn.receiptName);
+    const attachmentHtml = hasAttachment
+      ? (txn.receiptUrl 
+          ? `<a href="${txn.receiptUrl}" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>`
+          : '<a href="#" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>')
+      : 'NO';
+
+    const boldChangedFields = `<strong>${changedFieldsStr}</strong>`;
+
     if (type === 'NEW') {
       subjectTemplate = localStorage.getItem('petty_cash_email_subject_new') ||
         '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
       bodyTemplate = localStorage.getItem('petty_cash_email_body_new') ||
-        'Hello Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+        'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     } else {
       subjectTemplate = localStorage.getItem('petty_cash_email_subject_edit') ||
         '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
       bodyTemplate = localStorage.getItem('petty_cash_email_body_edit') ||
-        'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nUpdated Details:\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+        'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
 
     const emailSubject = subjectTemplate
       .replace(/\{voucher_id\}/g, txn.reference || txn.id)
       .replace(/\{amount\}/g, formattedAmount)
       .replace(/\{category\}/g, txn.category || 'General')
-      .replace(/\{changed_fields\}/g, changedFieldsStr);
+      .replace(/\{changed_fields\}/g, changedFieldsStr)
+      .replace(/\{attachment\}/g, hasAttachment ? 'YES' : 'NO');
 
     const emailBodyParsed = bodyTemplate
       .replace(/\{voucher_id\}/g, txn.reference || txn.id)
@@ -217,8 +227,9 @@ export async function sendEmailNotification(
       .replace(/\{category\}/g, txn.category || 'General')
       .replace(/\{remarks\}/g, txn.remarks || txn.description || 'N/A')
       .replace(/\{date\}/g, txn.date)
+      .replace(/\{attachment\}/g, attachmentHtml)
       .replace(/\{balance\}/g, currentBalance)
-      .replace(/\{changed_fields\}/g, changedFieldsStr)
+      .replace(/\{changed_fields\}/g, boldChangedFields)
       .replace(/\{updated_by\}/g, updaterName);
 
     const cardTitle = type === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert';
