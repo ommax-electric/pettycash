@@ -106,6 +106,7 @@ export default function AdminSettingsView({
   const [userEmpId, setUserEmpId] = useState('');
   const [userUsername, setUserUsername] = useState('');
   const [userPassword, setUserPassword] = useState('');
+  const [showModalPassword, setShowModalPassword] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('CUSTODIAN');
   const [userError, setUserError] = useState('');
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
@@ -206,6 +207,7 @@ export default function AdminSettingsView({
     setUserEmpId('');
     setUserUsername('');
     setUserPassword('');
+    setShowModalPassword(false);
     setUserRole('CUSTODIAN');
     setUserError('');
     setIsUserModalOpen(true);
@@ -217,6 +219,7 @@ export default function AdminSettingsView({
     setUserEmpId(u.empId || '');
     setUserUsername(u.username);
     setUserPassword(u.password || '');
+    setShowModalPassword(false);
     setUserRole(u.role);
     setUserError('');
     setIsUserModalOpen(true);
@@ -1075,13 +1078,23 @@ export default function AdminSettingsView({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={userPassword}
-                  onChange={(e) => setUserPassword(e.target.value)}
-                  placeholder={editingUser ? "Leave blank to keep current" : "Enter password"}
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                />
+                <div className="relative">
+                  <input
+                    type={showModalPassword ? "text" : "password"}
+                    value={userPassword}
+                    onChange={(e) => setUserPassword(e.target.value)}
+                    placeholder={editingUser ? "Leave blank to keep current" : "Enter password"}
+                    className="w-full py-2.5 pl-3 pr-10 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowModalPassword(!showModalPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer p-1"
+                    title={showModalPassword ? "Hide Password" : "Show Password"}
+                  >
+                    {showModalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>

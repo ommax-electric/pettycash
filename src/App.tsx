@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Building2, 
@@ -185,39 +185,48 @@ export default function App() {
   }, []);
 
   // Fetch user public IP address for accurate audit log tracking
-  const [userIpAddress, setUserIpAddress] = useState<string>('Detecting...');
+  const [userIpAddress, setUserIpAddress] = useState<string>(() => {
+    return localStorage.getItem('ommax_user_ip') || 'Detecting...';
+  });
+  const userIpRef = useRef<string>(userIpAddress);
+
+  useEffect(() => {
+    userIpRef.current = userIpAddress;
+  }, [userIpAddress]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchPublicIp = async () => {
-      try {
-        const res = await fetch('https://api.ipify.org?format=json');
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.ip && isMounted) {
-            setUserIpAddress(data.ip);
-            return;
+      // List of reliable public IP endpoints
+      const endpoints = [
+        'https://api.ipify.org?format=json',
+        'https://api64.ipify.org?format=json',
+        'https://api.db-ip.com/v2/free/self',
+        'https://ipinfo.io/json'
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint);
+          if (res.ok) {
+            const data = await res.json();
+            const ip = data.ip || data.ipAddress;
+            if (ip && isMounted) {
+              setUserIpAddress(ip);
+              userIpRef.current = ip;
+              localStorage.setItem('ommax_user_ip', ip);
+              return;
+            }
           }
+        } catch (e) {
+          // Try next provider
         }
-      } catch (e) {
-        // Retry with secondary provider
       }
 
-      try {
-        const res = await fetch('https://ipapi.co/json/');
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.ip && isMounted) {
-            setUserIpAddress(data.ip);
-            return;
-          }
-        }
-      } catch (e) {
-        // Fallback
-      }
-
-      if (isMounted) {
+      if (isMounted && userIpRef.current === 'Detecting...') {
+        // If external IP lookup is blocked by ad-blocker or network sandbox, use client fallback tag
         setUserIpAddress('127.0.0.1');
+        userIpRef.current = '127.0.0.1';
       }
     };
 
@@ -228,11 +237,20 @@ export default function App() {
     };
   }, []);
 
+  const getEffectiveIp = () => {
+    if (userIpRef.current && userIpRef.current !== 'Detecting...') {
+      return userIpRef.current;
+    }
+    const cached = localStorage.getItem('ommax_user_ip');
+    if (cached) return cached;
+    return '127.0.0.1';
+  };
+
   // Helper for adding Audit Log to Firestore
   const addLog = (action: string, details: string) => {
     if (!currentUser) return;
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-    const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
+    const effectiveIp = getEffectiveIp();
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -252,7 +270,7 @@ export default function App() {
     
     // Add Login Audit log
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-    const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
+    const effectiveIp = getEffectiveIp();
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -271,7 +289,7 @@ export default function App() {
   const handleLogout = () => {
     if (currentUser) {
       const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-      const effectiveIp = userIpAddress && userIpAddress !== 'Detecting...' ? userIpAddress : '127.0.0.1';
+      const effectiveIp = getEffectiveIp();
       const newLog: ActivityLog = {
         id: logId,
         timestamp: new Date().toISOString(),
@@ -787,7 +805,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* MOBILE VIEW SCROLLING PORT */}
-        <div className="flex-1 overflow-y-auto p-4 md:hidden">
+        <div className="flex-1 overflow-y-auto p-4 pb-12 sm:pb-16 md:hidden">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

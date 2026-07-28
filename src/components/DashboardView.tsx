@@ -151,7 +151,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
     .slice(0, 5);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 auto-rows-auto">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 auto-rows-auto pb-10 sm:pb-14">
       {/* YEAR SELECTOR FILTER HEADER */}
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
@@ -436,7 +436,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
             </div>
           </div>
           
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pb-3 pt-1">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/50">
