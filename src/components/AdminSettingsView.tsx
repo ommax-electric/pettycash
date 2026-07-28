@@ -42,6 +42,7 @@ import {
 import { User, CategoryLimit, ActivityLog, AppSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendSmsNotification, calculateCashBalance } from '../services/notificationService';
+import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 
 interface AdminSettingsViewProps {
   currentUser: User;
@@ -208,6 +209,8 @@ export default function AdminSettingsView({
     return saved;
   });
 
+  const [emailPreviewTab, setEmailPreviewTab] = useState<'NEW' | 'EDIT'>('NEW');
+
   const [integrationSuccess, setIntegrationSuccess] = useState<string>('');
   const [testNotificationModal, setTestNotificationModal] = useState<{ title: string; content: string; type: 'SMS' | 'EMAIL' } | null>(null);
 
@@ -319,19 +322,14 @@ export default function AdminSettingsView({
       return;
     }
 
-    const subjectNew = emailSubjectNew
-      .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-      .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-      .replace(/\{category\}/g, 'Office Supplies');
-    
-    const bodyNew = emailBodyNew
-      .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-      .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-      .replace(/\{paid_to\}/g, 'Rahul Sharma')
-      .replace(/\{category\}/g, 'Office Supplies')
-      .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
-      .replace(/\{date\}/g, '2026-07-28')
-      .replace(/\{balance\}/g, calculateCashBalance(transactions, appSettings.currencySymbol));
+    const targetSubject = emailPreviewTab === 'NEW' ? emailSubjectNew : emailSubjectEdit;
+    const targetBody = emailPreviewTab === 'NEW' ? emailBodyNew : emailBodyEdit;
+
+    const parsedSubject = substituteSampleTags(targetSubject, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
+    const parsedBody = substituteSampleTags(targetBody, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
+
+    const cardTitle = emailPreviewTab === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert';
+    const htmlEmailBody = buildModernHtmlEmailFromText(cardTitle, parsedBody);
 
     const recipientList = emailRecipients.split(',').map(r => r.trim()).filter(Boolean);
 
@@ -348,17 +346,17 @@ export default function AdminSettingsView({
           senderEmail: msSenderEmail,
           senderName: msSenderName,
           recipients: recipientList,
-          subject: subjectNew,
-          body: bodyNew
+          subject: parsedSubject,
+          body: htmlEmailBody
         })
       });
 
       const data = await res.json();
 
       setTestNotificationModal({
-        title: res.ok && data.success ? 'Microsoft Graph Email Dispatched Successfully!' : 'Microsoft Graph Email Dispatch Result',
+        title: res.ok && data.success ? 'Microsoft Graph Modern HTML Email Dispatched!' : 'Microsoft Graph Email Dispatch Result',
         type: 'EMAIL',
-        content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName} <${msSenderEmail}>\nTo Recipients: ${emailRecipients}\n\n========================================\nGRAPH API RESPONSE:\n${data.message || data.error || JSON.stringify(data, null, 2)}\n\n========================================\nDISPATCHED EMAIL SUBJECT:\n${subjectNew}\n\n========================================\nDISPATCHED EMAIL BODY:\n${bodyNew}`
+        content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName} <${msSenderEmail}>\nTo Recipients: ${emailRecipients}\nFormat: HTML Only (Modern Card Layout)\n\n========================================\nGRAPH API RESPONSE:\n${data.message || data.error || JSON.stringify(data, null, 2)}`
       });
       setIntegrationSuccess('');
     } catch (err: any) {
@@ -1634,58 +1632,138 @@ export default function AdminSettingsView({
                     </div>
                   </div>
 
-                  {/* Realtime Live Email Preview */}
-                  <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
-                      <span>MICROSOFT GRAPH EMAIL REALTIME PREVIEWS</span>
-                      <span>From: {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                    </div>
+                  {/* Common Realtime Live Modern HTML Email Card Preview with Tabs */}
+                  {(() => {
+                    const activeSubject = emailPreviewTab === 'NEW' ? emailSubjectNew : emailSubjectEdit;
+                    const activeBody = emailPreviewTab === 'NEW' ? emailBodyNew : emailBodyEdit;
 
-                    <div className="space-y-3 font-mono">
-                      <div>
-                        <span className="text-[10px] text-emerald-400 font-bold uppercase block mb-1">New Voucher Email Preview:</span>
-                        <div className="text-xs font-bold text-amber-300 mb-1">
-                          Subject: {emailSubjectNew
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{category\}/g, 'Office Supplies')}
-                        </div>
-                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-800/80 p-3 rounded-xl border border-slate-800">
-                          {emailBodyNew
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
-                            .replace(/\{category\}/g, 'Office Supplies')
-                            .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
-                            .replace(/\{date\}/g, '2026-07-28')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}
-                        </p>
-                      </div>
+                    const previewSubject = substituteSampleTags(activeSubject, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
+                    const previewBodyRaw = substituteSampleTags(activeBody, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
+                    const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
-                      <div className="pt-2 border-t border-slate-800">
-                        <span className="text-[10px] text-amber-400 font-bold uppercase block mb-1">Voucher Changes Alert Email Preview:</span>
-                        <div className="text-xs font-bold text-amber-300 mb-1">
-                          Subject: {emailSubjectEdit
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{changed_fields\}/g, 'Name and Amount')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{category\}/g, 'Office Supplies')}
+                    return (
+                      <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-4">
+                        {/* Tab Selector Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                              Modern HTML Email Live Card Preview
+                            </span>
+                          </div>
+
+                          {/* Common Tabs for New Voucher & Voucher Changes */}
+                          <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl">
+                            <button
+                              type="button"
+                              onClick={() => setEmailPreviewTab('NEW')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                emailPreviewTab === 'NEW'
+                                  ? 'bg-white text-emerald-800 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              New Voucher Email
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEmailPreviewTab('EDIT')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                emailPreviewTab === 'EDIT'
+                                  ? 'bg-white text-amber-800 shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                              Voucher Changes Email
+                            </button>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-800/80 p-3 rounded-xl border border-slate-800">
-                          {emailBodyEdit
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{changed_fields\}/g, 'Name and Amount')
-                            .replace(/\{updated_by\}/g, 'Admin (Anita)')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
-                            .replace(/\{category\}/g, 'Office Supplies')
-                            .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
-                            .replace(/\{date\}/g, '2026-07-28')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}
-                        </p>
+
+                        {/* Simulated Modern Email Card */}
+                        <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
+                          {/* Sender Info */}
+                          <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
+                            <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                            <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-sans font-bold">
+                              {emailPreviewTab === 'NEW' ? 'New Voucher Event' : 'Voucher Modification Event'}
+                            </span>
+                          </div>
+
+                          {/* Email Header Title */}
+                          <div>
+                            <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                              {emailPreviewTab === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert'}
+                            </h3>
+                            <div className="text-xs font-semibold text-slate-500 mt-1">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+                            {/* Yellow Accent Bar */}
+                            <div className="w-11 h-1 bg-[#f7b944] rounded-full mt-2.5 mb-4"></div>
+                          </div>
+
+                          {/* Dynamic Parsed Template Body Blocks */}
+                          <div className="space-y-3">
+                            {previewBlocks.map((block, idx) => {
+                              if (block.type === 'callout' && block.lines) {
+                                return (
+                                  <div key={`preview-block-${idx}`} className="bg-slate-50/90 border-l-4 border-red-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
+                                    {block.lines.map((line, lIdx) => {
+                                      let valClass = 'text-slate-700 font-medium';
+                                      if (line.key.toLowerCase().includes('amount')) {
+                                        valClass = 'text-red-600 font-bold';
+                                      } else if (line.key.toLowerCase().includes('balance')) {
+                                        valClass = 'text-emerald-700 font-bold';
+                                      } else if (line.key.toLowerCase().includes('changed')) {
+                                        valClass = 'text-blue-600 font-semibold';
+                                      }
+                                      return (
+                                        <div key={`line-${lIdx}`}>
+                                          <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
+                                          <span className={valClass}>{line.value}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              }
+
+                              if (block.type === 'signoff') {
+                                return (
+                                  <p key={`preview-block-${idx}`} className="text-sm font-bold text-slate-900 pt-2">
+                                    {block.text}
+                                  </p>
+                                );
+                              }
+
+                              if (block.type === 'note') {
+                                return (
+                                  <p key={`preview-block-${idx}`} className="text-xs italic text-slate-400 my-3">
+                                    {block.text}
+                                  </p>
+                                );
+                              }
+
+                              return (
+                                <p key={`preview-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                                  {block.text}
+                                </p>
+                              );
+                            })}
+                          </div>
+
+                          {/* Divider */}
+                          <div className="border-t border-slate-100 my-4"></div>
+
+                          {/* Footer */}
+                          <p className="text-[11px] text-slate-400 leading-normal">
+                            This is an automated notification from the Administration Department.
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* Actions */}
                   <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">

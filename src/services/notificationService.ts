@@ -1,4 +1,5 @@
 import { AppSettings, Transaction, User } from '../types';
+import { buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 
 /**
  * Joins array of changed field names with proper commas and 'and'
@@ -186,11 +187,16 @@ export async function sendEmailNotification(
     let subjectTemplate = '';
     let bodyTemplate = '';
 
+    const currentBalance = calculateCashBalance(transactionsList, appSettings.currencySymbol);
+    const changedFieldsStr = joinChangedFields(changedFieldLabels);
+    const updaterName = currentUser ? `${currentUser.fullName}` : 'Admin';
+    const formattedAmount = `${appSettings.currencySymbol}${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
     if (type === 'NEW') {
       subjectTemplate = localStorage.getItem('petty_cash_email_subject_new') ||
         '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
       bodyTemplate = localStorage.getItem('petty_cash_email_body_new') ||
-        'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+        'Hello Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     } else {
       subjectTemplate = localStorage.getItem('petty_cash_email_subject_edit') ||
         '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
@@ -198,19 +204,13 @@ export async function sendEmailNotification(
         'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nUpdated Details:\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
 
-    const currentBalance = calculateCashBalance(transactionsList, appSettings.currencySymbol);
-    const changedFieldsStr = joinChangedFields(changedFieldLabels);
-    const updaterName = currentUser ? `${currentUser.fullName}` : 'Admin';
-
-    const formattedAmount = `${appSettings.currencySymbol}${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
     const emailSubject = subjectTemplate
       .replace(/\{voucher_id\}/g, txn.reference || txn.id)
       .replace(/\{amount\}/g, formattedAmount)
       .replace(/\{category\}/g, txn.category || 'General')
       .replace(/\{changed_fields\}/g, changedFieldsStr);
 
-    const emailBody = bodyTemplate
+    const emailBodyParsed = bodyTemplate
       .replace(/\{voucher_id\}/g, txn.reference || txn.id)
       .replace(/\{amount\}/g, formattedAmount)
       .replace(/\{paid_to\}/g, txn.merchant || 'N/A')
@@ -218,10 +218,11 @@ export async function sendEmailNotification(
       .replace(/\{remarks\}/g, txn.remarks || txn.description || 'N/A')
       .replace(/\{date\}/g, txn.date)
       .replace(/\{balance\}/g, currentBalance)
-      .replace(/Name\/amount\/paid to\/category\/date\/attachment\/remarks\/particulars have been/gi, `${changedFieldsStr} changed`)
-      .replace(/Name\/amount\/paid to\/category\/date\/attachment\/remarks\/particulars/gi, changedFieldsStr)
       .replace(/\{changed_fields\}/g, changedFieldsStr)
       .replace(/\{updated_by\}/g, updaterName);
+
+    const cardTitle = type === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert';
+    const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed);
 
     console.log('[EmailAlert] Dispatching Email Alert via Microsoft Graph Proxy:', {
       tenantId,
@@ -243,7 +244,7 @@ export async function sendEmailNotification(
           senderName,
           recipients,
           subject: emailSubject,
-          body: emailBody
+          body: emailBodyHtml
         })
       });
 

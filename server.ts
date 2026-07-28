@@ -135,7 +135,7 @@ async function startServer() {
         message: {
           subject: subject || "Petty Cash Alert",
           body: {
-            contentType: "Text",
+            contentType: "HTML",
             content: body || ""
           },
           toRecipients: recipientList.map((email: string) => ({
