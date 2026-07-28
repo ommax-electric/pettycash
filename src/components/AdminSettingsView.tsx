@@ -31,10 +31,17 @@ import {
   Terminal,
   Layers,
   RefreshCw,
-  Check
+  Check,
+  Share2,
+  Send,
+  MessageSquare,
+  Mail,
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
+import { sendSmsNotification, calculateCashBalance } from '../services/notificationService';
 
 interface AdminSettingsViewProps {
   currentUser: User;
@@ -55,7 +62,7 @@ interface AdminSettingsViewProps {
   onWipeAllData: () => void | Promise<void>;
 }
 
-type AdminTab = 'APP_SETTINGS' | 'USER_MGMT' | 'SYSTEM_AUDIT' | 'SYSTEM_OPERATIONS';
+type AdminTab = 'APP_SETTINGS' | 'USER_MGMT' | 'SYSTEM_AUDIT' | 'INTEGRATIONS' | 'SYSTEM_OPERATIONS';
 
 export default function AdminSettingsView({
   currentUser,
@@ -120,6 +127,249 @@ export default function AdminSettingsView({
   const [restoreError, setRestoreError] = useState('');
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [wipeConfirmInput, setWipeConfirmInput] = useState('');
+
+  // --- 5. Integration Settings State (SMS & Email) ---
+  const [integrationSubTab, setIntegrationSubTab] = useState<'SMS' | 'EMAIL'>('SMS');
+
+  // SMS State
+  const [smsEnabled, setSmsEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('petty_cash_sms_enabled') !== 'false';
+  });
+  const [smsGatewayUrl, setSmsGatewayUrl] = useState<string>(() => {
+    const saved = (localStorage.getItem('petty_cash_sms_url') || '').trim();
+    if (!saved || saved.includes('mobile/v1') || saved === 'https://api.sms-gate.app' || saved === 'https://api.sms-gate.app/') {
+      return 'https://api.sms-gate.app/3rdparty/v1/message';
+    }
+    return saved;
+  });
+  const [smsUsername, setSmsUsername] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_sms_username') || 'WRJ0SQ';
+  });
+  const [smsPassword, setSmsPassword] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_sms_password') || 'sdoaxryxfmy5qh';
+  });
+  const [showSmsPass, setShowSmsPass] = useState<boolean>(false);
+  const [smsRecipients, setSmsRecipients] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_sms_recipients') || '+91 90259 76761';
+  });
+
+  // SMS Templates: New Voucher & Voucher Modifications
+  const [smsTemplateNew, setSmsTemplateNew] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_sms_template_new') || 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.';
+  });
+  const [smsTemplateEdit, setSmsTemplateEdit] = useState<string>(() => {
+    const saved = localStorage.getItem('petty_cash_sms_template_edit');
+    if (!saved || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
+      return 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.';
+    }
+    return saved;
+  });
+
+  // Email State
+  // Email State (Microsoft Graph API for Office 365 / Shared Mailbox)
+  const [emailEnabled, setEmailEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('petty_cash_email_enabled') === 'true';
+  });
+  const [msTenantId, setMsTenantId] = useState<string>(() => {
+    return localStorage.getItem('ms_graph_tenant_id') || '';
+  });
+  const [msClientId, setMsClientId] = useState<string>(() => {
+    return localStorage.getItem('ms_graph_client_id') || '';
+  });
+  const [msClientSecret, setMsClientSecret] = useState<string>(() => {
+    return localStorage.getItem('ms_graph_client_secret') || '';
+  });
+  const [showMsSecret, setShowMsSecret] = useState<boolean>(false);
+  const [msSenderEmail, setMsSenderEmail] = useState<string>(() => {
+    return localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com';
+  });
+  const [msSenderName, setMsSenderName] = useState<string>(() => {
+    return localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk';
+  });
+  const [emailRecipients, setEmailRecipients] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_email_recipients') || 'cfo@company.com, auditor@company.com';
+  });
+
+  // Email Templates: New Voucher & Voucher Modifications
+  const [emailSubjectNew, setEmailSubjectNew] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_email_subject_new') || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
+  });
+  const [emailBodyNew, setEmailBodyNew] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_email_body_new') || 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+  });
+  const [emailSubjectEdit, setEmailSubjectEdit] = useState<string>(() => {
+    return localStorage.getItem('petty_cash_email_subject_edit') || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified - {amount} ({category})';
+  });
+  const [emailBodyEdit, setEmailBodyEdit] = useState<string>(() => {
+    const saved = localStorage.getItem('petty_cash_email_body_edit');
+    if (!saved || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
+      return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nUpdated Details:\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+    }
+    return saved;
+  });
+
+  const [integrationSuccess, setIntegrationSuccess] = useState<string>('');
+  const [testNotificationModal, setTestNotificationModal] = useState<{ title: string; content: string; type: 'SMS' | 'EMAIL' } | null>(null);
+
+  const handleSaveSmsSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    localStorage.setItem('petty_cash_sms_enabled', String(smsEnabled));
+    localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
+    localStorage.setItem('petty_cash_sms_username', smsUsername);
+    localStorage.setItem('petty_cash_sms_password', smsPassword);
+    localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
+    localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
+    localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
+    setIntegrationSuccess('SMS Gate API credentials & message templates saved successfully!');
+    setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleSaveEmailSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    localStorage.setItem('petty_cash_email_enabled', String(emailEnabled));
+    localStorage.setItem('ms_graph_tenant_id', msTenantId);
+    localStorage.setItem('ms_graph_client_id', msClientId);
+    localStorage.setItem('ms_graph_client_secret', msClientSecret);
+    localStorage.setItem('ms_graph_sender_email', msSenderEmail);
+    localStorage.setItem('ms_graph_sender_name', msSenderName);
+    localStorage.setItem('petty_cash_email_recipients', emailRecipients);
+    localStorage.setItem('petty_cash_email_subject_new', emailSubjectNew);
+    localStorage.setItem('petty_cash_email_body_new', emailBodyNew);
+    localStorage.setItem('petty_cash_email_subject_edit', emailSubjectEdit);
+    localStorage.setItem('petty_cash_email_body_edit', emailBodyEdit);
+    setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully!');
+    setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleTestSms = async () => {
+    // Persist current settings first
+    localStorage.setItem('petty_cash_sms_enabled', 'true');
+    localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
+    localStorage.setItem('petty_cash_sms_username', smsUsername);
+    localStorage.setItem('petty_cash_sms_password', smsPassword);
+    localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
+    localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
+    localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
+
+    const testTxn: Transaction = {
+      id: 'VOUCHER-TEST-104',
+      type: 'OUT',
+      amount: 3500,
+      category: 'Office Supplies',
+      merchant: 'Rahul Sharma',
+      description: 'A4 printer paper',
+      remarks: 'A4 printer paper',
+      date: '2026-07-28',
+      status: 'APPROVED',
+      recordedBy: currentUser ? currentUser.fullName : 'Admin (Anita)',
+      reference: 'VOUCHER-104',
+      receiptName: null,
+      receiptSize: null
+    };
+
+    setIntegrationSuccess('Dispatching test SMS via SMSGate endpoint...');
+
+    const result = await sendSmsNotification(
+      'EDIT',
+      testTxn,
+      currentUser,
+      transactions,
+      appSettings,
+      ['Name', 'Amount']
+    );
+
+    if (result.success) {
+      setIntegrationSuccess(`Test SMS Sent Successfully to ${smsRecipients}!`);
+    } else {
+      setIntegrationSuccess(`SMS Dispatch Status: ${result.message}`);
+    }
+
+    setTestNotificationModal({
+      title: result.success ? 'SMS Dispatched Successfully!' : 'SMS Dispatch Result',
+      type: 'SMS',
+      content: `Dispatched API Endpoint: ${smsGatewayUrl}\nAuth Credentials: Username="${smsUsername}"\nRecipients: ${smsRecipients}\n\nGATEWAY RESPONSE:\n${result.message}\n\nDISPATCHED SMS TEXT:\n"${smsTemplateEdit
+        .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+        .replace(/Name\/amount\/paid to\/category\/date\/attachment\/remarks\/particulars/gi, 'Name and amount')
+        .replace(/\{changed_fields\}/g, 'Name and amount')
+        .replace(/\{updated_by\}/g, currentUser ? currentUser.fullName : 'Admin (Anita)')
+        .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+        .replace(/\{paid_to\}/g, 'Rahul Sharma')
+        .replace(/\{category\}/g, 'Office Supplies')
+        .replace(/\{date\}/g, '2026-07-28')
+        .replace(/\{balance\}/g, calculateCashBalance(transactions, appSettings.currencySymbol))}"`
+    });
+  };
+
+  const handleTestEmail = async () => {
+    // Persist current settings first
+    localStorage.setItem('petty_cash_email_enabled', 'true');
+    localStorage.setItem('ms_graph_tenant_id', msTenantId);
+    localStorage.setItem('ms_graph_client_id', msClientId);
+    localStorage.setItem('ms_graph_client_secret', msClientSecret);
+    localStorage.setItem('ms_graph_sender_email', msSenderEmail);
+    localStorage.setItem('ms_graph_sender_name', msSenderName);
+    localStorage.setItem('petty_cash_email_recipients', emailRecipients);
+
+    if (!msTenantId.trim() || !msClientId.trim() || !msClientSecret.trim()) {
+      setTestNotificationModal({
+        title: 'Microsoft Graph API Credentials Required',
+        type: 'EMAIL',
+        content: `Please enter your Directory (Tenant) ID, Application (Client) ID, and Client Secret from Azure Portal before dispatching a test email.\n\nSender Email: ${msSenderEmail}\nRecipients: ${emailRecipients}`
+      });
+      return;
+    }
+
+    const subjectNew = emailSubjectNew
+      .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+      .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+      .replace(/\{category\}/g, 'Office Supplies');
+    
+    const bodyNew = emailBodyNew
+      .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+      .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+      .replace(/\{paid_to\}/g, 'Rahul Sharma')
+      .replace(/\{category\}/g, 'Office Supplies')
+      .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
+      .replace(/\{date\}/g, '2026-07-28')
+      .replace(/\{balance\}/g, calculateCashBalance(transactions, appSettings.currencySymbol));
+
+    const recipientList = emailRecipients.split(',').map(r => r.trim()).filter(Boolean);
+
+    setIntegrationSuccess('Connecting to Microsoft Identity Platform & Graph API...');
+
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: msTenantId,
+          clientId: msClientId,
+          clientSecret: msClientSecret,
+          senderEmail: msSenderEmail,
+          senderName: msSenderName,
+          recipients: recipientList,
+          subject: subjectNew,
+          body: bodyNew
+        })
+      });
+
+      const data = await res.json();
+
+      setTestNotificationModal({
+        title: res.ok && data.success ? 'Microsoft Graph Email Dispatched Successfully!' : 'Microsoft Graph Email Dispatch Result',
+        type: 'EMAIL',
+        content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName} <${msSenderEmail}>\nTo Recipients: ${emailRecipients}\n\n========================================\nGRAPH API RESPONSE:\n${data.message || data.error || JSON.stringify(data, null, 2)}\n\n========================================\nDISPATCHED EMAIL SUBJECT:\n${subjectNew}\n\n========================================\nDISPATCHED EMAIL BODY:\n${bodyNew}`
+      });
+      setIntegrationSuccess('');
+    } catch (err: any) {
+      setTestNotificationModal({
+        title: 'Microsoft Graph Email Exception',
+        type: 'EMAIL',
+        content: `Error contacting server proxy endpoint: ${err.message || 'Unknown network error'}`
+      });
+      setIntegrationSuccess('');
+    }
+  };
 
   // ----------------------------------------------------
   // Handlers for App Settings
@@ -407,6 +657,18 @@ export default function AdminSettingsView({
         >
           <History className="w-3.5 h-3.5 shrink-0" />
           <span className="truncate">Audit Trail ({logs.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('INTEGRATIONS')}
+          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'INTEGRATIONS'
+              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Share2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Integrations</span>
         </button>
 
         <button
@@ -817,7 +1079,640 @@ export default function AdminSettingsView({
         )}
 
         {/* ======================================================== */}
-        {/* TAB 4: SYSTEM OPERATIONS (BACKUP, RESTORE, WIPE)        */}
+        {/* TAB 4: NOTIFICATION & GATEWAY INTEGRATIONS              */}
+        {/* ======================================================== */}
+        {activeTab === 'INTEGRATIONS' && (
+          <motion.div
+            key="INTEGRATIONS"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            {/* Header & Sub-tab navigation */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                    <Share2 className="w-5 h-5 text-[#f7b944]" />
+                    Voucher Alert & Notification Integrations
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Configure automated alert dispatches via Self-Hosted Android SMS Gateway (SMSGate) and Microsoft Graph API Email Integration (Office 365).
+                  </p>
+                </div>
+
+                {/* Integration Sub-tabs (SMS vs Email) */}
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationSubTab('SMS')}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                      integrationSubTab === 'SMS'
+                        ? 'bg-white text-slate-900 shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                    SMS Gateway (SMSGate)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationSubTab('EMAIL')}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                      integrationSubTab === 'EMAIL'
+                        ? 'bg-white text-slate-900 shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5 text-sky-600" />
+                    Microsoft Graph Email (Office 365)
+                  </button>
+                </div>
+              </div>
+
+              {integrationSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  {integrationSuccess}
+                </div>
+              )}
+            </div>
+
+            {/* ======================================================== */}
+            {/* SUB-SECTION 1: SMS GATEWAY INTEGRATION                    */}
+            {/* ======================================================== */}
+            {integrationSubTab === 'SMS' && (
+              <form onSubmit={handleSaveSmsSettings} className="space-y-6">
+                {/* Status Toggle Card */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                      smsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'
+                    }`}>
+                      <Smartphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">Self-Hosted Android SMS Gate Service</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {smsEnabled ? 'Active — Automatically dispatches instant SMS alerts upon voucher creation & modification' : 'Disabled — No SMS notifications will be dispatched'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={smsEnabled}
+                      onChange={(e) => setSmsEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#f7b944]"></div>
+                  </label>
+                </div>
+
+                {/* Gateway Connection Details & Recipient Numbers */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+                  <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
+                    <Server className="w-4 h-4 text-emerald-600" />
+                    SMSGate Server Credentials & Recipient Settings
+                  </h4>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-3 space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Android Gateway API Endpoint URL
+                      </label>
+                      <input
+                        type="url"
+                        value={smsGatewayUrl}
+                        onChange={(e) => setSmsGatewayUrl(e.target.value)}
+                        placeholder="http://192.168.1.100:8080/message"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Exact API endpoint provided by your Android SMS Gate application</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        SMS Gate Username / Login ID
+                      </label>
+                      <input
+                        type="text"
+                        value={smsUsername}
+                        onChange={(e) => setSmsUsername(e.target.value)}
+                        placeholder="admin"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        SMS Gate Password / Secret Key
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showSmsPass ? 'text' : 'password'}
+                          value={smsPassword}
+                          onChange={(e) => setSmsPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full py-2.5 pl-3 pr-9 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSmsPass(!showSmsPass)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          {showSmsPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Alert Recipient Phone Numbers
+                      </label>
+                      <input
+                        type="text"
+                        value={smsRecipients}
+                        onChange={(e) => setSmsRecipients(e.target.value)}
+                        placeholder="+91 98765 43210, +91 91234 56789"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Commas separated</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable SMS Message Templates */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-[#f7b944]" />
+                      Editable SMS Message Templates
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Customize SMS texts dispatched for both new voucher creation and voucher modification events.
+                    </p>
+                  </div>
+
+                  {/* EVENT 1: NEW VOUCHER SMS TEMPLATE */}
+                  <div className="space-y-3 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        1. New Voucher Creation SMS Alert
+                      </h5>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
+                        <button
+                          key={`new-sms-${tag}`}
+                          type="button"
+                          onClick={() => setSmsTemplateNew(prev => prev + ' ' + tag)}
+                          className="px-2 py-0.5 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all shadow-2xs"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                    </div>
+
+                    <textarea
+                      value={smsTemplateNew}
+                      onChange={(e) => setSmsTemplateNew(e.target.value)}
+                      rows={2}
+                      className="w-full p-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-medium leading-relaxed"
+                      required
+                    />
+                  </div>
+
+                  {/* EVENT 2: VOUCHER MODIFICATION/CHANGES SMS TEMPLATE */}
+                  <div className="space-y-3 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        2. Voucher Changes & Modification SMS Alert
+                      </h5>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
+                        <button
+                          key={`edit-sms-${tag}`}
+                          type="button"
+                          onClick={() => setSmsTemplateEdit(prev => prev + ' ' + tag)}
+                          className="px-2 py-0.5 bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all shadow-2xs"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                    </div>
+
+                    <textarea
+                      value={smsTemplateEdit}
+                      onChange={(e) => setSmsTemplateEdit(e.target.value)}
+                      rows={3}
+                      className="w-full p-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-medium leading-relaxed"
+                      required
+                    />
+                  </div>
+
+                  {/* Realtime Live SMS Preview */}
+                  <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
+                      <span>SMS OUTPUT REALTIME PREVIEWS</span>
+                      <span>Target: {smsRecipients}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-[10px] text-emerald-400 font-bold uppercase block mb-0.5">New Voucher Alert Payload:</span>
+                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
+                          "{smsTemplateNew
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
+                            .replace(/\{category\}/g, 'Office Supplies')
+                            .replace(/\{date\}/g, '2026-07-28')
+                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}"
+                        </p>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-amber-400 font-bold uppercase block mb-0.5">Voucher Changes Alert Payload:</span>
+                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
+                          "{smsTemplateEdit
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{changed_fields\}/g, 'Name and Amount')
+                            .replace(/\{updated_by\}/g, 'Admin (Anita)')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
+                            .replace(/\{category\}/g, 'Office Supplies')
+                            .replace(/\{date\}/g, '2026-07-28')
+                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}"
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleTestSms}
+                      className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5 text-emerald-600" />
+                      Test Dispatched SMS Payloads
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save SMS Gateway Settings
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {/* ======================================================== */}
+            {/* SUB-SECTION 2: MICROSOFT GRAPH API EMAIL INTEGRATION     */}
+            {/* ======================================================== */}
+            {integrationSubTab === 'EMAIL' && (
+              <form onSubmit={handleSaveEmailSettings} className="space-y-6">
+                {/* Toggle Email Alerts */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                      emailEnabled ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'
+                    }`}>
+                      <Mail className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">Microsoft Graph API Email Integration (Office 365)</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {emailEnabled ? 'Active — Dispatches corporate email alerts directly via Microsoft Graph API' : 'Disabled — No email alerts will be sent'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={emailEnabled}
+                      onChange={(e) => setEmailEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#f7b944]"></div>
+                  </label>
+                </div>
+
+                {/* Microsoft Graph API Azure Credentials */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                      <Server className="w-4 h-4 text-sky-600" />
+                      Microsoft Azure AD OAuth App Credentials
+                    </h4>
+                    <span className="text-[10px] bg-sky-50 text-sky-700 px-2.5 py-1 rounded-lg border border-sky-200 font-mono font-bold">
+                      Office 365 / Shared Mailbox Support
+                    </span>
+                  </div>
+
+                  {/* Azure AD Quick Setup Helper Banner */}
+                  <div className="bg-blue-50/80 rounded-2xl border border-blue-100 p-4 flex items-start gap-3 text-xs text-blue-900 leading-relaxed">
+                    <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <span className="font-bold text-blue-950">How to set up Microsoft 365 Azure App for Mail Flow:</span>
+                      <ol className="list-decimal ml-4 space-y-1 text-[11px] text-blue-800">
+                        <li>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/RegisteredApps" target="_blank" rel="noreferrer" className="underline font-bold hover:text-blue-950">Azure Portal &gt; App Registrations</a> and register a new app.</li>
+                        <li>Copy the <strong>Directory (Tenant) ID</strong> and <strong>Application (Client) ID</strong> into the fields below.</li>
+                        <li>Under <strong>Certificates &amp; secrets</strong>, generate a Client Secret and copy its Value here.</li>
+                        <li>Under <strong>API permissions</strong>, add Microsoft Graph <code>Mail.Send</code> Application permission &amp; click <strong>Grant admin consent</strong>.</li>
+                        <li>This allows mail flow directly from your shared mailbox (e.g. <code>mail@ommaxelectric.com</code>) without an extra user license!</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Directory (Tenant) ID
+                      </label>
+                      <input
+                        type="text"
+                        value={msTenantId}
+                        onChange={(e) => setMsTenantId(e.target.value)}
+                        placeholder="e.g. 88888888-4444-4444-4444-121212121212"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Application (Client) ID
+                      </label>
+                      <input
+                        type="text"
+                        value={msClientId}
+                        onChange={(e) => setMsClientId(e.target.value)}
+                        placeholder="e.g. 11111111-2222-3333-4444-555555555555"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 md:col-span-2">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Client Secret Value
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showMsSecret ? 'text' : 'password'}
+                          value={msClientSecret}
+                          onChange={(e) => setMsClientSecret(e.target.value)}
+                          placeholder="Azure AD Client Secret Value"
+                          className="w-full py-2.5 pl-3 pr-9 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowMsSecret(!showMsSecret)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          {showMsSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Sender Shared Mailbox Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={msSenderEmail}
+                        onChange={(e) => setMsSenderEmail(e.target.value)}
+                        placeholder="mail@ommaxelectric.com"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Office 365 User / Shared Mailbox user account</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Sender Display Name
+                      </label>
+                      <input
+                        type="text"
+                        value={msSenderName}
+                        onChange={(e) => setMsSenderName(e.target.value)}
+                        placeholder="Petty Cash Desk"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-medium"
+                        required
+                      />
+                    </div>
+
+                    <div className="md:col-span-2 space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Recipient Email Addresses (Finance Team / Auditors)
+                      </label>
+                      <input
+                        type="text"
+                        value={emailRecipients}
+                        onChange={(e) => setEmailRecipients(e.target.value)}
+                        placeholder="cfo@company.com, auditor@company.com, admin@company.com"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Separate multiple recipient email addresses with commas</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable Email Templates */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-[#f7b944]" />
+                      Editable Email Subject & Body Templates
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Customize corporate email subject lines and bodies for both new voucher creation and voucher modification events.
+                    </p>
+                  </div>
+
+                  {/* EVENT 1: NEW VOUCHER EMAIL TEMPLATES */}
+                  <div className="space-y-3 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        1. New Voucher Email Alert Template
+                      </h5>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{balance}'].map((tag) => (
+                        <button
+                          key={`new-email-${tag}`}
+                          type="button"
+                          onClick={() => setEmailBodyNew(prev => prev + ' ' + tag)}
+                          className="px-2 py-0.5 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all shadow-2xs"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={emailSubjectNew}
+                        onChange={(e) => setEmailSubjectNew(e.target.value)}
+                        placeholder="Subject line"
+                        className="w-full py-2 px-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-semibold"
+                        required
+                      />
+                      <textarea
+                        value={emailBodyNew}
+                        onChange={(e) => setEmailBodyNew(e.target.value)}
+                        rows={5}
+                        className="w-full p-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-mono leading-relaxed"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* EVENT 2: VOUCHER MODIFICATION EMAIL TEMPLATES */}
+                  <div className="space-y-3 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        2. Voucher Changes & Modification Email Alert Template
+                      </h5>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{balance}'].map((tag) => (
+                        <button
+                          key={`edit-email-${tag}`}
+                          type="button"
+                          onClick={() => setEmailBodyEdit(prev => prev + ' ' + tag)}
+                          className="px-2 py-0.5 bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all shadow-2xs"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={emailSubjectEdit}
+                        onChange={(e) => setEmailSubjectEdit(e.target.value)}
+                        placeholder="Subject line"
+                        className="w-full py-2 px-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-semibold"
+                        required
+                      />
+                      <textarea
+                        value={emailBodyEdit}
+                        onChange={(e) => setEmailBodyEdit(e.target.value)}
+                        rows={6}
+                        className="w-full p-3 bg-white border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs font-mono leading-relaxed"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Realtime Live Email Preview */}
+                  <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
+                      <span>MICROSOFT GRAPH EMAIL REALTIME PREVIEWS</span>
+                      <span>From: {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                    </div>
+
+                    <div className="space-y-3 font-mono">
+                      <div>
+                        <span className="text-[10px] text-emerald-400 font-bold uppercase block mb-1">New Voucher Email Preview:</span>
+                        <div className="text-xs font-bold text-amber-300 mb-1">
+                          Subject: {emailSubjectNew
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{category\}/g, 'Office Supplies')}
+                        </div>
+                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-800/80 p-3 rounded-xl border border-slate-800">
+                          {emailBodyNew
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
+                            .replace(/\{category\}/g, 'Office Supplies')
+                            .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
+                            .replace(/\{date\}/g, '2026-07-28')
+                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}
+                        </p>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800">
+                        <span className="text-[10px] text-amber-400 font-bold uppercase block mb-1">Voucher Changes Alert Email Preview:</span>
+                        <div className="text-xs font-bold text-amber-300 mb-1">
+                          Subject: {emailSubjectEdit
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{changed_fields\}/g, 'Name and Amount')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{category\}/g, 'Office Supplies')}
+                        </div>
+                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-800/80 p-3 rounded-xl border border-slate-800">
+                          {emailBodyEdit
+                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+                            .replace(/\{changed_fields\}/g, 'Name and Amount')
+                            .replace(/\{updated_by\}/g, 'Admin (Anita)')
+                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
+                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
+                            .replace(/\{category\}/g, 'Office Supplies')
+                            .replace(/\{remarks\}/g, 'A4 printer paper & ink cartridges purchase')
+                            .replace(/\{date\}/g, '2026-07-28')
+                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleTestEmail}
+                      className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5 text-sky-600" />
+                      Test Dispatched Email Payloads
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save Email Gateway Settings
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </motion.div>
+        )}
+
+        {/* ======================================================== */}
+        {/* TAB 5: SYSTEM OPERATIONS (BACKUP, RESTORE, WIPE)        */}
         {/* ======================================================== */}
         {activeTab === 'SYSTEM_OPERATIONS' && (
           <motion.div
@@ -922,9 +1817,46 @@ export default function AdminSettingsView({
 
       </AnimatePresence>
 
+
+
+      {/* ================================================= realm MODALS ================================================= */}
+      {/* MODAL: TEST NOTIFICATION PAYLOAD DISPLAY                 */}
       {/* ======================================================== */}
-      {/* MODAL: ADD / EDIT CATEGORY                               */}
-      {/* ======================================================== */}
+      {testNotificationModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                {testNotificationModal.title}
+              </h3>
+              <button
+                onClick={() => setTestNotificationModal(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-900 text-slate-100 p-4 rounded-2xl font-mono text-xs leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto">
+              {testNotificationModal.content}
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setTestNotificationModal(null)}
+                className="py-2 px-5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl text-xs cursor-pointer"
+              >
+                Close Test Output
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
       {isCategoryModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <motion.div

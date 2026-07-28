@@ -17,6 +17,7 @@ import {
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings } from './types';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
+import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
 
 // Subcomponents
 import LoginScreen from './components/LoginScreen';
@@ -317,10 +318,15 @@ export default function App() {
       recordedBy: currentUser.fullName
     };
 
-    setTransactions([newTxn, ...transactions]);
+    const updatedTxnsList = [newTxn, ...transactions];
+    setTransactions(updatedTxnsList);
     setDoc(doc(db, 'transactions', newTxnId), newTxn).catch(e => console.warn(e));
 
     addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
+
+    // Dispatch automated SMS & Email alerts
+    sendSmsNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings);
+    sendEmailNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings);
   };
 
   // Handler: Update transaction (for edits)
@@ -380,6 +386,14 @@ export default function App() {
         fieldLabel = 'Payment Mode';
       } else if (field === 'receiptName') {
         fieldLabel = 'Attachment';
+      } else if (field === 'remarks') {
+        fieldLabel = 'Remarks';
+      } else if (field === 'date') {
+        fieldLabel = 'Date';
+      } else if (field === 'category') {
+        fieldLabel = 'Category';
+      } else if (field === 'amount') {
+        fieldLabel = 'Amount';
       } else {
         fieldLabel = fieldLabel.charAt(0).toUpperCase() + fieldLabel.slice(1);
       }
@@ -410,10 +424,18 @@ export default function App() {
       };
     }
 
-    setTransactions(prev => prev.map(t => t.id === updatedTxn.id ? finalTxn : t));
+    const updatedTxnsList = transactions.map(t => t.id === updatedTxn.id ? finalTxn : t);
+    setTransactions(updatedTxnsList);
     setDoc(doc(db, 'transactions', updatedTxn.id), finalTxn).catch(e => console.warn(e));
 
     addLog('TXN_UPDATE', `Modified transaction reference ${updatedTxn.reference} (${updatedTxn.type === 'IN' ? 'Deposit' : 'Disbursement'})`);
+
+    // Dispatch automated SMS & Email alerts with dynamic changed fields
+    if (changes.length > 0) {
+      const changedFieldLabels = changes.map(c => c.field);
+      sendSmsNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels);
+      sendEmailNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels);
+    }
   };
 
   // Handler: Delete transaction
