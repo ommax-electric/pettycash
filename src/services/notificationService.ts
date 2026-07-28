@@ -121,7 +121,7 @@ export async function sendSmsNotification(
 
     console.log('[SMSGate] Dispatching SMS Alert via Server Proxy /api/send-sms:', payload);
 
-    // Primary Dispatch: Server Proxy endpoint (handles Basic Auth & bypasses browser CORS)
+    // 1. Try Node.js Express Server Proxy /api/send-sms
     try {
       const serverRes = await fetch('/api/send-sms', {
         method: 'POST',
@@ -129,18 +129,82 @@ export async function sendSmsNotification(
         body: JSON.stringify(payload)
       });
 
-      const serverData = await serverRes.json();
-      if (serverRes.ok && serverData.success) {
+      const responseText = await serverRes.text();
+      let serverData: any = null;
+      try {
+        serverData = JSON.parse(responseText);
+      } catch {
+        serverData = null;
+      }
+
+      if (serverRes.ok && serverData && serverData.success) {
         console.log('[SMSGate] Server proxy dispatch successful:', serverData);
         return { success: true, message: 'SMS Alert dispatched successfully via SMSGate Server Proxy!' };
-      } else {
-        const errorMsg = serverData.error || (serverData.details && serverData.details.message) || `Server proxy returned error status ${serverRes.status}`;
+      } else if (serverData && serverData.error) {
         console.warn('[SMSGate] Server proxy returned error response:', serverData);
-        return { success: false, message: errorMsg };
+        return { success: false, message: serverData.error || 'Server proxy error' };
       }
     } catch (proxyError: any) {
-      console.warn('[SMSGate] Server proxy network exception:', proxyError);
-      return { success: false, message: `Proxy connection error: ${proxyError.message || 'Failed to reach backend server'}` };
+      console.warn('[SMSGate] Node server proxy network exception:', proxyError);
+    }
+
+    // 2. Try PHP Endpoint Proxy /api/send-sms.php (for PHP / cPanel shared hosting)
+    try {
+      const phpRes = await fetch('/api/send-sms.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const phpText = await phpRes.text();
+      let phpData: any = null;
+      try {
+        phpData = JSON.parse(phpText);
+      } catch {
+        phpData = null;
+      }
+
+      if (phpRes.ok && phpData && phpData.success) {
+        console.log('[SMSGate] PHP endpoint proxy dispatch successful:', phpData);
+        return { success: true, message: 'SMS Alert dispatched successfully via PHP SMS Proxy!' };
+      }
+    } catch (phpErr) {
+      console.warn('[SMSGate] PHP proxy exception:', phpErr);
+    }
+
+    // 3. Fallback: Direct Browser Client-Side Dispatch to SMS Gate API
+    console.log('[SMSGate] Server proxies unavailable. Executing direct browser client dispatch...');
+    try {
+      const authString = btoa(`${username}:${password}`);
+      const directRes = await fetch(gatewayUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${authString}`
+        },
+        body: JSON.stringify({
+          phoneNumbers: recipients,
+          message: messageText
+        })
+      });
+
+      const directText = await directRes.text();
+      let directData: any = null;
+      try {
+        directData = JSON.parse(directText);
+      } catch {
+        directData = { raw: directText };
+      }
+
+      if (directRes.ok) {
+        return { success: true, message: 'SMS Alert dispatched successfully via SMS Gate API!' };
+      } else {
+        const errDetail = directData.error || directData.message || directText || `HTTP ${directRes.status}`;
+        return { success: false, message: `SMS Gate API Error: ${errDetail}` };
+      }
+    } catch (directErr: any) {
+      console.error('[SMSGate] Direct client dispatch exception:', directErr);
+      return { success: false, message: `Failed to dispatch SMS: ${directErr.message || 'Network connection failed'}` };
     }
   } catch (err: any) {
     console.error('[SMSGate] Dispatch exception:', err);
@@ -243,32 +307,140 @@ export async function sendEmailNotification(
       emailSubject
     });
 
+    const emailPayload = {
+      tenantId,
+      clientId,
+      clientSecret,
+      senderEmail,
+      senderName,
+      recipients,
+      subject: emailSubject,
+      body: emailBodyHtml
+    };
+
+    // 1. Try Node.js Express Server Proxy /api/send-email
     try {
       const serverRes = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId,
-          clientId,
-          clientSecret,
-          senderEmail,
-          senderName,
-          recipients,
-          subject: emailSubject,
-          body: emailBodyHtml
-        })
+        body: JSON.stringify(emailPayload)
       });
 
-      const serverData = await serverRes.json();
-      if (serverRes.ok && serverData.success) {
+      const responseText = await serverRes.text();
+      let serverData: any = null;
+      try {
+        serverData = JSON.parse(responseText);
+      } catch {
+        serverData = null; // HTML or non-JSON returned on static hosts
+      }
+
+      if (serverRes.ok && serverData && serverData.success) {
         return { success: true, message: serverData.message || 'Email alert dispatched successfully via Microsoft Graph API!' };
-      } else {
-        const errorMsg = serverData.error || (serverData.details && serverData.details.error_description) || `Server returned error status ${serverRes.status}`;
-        return { success: false, message: errorMsg };
+      } else if (serverData && serverData.error) {
+        console.warn('[EmailAlert] Node proxy returned error message:', serverData);
+        // If it's an explicit JSON error from Microsoft Graph via the server, return it directly
+        if (serverRes.status !== 404 && serverRes.status !== 502) {
+          return { success: false, message: serverData.error || 'Email proxy error' };
+        }
       }
     } catch (proxyError: any) {
-      console.warn('[EmailAlert] Microsoft Graph proxy exception:', proxyError);
-      return { success: false, message: `Proxy connection error: ${proxyError.message || 'Failed to reach backend server'}` };
+      console.warn('[EmailAlert] Node proxy exception:', proxyError);
+    }
+
+    // 2. Try PHP Endpoint Proxy /api/send-email.php (for PHP / cPanel shared hosting)
+    try {
+      const phpRes = await fetch('/api/send-email.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailPayload)
+      });
+
+      const phpText = await phpRes.text();
+      let phpData: any = null;
+      try {
+        phpData = JSON.parse(phpText);
+      } catch {
+        phpData = null;
+      }
+
+      if (phpRes.ok && phpData && phpData.success) {
+        return { success: true, message: phpData.message || 'Email alert dispatched successfully via PHP Microsoft Graph Proxy!' };
+      } else if (phpData && phpData.error) {
+        console.warn('[EmailAlert] PHP proxy returned error message:', phpData);
+        if (phpRes.status !== 404 && phpRes.status !== 502) {
+          return { success: false, message: phpData.error || 'PHP proxy error' };
+        }
+      }
+    } catch (phpErr) {
+      console.warn('[EmailAlert] PHP proxy exception:', phpErr);
+    }
+
+    // 3. Fallback: Direct Client Browser Dispatch to Microsoft Graph API
+    console.log('[EmailAlert] Server proxies unavailable. Attempting direct browser client dispatch via MS Graph API...');
+
+    try {
+      // Step A: Acquire token directly from browser
+      const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`;
+      const tokenParams = new URLSearchParams();
+      tokenParams.append("client_id", clientId);
+      tokenParams.append("client_secret", clientSecret);
+      tokenParams.append("scope", "https://graph.microsoft.com/.default");
+      tokenParams.append("grant_type", "client_credentials");
+
+      const tokenRes = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenParams.toString()
+      });
+
+      const tokenText = await tokenRes.text();
+      let tokenData: any = null;
+      try { tokenData = JSON.parse(tokenText); } catch { tokenData = { raw: tokenText }; }
+
+      if (!tokenRes.ok || !tokenData.access_token) {
+        const errorMsg = tokenData.error_description || tokenData.error || `Microsoft OAuth authentication failed (${tokenRes.status})`;
+        return { success: false, message: `Microsoft Graph Auth Error: ${errorMsg}` };
+      }
+
+      // Step B: Send mail via Graph API
+      const graphMailUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
+      const directPayload = {
+        message: {
+          subject: emailSubject,
+          body: {
+            contentType: "HTML",
+            content: emailBodyHtml
+          },
+          toRecipients: recipients.map((email: string) => ({
+            emailAddress: { address: email }
+          }))
+        },
+        saveToSentItems: "true"
+      };
+
+      const mailRes = await fetch(graphMailUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${tokenData.access_token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(directPayload)
+      });
+
+      if (mailRes.ok || mailRes.status === 202) {
+        return { success: true, message: `Email alert successfully sent via Microsoft Graph API to ${recipients.join(", ")}!` };
+      } else {
+        const mailErrText = await mailRes.text();
+        let mailErrJson: any = null;
+        try { mailErrJson = JSON.parse(mailErrText); } catch { mailErrJson = { raw: mailErrText }; }
+        return {
+          success: false,
+          message: mailErrJson.error?.message || `Microsoft Graph API returned HTTP ${mailRes.status}`
+        };
+      }
+    } catch (directError: any) {
+      console.error('[EmailAlert] Direct client dispatch exception:', directError);
+      return { success: false, message: `Failed to dispatch email: ${directError.message || 'Network error'}` };
     }
   } catch (err: any) {
     console.error('[EmailAlert] Exception:', err);
