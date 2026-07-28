@@ -408,10 +408,29 @@ export default function RegisterView({
     let refVal = formReference.trim();
     let merchVal = formMerchant.trim();
 
+    // Helper to get numeric value from voucher ID string (e.g. "012", "0012", "OW-012" -> 12)
+    const getNumericPart = (str: string): number | null => {
+      if (!str) return null;
+      const match = str.trim().match(/\d+/);
+      return match ? parseInt(match[0], 10) : null;
+    };
+
+    const normalizeVoucherStr = (str: string): string => {
+      if (!str) return '';
+      return str.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10)));
+    };
+
     if (forceTypeVal === 'IN') {
       if (!refVal) {
-        const inCount = transactions.filter(t => t.type === 'IN').length;
-        refVal = `IW-${String(inCount + 1).padStart(3, '0')}`;
+        const existingNums = new Set<number>();
+        transactions.forEach(t => {
+          if (editingTransaction && t.id === editingTransaction.id) return;
+          const num = getNumericPart(t.reference);
+          if (num !== null) existingNums.add(num);
+        });
+        let nextNum = 1;
+        while (existingNums.has(nextNum)) { nextNum++; }
+        refVal = `IW-${String(nextNum).padStart(3, '0')}`;
       }
       if (!merchVal) {
         merchVal = 'Corporate Treasury';
@@ -423,10 +442,40 @@ export default function RegisterView({
         return;
       }
       if (!refVal) {
-        // Auto-generate optional Voucher ID if omitted
-        const outCount = transactions.filter(t => t.type === 'OUT').length;
-        refVal = `OW-${String(outCount + 1).padStart(3, '0')}`;
+        // Auto-generate optional Voucher ID if omitted, skipping any existing voucher numbers
+        const existingNums = new Set<number>();
+        transactions.forEach(t => {
+          if (editingTransaction && t.id === editingTransaction.id) return;
+          const num = getNumericPart(t.reference);
+          if (num !== null) existingNums.add(num);
+        });
+        let nextNum = 1;
+        while (existingNums.has(nextNum)) { nextNum++; }
+        refVal = `OW-${String(nextNum).padStart(3, '0')}`;
       }
+    }
+
+    // Enforce Unique Voucher ID Validation
+    const refValNum = getNumericPart(refVal);
+    const refValNorm = normalizeVoucherStr(refVal);
+
+    const duplicateTxn = transactions.find(t => {
+      if (editingTransaction && t.id === editingTransaction.id) return false;
+      const existingNum = getNumericPart(t.reference);
+      const existingNorm = normalizeVoucherStr(t.reference);
+
+      if (refValNum !== null && existingNum !== null && refValNum === existingNum) {
+        return true;
+      }
+      if (refValNorm && existingNorm && refValNorm === existingNorm) {
+        return true;
+      }
+      return false;
+    });
+
+    if (duplicateTxn) {
+      setFormError(`Voucher ID "${refVal}" (Voucher No. ${refValNum ?? refVal}) already exists as "${duplicateTxn.reference}". Duplicate Voucher numbers are not allowed.`);
+      return;
     }
 
     if (!formDescription.trim()) {

@@ -197,8 +197,8 @@ export default function AdminSettingsView({
   });
   const [emailBodyNew, setEmailBodyNew] = useState<string>(() => {
     const saved = localStorage.getItem('petty_cash_email_body_new');
-    if (!saved || !saved.includes('{attachment}')) {
-      return 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    if (!saved || !saved.includes('{particulars}')) {
+      return 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     }
     return saved;
   });
@@ -207,8 +207,8 @@ export default function AdminSettingsView({
   });
   const [emailBodyEdit, setEmailBodyEdit] = useState<string>(() => {
     const saved = localStorage.getItem('petty_cash_email_body_edit');
-    if (!saved || !saved.includes('{attachment}') || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
-      return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+    if (!saved || !saved.includes('{particulars}')) {
+      return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
     return saved;
   });
@@ -1564,7 +1564,7 @@ export default function AdminSettingsView({
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
-                      {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                      {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
                         <button
                           key={`new-email-${tag}`}
                           type="button"
@@ -1605,7 +1605,7 @@ export default function AdminSettingsView({
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
-                      {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{category}', '{remarks}', '{date}', '{balance}'].map((tag) => (
+                      {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
                         <button
                           key={`edit-email-${tag}`}
                           type="button"
