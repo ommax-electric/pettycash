@@ -173,44 +173,44 @@ export default function AdminSettingsView({
   // Email State
   // Email State (Microsoft Graph API for Office 365 / Shared Mailbox)
   const [emailEnabled, setEmailEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('petty_cash_email_enabled') === 'true';
+    return integrationSettings?.emailEnabled ?? (localStorage.getItem('petty_cash_email_enabled') !== 'false');
   });
   const [msTenantId, setMsTenantId] = useState<string>(() => {
-    return localStorage.getItem('ms_graph_tenant_id') || '';
+    return integrationSettings?.msTenantId || localStorage.getItem('ms_graph_tenant_id') || 'a63883ba-4173-48a2-a29d-247ca0c8e59a';
   });
   const [msClientId, setMsClientId] = useState<string>(() => {
-    return localStorage.getItem('ms_graph_client_id') || '';
+    return integrationSettings?.msClientId || localStorage.getItem('ms_graph_client_id') || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6';
   });
   const [msClientSecret, setMsClientSecret] = useState<string>(() => {
-    return localStorage.getItem('ms_graph_client_secret') || '';
+    return integrationSettings?.msClientSecret || localStorage.getItem('ms_graph_client_secret') || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz';
   });
   const [showMsSecret, setShowMsSecret] = useState<boolean>(false);
   const [msSenderEmail, setMsSenderEmail] = useState<string>(() => {
-    return localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com';
+    return integrationSettings?.msSenderEmail || localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com';
   });
   const [msSenderName, setMsSenderName] = useState<string>(() => {
-    return localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk';
+    return integrationSettings?.msSenderName || localStorage.getItem('ms_graph_sender_name') || 'Petty Cash';
   });
   const [emailRecipients, setEmailRecipients] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_email_recipients') || 'cfo@company.com, auditor@company.com';
+    return integrationSettings?.emailRecipients || localStorage.getItem('petty_cash_email_recipients') || 'info@ommaxelectric.com, admin@ommaxelectric.com';
   });
 
   // Email Templates: New Voucher & Voucher Modifications
   const [emailSubjectNew, setEmailSubjectNew] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_email_subject_new') || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
+    return integrationSettings?.emailSubjectNew || localStorage.getItem('petty_cash_email_subject_new') || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
   });
   const [emailBodyNew, setEmailBodyNew] = useState<string>(() => {
-    const saved = localStorage.getItem('petty_cash_email_body_new');
+    const saved = integrationSettings?.emailBodyNew || localStorage.getItem('petty_cash_email_body_new');
     if (!saved || !saved.includes('{particulars}')) {
       return 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     }
     return saved;
   });
   const [emailSubjectEdit, setEmailSubjectEdit] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_email_subject_edit') || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
+    return integrationSettings?.emailSubjectEdit || localStorage.getItem('petty_cash_email_subject_edit') || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
   });
   const [emailBodyEdit, setEmailBodyEdit] = useState<string>(() => {
-    const saved = localStorage.getItem('petty_cash_email_body_edit');
+    const saved = integrationSettings?.emailBodyEdit || localStorage.getItem('petty_cash_email_body_edit');
     if (!saved || !saved.includes('{particulars}')) {
       return 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
@@ -228,12 +228,12 @@ export default function AdminSettingsView({
       setSmsTemplateEdit(integrationSettings.smsTemplateEdit || 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.');
 
       setEmailEnabled(integrationSettings.emailEnabled);
-      setMsTenantId(integrationSettings.msTenantId || '');
-      setMsClientId(integrationSettings.msClientId || '');
-      setMsClientSecret(integrationSettings.msClientSecret || '');
+      setMsTenantId(integrationSettings.msTenantId || 'a63883ba-4173-48a2-a29d-247ca0c8e59a');
+      setMsClientId(integrationSettings.msClientId || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6');
+      setMsClientSecret(integrationSettings.msClientSecret || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz');
       setMsSenderEmail(integrationSettings.msSenderEmail || 'mail@ommaxelectric.com');
-      setMsSenderName(integrationSettings.msSenderName || 'Petty Cash Desk');
-      setEmailRecipients(integrationSettings.emailRecipients || 'cfo@company.com, auditor@company.com');
+      setMsSenderName(integrationSettings.msSenderName || 'Petty Cash');
+      setEmailRecipients(integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
       setEmailSubjectNew(integrationSettings.emailSubjectNew || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})');
       setEmailBodyNew(integrationSettings.emailBodyNew || 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
       setEmailSubjectEdit(integrationSettings.emailSubjectEdit || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}');

@@ -179,27 +179,37 @@ export default function App() {
                 setAppSettings(d.data() as AppSettings);
               } else if (d.id === 'integrations') {
                 const fetched = d.data() as IntegrationSettings;
-                setIntegrationSettings(fetched);
+                const merged: IntegrationSettings = {
+                  ...DEFAULT_INTEGRATION_SETTINGS,
+                  ...fetched,
+                  msTenantId: fetched.msTenantId ?? DEFAULT_INTEGRATION_SETTINGS.msTenantId,
+                  msClientId: fetched.msClientId ?? DEFAULT_INTEGRATION_SETTINGS.msClientId,
+                  msClientSecret: fetched.msClientSecret ?? DEFAULT_INTEGRATION_SETTINGS.msClientSecret,
+                  msSenderEmail: fetched.msSenderEmail ?? DEFAULT_INTEGRATION_SETTINGS.msSenderEmail,
+                  msSenderName: fetched.msSenderName ?? DEFAULT_INTEGRATION_SETTINGS.msSenderName,
+                  emailRecipients: fetched.emailRecipients ?? DEFAULT_INTEGRATION_SETTINGS.emailRecipients,
+                };
+                setIntegrationSettings(merged);
                 // Also mirror to localStorage for offline cache
-                if (fetched.smsEnabled !== undefined) localStorage.setItem('petty_cash_sms_enabled', String(fetched.smsEnabled));
-                if (fetched.smsGatewayUrl) localStorage.setItem('petty_cash_sms_url', fetched.smsGatewayUrl);
-                if (fetched.smsUsername) localStorage.setItem('petty_cash_sms_username', fetched.smsUsername);
-                if (fetched.smsPassword) localStorage.setItem('petty_cash_sms_password', fetched.smsPassword);
-                if (fetched.smsRecipients) localStorage.setItem('petty_cash_sms_recipients', fetched.smsRecipients);
-                if (fetched.smsTemplateNew) localStorage.setItem('petty_cash_sms_template_new', fetched.smsTemplateNew);
-                if (fetched.smsTemplateEdit) localStorage.setItem('petty_cash_sms_template_edit', fetched.smsTemplateEdit);
+                if (merged.smsEnabled !== undefined) localStorage.setItem('petty_cash_sms_enabled', String(merged.smsEnabled));
+                if (merged.smsGatewayUrl) localStorage.setItem('petty_cash_sms_url', merged.smsGatewayUrl);
+                if (merged.smsUsername) localStorage.setItem('petty_cash_sms_username', merged.smsUsername);
+                if (merged.smsPassword) localStorage.setItem('petty_cash_sms_password', merged.smsPassword);
+                if (merged.smsRecipients) localStorage.setItem('petty_cash_sms_recipients', merged.smsRecipients);
+                if (merged.smsTemplateNew) localStorage.setItem('petty_cash_sms_template_new', merged.smsTemplateNew);
+                if (merged.smsTemplateEdit) localStorage.setItem('petty_cash_sms_template_edit', merged.smsTemplateEdit);
 
-                if (fetched.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(fetched.emailEnabled));
-                if (fetched.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', fetched.msTenantId);
-                if (fetched.msClientId !== undefined) localStorage.setItem('ms_graph_client_id', fetched.msClientId);
-                if (fetched.msClientSecret !== undefined) localStorage.setItem('ms_graph_client_secret', fetched.msClientSecret);
-                if (fetched.msSenderEmail) localStorage.setItem('ms_graph_sender_email', fetched.msSenderEmail);
-                if (fetched.msSenderName) localStorage.setItem('ms_graph_sender_name', fetched.msSenderName);
-                if (fetched.emailRecipients) localStorage.setItem('petty_cash_email_recipients', fetched.emailRecipients);
-                if (fetched.emailSubjectNew) localStorage.setItem('petty_cash_email_subject_new', fetched.emailSubjectNew);
-                if (fetched.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', fetched.emailBodyNew);
-                if (fetched.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', fetched.emailSubjectEdit);
-                if (fetched.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', fetched.emailBodyEdit);
+                if (merged.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(merged.emailEnabled));
+                if (merged.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', merged.msTenantId);
+                if (merged.msClientId !== undefined) localStorage.setItem('ms_graph_client_id', merged.msClientId);
+                if (merged.msClientSecret !== undefined) localStorage.setItem('ms_graph_client_secret', merged.msClientSecret);
+                if (merged.msSenderEmail) localStorage.setItem('ms_graph_sender_email', merged.msSenderEmail);
+                if (merged.msSenderName) localStorage.setItem('ms_graph_sender_name', merged.msSenderName);
+                if (merged.emailRecipients) localStorage.setItem('petty_cash_email_recipients', merged.emailRecipients);
+                if (merged.emailSubjectNew) localStorage.setItem('petty_cash_email_subject_new', merged.emailSubjectNew);
+                if (merged.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', merged.emailBodyNew);
+                if (merged.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', merged.emailSubjectEdit);
+                if (merged.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', merged.emailBodyEdit);
               }
             });
           }
@@ -1047,6 +1057,8 @@ export default function App() {
                   currentUser={currentUser}
                   appSettings={appSettings}
                   onUpdateAppSettings={handleUpdateAppSettings}
+                  integrationSettings={integrationSettings}
+                  onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
                   users={users}
                   onAddUser={handleAddUser}
                   onUpdateUser={handleUpdateUser}
