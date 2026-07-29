@@ -39,7 +39,7 @@ import {
   Smartphone,
   ShieldCheck
 } from 'lucide-react';
-import { User, CategoryLimit, ActivityLog, AppSettings, UserRole, Transaction } from '../types';
+import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendSmsNotification, calculateCashBalance } from '../services/notificationService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
@@ -48,6 +48,8 @@ interface AdminSettingsViewProps {
   currentUser: User;
   appSettings: AppSettings;
   onUpdateAppSettings: (newSettings: AppSettings) => void;
+  integrationSettings?: IntegrationSettings;
+  onUpdateIntegrationSettings?: (newSettings: IntegrationSettings) => void;
   users: User[];
   onAddUser: (user: User) => void;
   onUpdateUser: (updatedUser: User) => void;
@@ -69,6 +71,8 @@ export default function AdminSettingsView({
   currentUser,
   appSettings,
   onUpdateAppSettings,
+  integrationSettings,
+  onUpdateIntegrationSettings,
   users,
   onAddUser,
   onUpdateUser,
@@ -213,6 +217,30 @@ export default function AdminSettingsView({
     return saved;
   });
 
+  useEffect(() => {
+    if (integrationSettings) {
+      setSmsEnabled(integrationSettings.smsEnabled);
+      setSmsGatewayUrl(integrationSettings.smsGatewayUrl || 'https://api.sms-gate.app/3rdparty/v1/message');
+      setSmsUsername(integrationSettings.smsUsername || 'WRJ0SQ');
+      setSmsPassword(integrationSettings.smsPassword || 'sdoaxryxfmy5qh');
+      setSmsRecipients(integrationSettings.smsRecipients || '+91 90259 76761');
+      setSmsTemplateNew(integrationSettings.smsTemplateNew || 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.');
+      setSmsTemplateEdit(integrationSettings.smsTemplateEdit || 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.');
+
+      setEmailEnabled(integrationSettings.emailEnabled);
+      setMsTenantId(integrationSettings.msTenantId || '');
+      setMsClientId(integrationSettings.msClientId || '');
+      setMsClientSecret(integrationSettings.msClientSecret || '');
+      setMsSenderEmail(integrationSettings.msSenderEmail || 'mail@ommaxelectric.com');
+      setMsSenderName(integrationSettings.msSenderName || 'Petty Cash Desk');
+      setEmailRecipients(integrationSettings.emailRecipients || 'cfo@company.com, auditor@company.com');
+      setEmailSubjectNew(integrationSettings.emailSubjectNew || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})');
+      setEmailBodyNew(integrationSettings.emailBodyNew || 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
+      setEmailSubjectEdit(integrationSettings.emailSubjectEdit || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}');
+      setEmailBodyEdit(integrationSettings.emailBodyEdit || 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.');
+    }
+  }, [integrationSettings]);
+
   const [emailPreviewTab, setEmailPreviewTab] = useState<'NEW' | 'EDIT'>('NEW');
 
   const [integrationSuccess, setIntegrationSuccess] = useState<string>('');
@@ -220,31 +248,81 @@ export default function AdminSettingsView({
 
   const handleSaveSmsSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('petty_cash_sms_enabled', String(smsEnabled));
-    localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
-    localStorage.setItem('petty_cash_sms_username', smsUsername);
-    localStorage.setItem('petty_cash_sms_password', smsPassword);
-    localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
-    localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
-    localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
-    setIntegrationSuccess('SMS Gate API credentials & message templates saved successfully!');
+    const updated: IntegrationSettings = {
+      smsEnabled,
+      smsGatewayUrl,
+      smsUsername,
+      smsPassword,
+      smsRecipients,
+      smsTemplateNew,
+      smsTemplateEdit,
+      emailEnabled,
+      msTenantId,
+      msClientId,
+      msClientSecret,
+      msSenderEmail,
+      msSenderName,
+      emailRecipients,
+      emailSubjectNew,
+      emailBodyNew,
+      emailSubjectEdit,
+      emailBodyEdit
+    };
+
+    if (onUpdateIntegrationSettings) {
+      onUpdateIntegrationSettings(updated);
+    } else {
+      localStorage.setItem('petty_cash_sms_enabled', String(smsEnabled));
+      localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
+      localStorage.setItem('petty_cash_sms_username', smsUsername);
+      localStorage.setItem('petty_cash_sms_password', smsPassword);
+      localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
+      localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
+      localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
+    }
+    setIntegrationSuccess('SMS Gate API credentials & message templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
 
   const handleSaveEmailSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('petty_cash_email_enabled', String(emailEnabled));
-    localStorage.setItem('ms_graph_tenant_id', msTenantId);
-    localStorage.setItem('ms_graph_client_id', msClientId);
-    localStorage.setItem('ms_graph_client_secret', msClientSecret);
-    localStorage.setItem('ms_graph_sender_email', msSenderEmail);
-    localStorage.setItem('ms_graph_sender_name', msSenderName);
-    localStorage.setItem('petty_cash_email_recipients', emailRecipients);
-    localStorage.setItem('petty_cash_email_subject_new', emailSubjectNew);
-    localStorage.setItem('petty_cash_email_body_new', emailBodyNew);
-    localStorage.setItem('petty_cash_email_subject_edit', emailSubjectEdit);
-    localStorage.setItem('petty_cash_email_body_edit', emailBodyEdit);
-    setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully!');
+    const updated: IntegrationSettings = {
+      smsEnabled,
+      smsGatewayUrl,
+      smsUsername,
+      smsPassword,
+      smsRecipients,
+      smsTemplateNew,
+      smsTemplateEdit,
+      emailEnabled,
+      msTenantId,
+      msClientId,
+      msClientSecret,
+      msSenderEmail,
+      msSenderName,
+      emailRecipients,
+      emailSubjectNew,
+      emailBodyNew,
+      emailSubjectEdit,
+      emailBodyEdit
+    };
+
+    if (onUpdateIntegrationSettings) {
+      onUpdateIntegrationSettings(updated);
+    } else {
+      localStorage.setItem('petty_cash_email_enabled', String(emailEnabled));
+      localStorage.setItem('ms_graph_tenant_id', msTenantId);
+      localStorage.setItem('ms_graph_client_id', msClientId);
+      localStorage.setItem('ms_graph_client_secret', msClientSecret);
+      localStorage.setItem('ms_graph_sender_email', msSenderEmail);
+      localStorage.setItem('ms_graph_sender_name', msSenderName);
+      localStorage.setItem('petty_cash_email_recipients', emailRecipients);
+      localStorage.setItem('petty_cash_email_subject_new', emailSubjectNew);
+      localStorage.setItem('petty_cash_email_body_new', emailBodyNew);
+      localStorage.setItem('petty_cash_email_subject_edit', emailSubjectEdit);
+      localStorage.setItem('petty_cash_email_body_edit', emailBodyEdit);
+    }
+    setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
 

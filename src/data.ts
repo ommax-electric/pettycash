@@ -1,9 +1,30 @@
-import { Transaction, CategoryLimit, ActivityLog, User, AppSettings } from './types';
+import { Transaction, CategoryLimit, ActivityLog, User, AppSettings, IntegrationSettings } from './types';
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   currencySymbol: '₹',
   dateFormat: 'DD/MM/YYYY',
   timezone: 'Asia/Kolkata (IST, UTC+05:30)'
+};
+
+export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
+  smsEnabled: true,
+  smsGatewayUrl: 'https://api.sms-gate.app/3rdparty/v1/message',
+  smsUsername: 'WRJ0SQ',
+  smsPassword: 'sdoaxryxfmy5qh',
+  smsRecipients: '+91 90259 76761',
+  smsTemplateNew: 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.',
+  smsTemplateEdit: 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.',
+  emailEnabled: true,
+  msTenantId: '',
+  msClientId: '',
+  msClientSecret: '',
+  msSenderEmail: 'mail@ommaxelectric.com',
+  msSenderName: 'Petty Cash Desk',
+  emailRecipients: 'cfo@company.com, auditor@company.com',
+  emailSubjectNew: '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})',
+  emailBodyNew: 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.',
+  emailSubjectEdit: '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}',
+  emailBodyEdit: 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.'
 };
 
 export const MOCK_USERS: User[] = [

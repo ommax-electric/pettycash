@@ -1,4 +1,4 @@
-import { AppSettings, Transaction, User } from '../types';
+import { AppSettings, IntegrationSettings, Transaction, User } from '../types';
 import { buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 
 /**
@@ -58,22 +58,33 @@ export async function sendSmsNotification(
   currentUser: User | null,
   transactionsList: Transaction[],
   appSettings: AppSettings,
-  changedFieldLabels: string[] = []
+  changedFieldLabels: string[] = [],
+  integrationSettings?: IntegrationSettings | null
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const isSmsEnabled = localStorage.getItem('petty_cash_sms_enabled') !== 'false'; // Default to enabled
+    const isSmsEnabled = integrationSettings 
+      ? integrationSettings.smsEnabled 
+      : (localStorage.getItem('petty_cash_sms_enabled') !== 'false');
     if (!isSmsEnabled) {
       return { success: false, message: 'SMS Gate is currently disabled in settings.' };
     }
 
-    let gatewayUrl = (localStorage.getItem('petty_cash_sms_url') || 'https://api.sms-gate.app/3rdparty/v1/message').trim();
+    let gatewayUrl = (integrationSettings
+      ? integrationSettings.smsGatewayUrl
+      : (localStorage.getItem('petty_cash_sms_url') || 'https://api.sms-gate.app/3rdparty/v1/message')).trim();
     if (!gatewayUrl || gatewayUrl.includes('mobile/v1') || gatewayUrl === 'https://api.sms-gate.app' || gatewayUrl === 'https://api.sms-gate.app/') {
       gatewayUrl = 'https://api.sms-gate.app/3rdparty/v1/message';
     }
 
-    const username = (localStorage.getItem('petty_cash_sms_username') || 'WRJ0SQ').trim();
-    const password = (localStorage.getItem('petty_cash_sms_password') || 'sdoaxryxfmy5qh').trim();
-    const rawRecipients = localStorage.getItem('petty_cash_sms_recipients') || '+919025976761';
+    const username = (integrationSettings
+      ? integrationSettings.smsUsername
+      : (localStorage.getItem('petty_cash_sms_username') || 'WRJ0SQ')).trim();
+    const password = (integrationSettings
+      ? integrationSettings.smsPassword
+      : (localStorage.getItem('petty_cash_sms_password') || 'sdoaxryxfmy5qh')).trim();
+    const rawRecipients = integrationSettings
+      ? integrationSettings.smsRecipients
+      : (localStorage.getItem('petty_cash_sms_recipients') || '+919025976761');
 
     const recipients = rawRecipients
       .split(',')
@@ -87,10 +98,12 @@ export async function sendSmsNotification(
     // Determine message template
     let template = '';
     if (type === 'NEW') {
-      template = localStorage.getItem('petty_cash_sms_template_new') ||
+      template = (integrationSettings ? integrationSettings.smsTemplateNew : null) ||
+        localStorage.getItem('petty_cash_sms_template_new') ||
         'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.';
     } else {
-      template = localStorage.getItem('petty_cash_sms_template_edit') ||
+      template = (integrationSettings ? integrationSettings.smsTemplateEdit : null) ||
+        localStorage.getItem('petty_cash_sms_template_edit') ||
         'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.';
     }
 
@@ -221,25 +234,40 @@ export async function sendEmailNotification(
   currentUser: User | null,
   transactionsList: Transaction[],
   appSettings: AppSettings,
-  changedFieldLabels: string[] = []
+  changedFieldLabels: string[] = [],
+  integrationSettings?: IntegrationSettings | null
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const isEmailEnabled = localStorage.getItem('petty_cash_email_enabled') === 'true';
+    const isEmailEnabled = integrationSettings
+      ? integrationSettings.emailEnabled
+      : (localStorage.getItem('petty_cash_email_enabled') === 'true');
     if (!isEmailEnabled) {
       return { success: false, message: 'Corporate Email alerts disabled in settings.' };
     }
 
-    const rawRecipients = localStorage.getItem('petty_cash_email_recipients') || '';
+    const rawRecipients = integrationSettings
+      ? integrationSettings.emailRecipients
+      : (localStorage.getItem('petty_cash_email_recipients') || '');
     const recipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
     if (recipients.length === 0) {
       return { success: false, message: 'No Email recipients specified.' };
     }
 
-    const tenantId = (localStorage.getItem('ms_graph_tenant_id') || '').trim();
-    const clientId = (localStorage.getItem('ms_graph_client_id') || '').trim();
-    const clientSecret = (localStorage.getItem('ms_graph_client_secret') || '').trim();
-    const senderEmail = (localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com').trim();
-    const senderName = (localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk').trim();
+    const tenantId = (integrationSettings
+      ? integrationSettings.msTenantId
+      : (localStorage.getItem('ms_graph_tenant_id') || '')).trim();
+    const clientId = (integrationSettings
+      ? integrationSettings.msClientId
+      : (localStorage.getItem('ms_graph_client_id') || '')).trim();
+    const clientSecret = (integrationSettings
+      ? integrationSettings.msClientSecret
+      : (localStorage.getItem('ms_graph_client_secret') || '')).trim();
+    const senderEmail = (integrationSettings
+      ? integrationSettings.msSenderEmail
+      : (localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com')).trim();
+    const senderName = (integrationSettings
+      ? integrationSettings.msSenderName
+      : (localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk')).trim();
 
     if (!tenantId || !clientId || !clientSecret) {
       return {
@@ -266,14 +294,18 @@ export async function sendEmailNotification(
     const boldChangedFields = `<strong>${changedFieldsStr}</strong>`;
 
     if (type === 'NEW') {
-      subjectTemplate = localStorage.getItem('petty_cash_email_subject_new') ||
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectNew : null) ||
+        localStorage.getItem('petty_cash_email_subject_new') ||
         '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
-      bodyTemplate = localStorage.getItem('petty_cash_email_body_new') ||
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyNew : null) ||
+        localStorage.getItem('petty_cash_email_body_new') ||
         'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     } else {
-      subjectTemplate = localStorage.getItem('petty_cash_email_subject_edit') ||
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectEdit : null) ||
+        localStorage.getItem('petty_cash_email_subject_edit') ||
         '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
-      bodyTemplate = localStorage.getItem('petty_cash_email_body_edit') ||
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyEdit : null) ||
+        localStorage.getItem('petty_cash_email_body_edit') ||
         'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     }
 

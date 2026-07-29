@@ -14,8 +14,8 @@ import {
   User as UserIcon,
   IndianRupee
 } from 'lucide-react';
-import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings } from './types';
-import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS } from './data';
+import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings } from './types';
+import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
 
@@ -58,6 +58,7 @@ export default function App() {
   
   // App States
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>(DEFAULT_INTEGRATION_SETTINGS);
   const [users, setUsers] = useState<User[]>(MOCK_USERS);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<CategoryLimit[]>([]);
@@ -102,9 +103,17 @@ export default function App() {
               await setDoc(doc(db, 'logs', lg.id), lg);
             }
             await setDoc(doc(db, 'app_settings', 'config'), DEFAULT_APP_SETTINGS);
+            await setDoc(doc(db, 'app_settings', 'integrations'), DEFAULT_INTEGRATION_SETTINGS);
           } else {
             localStorage.setItem('petty_cash_db_seeded', 'true');
           }
+        }
+
+        // Ensure integrations document exists in Firestore
+        const integrationsDocRef = doc(db, 'app_settings', 'integrations');
+        const integrationsSnap = await getDoc(integrationsDocRef);
+        if (!integrationsSnap.exists()) {
+          await setDoc(integrationsDocRef, DEFAULT_INTEGRATION_SETTINGS);
         }
       } catch (err) {
         console.warn('Initial seeding check:', err);
@@ -163,10 +172,34 @@ export default function App() {
         const unsubSettings = onSnapshot(collection(db, 'app_settings'), (snapshot) => {
           if (snapshot.empty) {
             setAppSettings(DEFAULT_APP_SETTINGS);
+            setIntegrationSettings(DEFAULT_INTEGRATION_SETTINGS);
           } else {
             snapshot.forEach((d) => {
               if (d.id === 'config') {
                 setAppSettings(d.data() as AppSettings);
+              } else if (d.id === 'integrations') {
+                const fetched = d.data() as IntegrationSettings;
+                setIntegrationSettings(fetched);
+                // Also mirror to localStorage for offline cache
+                if (fetched.smsEnabled !== undefined) localStorage.setItem('petty_cash_sms_enabled', String(fetched.smsEnabled));
+                if (fetched.smsGatewayUrl) localStorage.setItem('petty_cash_sms_url', fetched.smsGatewayUrl);
+                if (fetched.smsUsername) localStorage.setItem('petty_cash_sms_username', fetched.smsUsername);
+                if (fetched.smsPassword) localStorage.setItem('petty_cash_sms_password', fetched.smsPassword);
+                if (fetched.smsRecipients) localStorage.setItem('petty_cash_sms_recipients', fetched.smsRecipients);
+                if (fetched.smsTemplateNew) localStorage.setItem('petty_cash_sms_template_new', fetched.smsTemplateNew);
+                if (fetched.smsTemplateEdit) localStorage.setItem('petty_cash_sms_template_edit', fetched.smsTemplateEdit);
+
+                if (fetched.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(fetched.emailEnabled));
+                if (fetched.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', fetched.msTenantId);
+                if (fetched.msClientId !== undefined) localStorage.setItem('ms_graph_client_id', fetched.msClientId);
+                if (fetched.msClientSecret !== undefined) localStorage.setItem('ms_graph_client_secret', fetched.msClientSecret);
+                if (fetched.msSenderEmail) localStorage.setItem('ms_graph_sender_email', fetched.msSenderEmail);
+                if (fetched.msSenderName) localStorage.setItem('ms_graph_sender_name', fetched.msSenderName);
+                if (fetched.emailRecipients) localStorage.setItem('petty_cash_email_recipients', fetched.emailRecipients);
+                if (fetched.emailSubjectNew) localStorage.setItem('petty_cash_email_subject_new', fetched.emailSubjectNew);
+                if (fetched.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', fetched.emailBodyNew);
+                if (fetched.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', fetched.emailSubjectEdit);
+                if (fetched.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', fetched.emailBodyEdit);
               }
             });
           }
@@ -325,8 +358,8 @@ export default function App() {
     addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
 
     // Dispatch automated SMS & Email alerts
-    sendSmsNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings);
-    sendEmailNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings);
+    sendSmsNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
+    sendEmailNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
   };
 
   // Handler: Update transaction (for edits)
@@ -433,8 +466,8 @@ export default function App() {
     // Dispatch automated SMS & Email alerts with dynamic changed fields
     if (changes.length > 0) {
       const changedFieldLabels = changes.map(c => c.field);
-      sendSmsNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels);
-      sendEmailNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels);
+      sendSmsNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
+      sendEmailNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
     }
   };
 
@@ -483,6 +516,36 @@ export default function App() {
     setAppSettings(newSettings);
     setDoc(doc(db, 'app_settings', 'config'), newSettings).catch(e => console.warn(e));
     addLog('APP_SETTINGS_UPDATE', `Updated App Settings (Currency: ${newSettings.currencySymbol}, Format: ${newSettings.dateFormat}, Timezone: ${newSettings.timezone})`);
+  };
+
+  // Admin Handler: Integration Settings (SMS & Email Templates / APIs)
+  const handleUpdateIntegrationSettings = (newSettings: IntegrationSettings) => {
+    setIntegrationSettings(newSettings);
+
+    // Save to local storage for local cache
+    localStorage.setItem('petty_cash_sms_enabled', String(newSettings.smsEnabled));
+    localStorage.setItem('petty_cash_sms_url', newSettings.smsGatewayUrl);
+    localStorage.setItem('petty_cash_sms_username', newSettings.smsUsername);
+    localStorage.setItem('petty_cash_sms_password', newSettings.smsPassword);
+    localStorage.setItem('petty_cash_sms_recipients', newSettings.smsRecipients);
+    localStorage.setItem('petty_cash_sms_template_new', newSettings.smsTemplateNew);
+    localStorage.setItem('petty_cash_sms_template_edit', newSettings.smsTemplateEdit);
+
+    localStorage.setItem('petty_cash_email_enabled', String(newSettings.emailEnabled));
+    localStorage.setItem('ms_graph_tenant_id', newSettings.msTenantId);
+    localStorage.setItem('ms_graph_client_id', newSettings.msClientId);
+    localStorage.setItem('ms_graph_client_secret', newSettings.msClientSecret);
+    localStorage.setItem('ms_graph_sender_email', newSettings.msSenderEmail);
+    localStorage.setItem('ms_graph_sender_name', newSettings.msSenderName);
+    localStorage.setItem('petty_cash_email_recipients', newSettings.emailRecipients);
+    localStorage.setItem('petty_cash_email_subject_new', newSettings.emailSubjectNew);
+    localStorage.setItem('petty_cash_email_body_new', newSettings.emailBodyNew);
+    localStorage.setItem('petty_cash_email_subject_edit', newSettings.emailSubjectEdit);
+    localStorage.setItem('petty_cash_email_body_edit', newSettings.emailBodyEdit);
+
+    // Persist to Firestore for multi-domain, multi-session synchronization
+    setDoc(doc(db, 'app_settings', 'integrations'), newSettings).catch(e => console.warn(e));
+    addLog('INTEGRATION_SETTINGS_UPDATE', 'Updated SMS & Email Templates / API Settings');
   };
 
   // Admin Handler: User Management

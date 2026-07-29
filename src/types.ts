@@ -16,6 +16,27 @@ export interface AppSettings {
   timezone: string; // e.g. "Asia/Kolkata (IST)", "UTC", "America/New_York (EST)", "Europe/London (GMT)"
 }
 
+export interface IntegrationSettings {
+  smsEnabled: boolean;
+  smsGatewayUrl: string;
+  smsUsername: string;
+  smsPassword: string;
+  smsRecipients: string;
+  smsTemplateNew: string;
+  smsTemplateEdit: string;
+  emailEnabled: boolean;
+  msTenantId: string;
+  msClientId: string;
+  msClientSecret: string;
+  msSenderEmail: string;
+  msSenderName: string;
+  emailRecipients: string;
+  emailSubjectNew: string;
+  emailBodyNew: string;
+  emailSubjectEdit: string;
+  emailBodyEdit: string;
+}
+
 export type TransactionType = 'IN' | 'OUT';
 export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
 
