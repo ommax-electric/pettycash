@@ -240,7 +240,7 @@ export async function sendEmailNotification(
   try {
     const isEmailEnabled = integrationSettings
       ? integrationSettings.emailEnabled
-      : (localStorage.getItem('petty_cash_email_enabled') === 'true');
+      : (localStorage.getItem('petty_cash_email_enabled') !== 'false');
     if (!isEmailEnabled) {
       return { success: false, message: 'Corporate Email alerts disabled in settings.' };
     }
@@ -448,7 +448,7 @@ export async function sendEmailNotification(
             emailAddress: { address: email }
           }))
         },
-        saveToSentItems: "true"
+        saveToSentItems: true
       };
 
       const mailRes = await fetch(graphMailUrl, {

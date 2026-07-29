@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
-import { sendSmsNotification, calculateCashBalance } from '../services/notificationService';
+import { sendSmsNotification, sendEmailNotification, calculateCashBalance } from '../services/notificationService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 
 interface AdminSettingsViewProps {
@@ -404,51 +404,61 @@ export default function AdminSettingsView({
       return;
     }
 
-    const targetSubject = emailPreviewTab === 'NEW' ? emailSubjectNew : emailSubjectEdit;
-    const targetBody = emailPreviewTab === 'NEW' ? emailBodyNew : emailBodyEdit;
+    const testTxn: Transaction = {
+      id: 'VOUCHER-TEST-104',
+      type: 'OUT',
+      amount: 3500,
+      category: 'Office Supplies',
+      merchant: 'Rahul Sharma',
+      description: 'A4 printer paper & stationery',
+      remarks: 'Invoice #INV-2026-902 attached',
+      date: new Date().toISOString().split('T')[0],
+      status: 'APPROVED',
+      recordedBy: currentUser ? currentUser.fullName : 'Admin (Anita)',
+      reference: 'VOUCHER-104',
+      receiptName: 'Invoice.pdf',
+      receiptSize: '1 KB'
+    };
 
-    const parsedSubject = substituteSampleTags(targetSubject, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
-    const parsedBody = substituteSampleTags(targetBody, appSettings.currencySymbol, emailPreviewTab === 'EDIT');
-
-    const cardTitle = emailPreviewTab === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert';
-    const htmlEmailBody = buildModernHtmlEmailFromText(cardTitle, parsedBody);
-
-    const recipientList = emailRecipients.split(',').map(r => r.trim()).filter(Boolean);
+    const currentIntegrationSettings: IntegrationSettings = {
+      smsEnabled,
+      smsGatewayUrl,
+      smsUsername,
+      smsPassword,
+      smsRecipients,
+      smsTemplateNew,
+      smsTemplateEdit,
+      emailEnabled: true,
+      msTenantId,
+      msClientId,
+      msClientSecret,
+      msSenderEmail,
+      msSenderName,
+      emailRecipients,
+      emailSubjectNew,
+      emailBodyNew,
+      emailSubjectEdit,
+      emailBodyEdit
+    };
 
     setIntegrationSuccess('Connecting to Microsoft Identity Platform & Graph API...');
 
-    try {
-      const res = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: msTenantId,
-          clientId: msClientId,
-          clientSecret: msClientSecret,
-          senderEmail: msSenderEmail,
-          senderName: msSenderName,
-          recipients: recipientList,
-          subject: parsedSubject,
-          body: htmlEmailBody
-        })
-      });
+    const result = await sendEmailNotification(
+      emailPreviewTab === 'NEW' ? 'NEW' : 'EDIT',
+      testTxn,
+      currentUser,
+      transactions,
+      appSettings,
+      ['Amount', 'Particulars'],
+      currentIntegrationSettings
+    );
 
-      const data = await res.json();
-
-      setTestNotificationModal({
-        title: res.ok && data.success ? 'Microsoft Graph Modern HTML Email Dispatched!' : 'Microsoft Graph Email Dispatch Result',
-        type: 'EMAIL',
-        content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName} <${msSenderEmail}>\nTo Recipients: ${emailRecipients}\nFormat: HTML Only (Modern Card Layout)\n\n========================================\nGRAPH API RESPONSE:\n${data.message || data.error || JSON.stringify(data, null, 2)}`
-      });
-      setIntegrationSuccess('');
-    } catch (err: any) {
-      setTestNotificationModal({
-        title: 'Microsoft Graph Email Exception',
-        type: 'EMAIL',
-        content: `Error contacting server proxy endpoint: ${err.message || 'Unknown network error'}`
-      });
-      setIntegrationSuccess('');
-    }
+    setTestNotificationModal({
+      title: result.success ? 'Microsoft Graph Modern HTML Email Dispatched!' : 'Microsoft Graph Email Dispatch Result',
+      type: 'EMAIL',
+      content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName} <${msSenderEmail}>\nTo Recipients: ${emailRecipients}\nFormat: HTML Only (Modern Card Layout)\n\n========================================\nGRAPH API RESPONSE:\n${result.message}`
+    });
+    setIntegrationSuccess('');
   };
 
   // ----------------------------------------------------

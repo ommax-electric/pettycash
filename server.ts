@@ -142,7 +142,7 @@ async function startServer() {
             emailAddress: { address: email }
           }))
         },
-        saveToSentItems: "true"
+        saveToSentItems: true
       };
 
       const mailRes = await fetch(graphMailUrl, {
