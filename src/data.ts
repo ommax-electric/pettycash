@@ -14,6 +14,8 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   smsRecipients: '+91 90259 76761',
   smsTemplateNew: 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.',
   smsTemplateEdit: 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.',
+  smsTemplateInward: 'Inward Cash Deposit Alert: #{voucher_id} for {amount} received from {paid_to} ({category}). Cash balance: {balance}.',
+  smsTemplateInwardEdit: 'Deposit Changes Alert for Cash Deposit #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.',
   emailEnabled: true,
   msTenantId: 'a63883ba-4173-48a2-a29d-247ca0c8e59a',
   msClientId: 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6',
@@ -24,7 +26,11 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   emailSubjectNew: '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})',
   emailBodyNew: 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.',
   emailSubjectEdit: '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}',
-  emailBodyEdit: 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.'
+  emailBodyEdit: 'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.',
+  emailSubjectInward: '[Petty Cash Alert] Inward Deposit #{voucher_id} - {amount} ({category})',
+  emailBodyInward: 'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.',
+  emailSubjectInwardEdit: '[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}',
+  emailBodyInwardEdit: 'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.'
 };
 
 export const MOCK_USERS: User[] = [

@@ -24,6 +24,8 @@ export interface IntegrationSettings {
   smsRecipients: string;
   smsTemplateNew: string;
   smsTemplateEdit: string;
+  smsTemplateInward: string;
+  smsTemplateInwardEdit?: string;
   emailEnabled: boolean;
   msTenantId: string;
   msClientId: string;
@@ -35,6 +37,10 @@ export interface IntegrationSettings {
   emailBodyNew: string;
   emailSubjectEdit: string;
   emailBodyEdit: string;
+  emailSubjectInward: string;
+  emailBodyInward: string;
+  emailSubjectInwardEdit?: string;
+  emailBodyInwardEdit?: string;
 }
 
 export type TransactionType = 'IN' | 'OUT';

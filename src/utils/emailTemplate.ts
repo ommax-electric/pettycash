@@ -102,8 +102,6 @@ export function substituteSampleTags(
 ): string {
   if (!templateText) return '';
 
-  const sampleAttachmentLink = `<a href="#" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>`;
-
   return templateText
     .replace(/\{voucher_id\}/g, 'VOUCHER-104')
     .replace(/\{amount\}/g, `${currencySymbol}3,500.00`)
@@ -111,11 +109,11 @@ export function substituteSampleTags(
     .replace(/\{particulars\}/g, 'A4 printer paper & stationary')
     .replace(/\{category\}/g, 'Office Supplies')
     .replace(/\{remarks\}/g, 'Invoice #INV-2026-902 attached')
-    .replace(/\{date\}/g, '2026-07-28')
-    .replace(/\{attachment\}/g, sampleAttachmentLink)
+    .replace(/\{date\}/g, '28-07-2026')
+    .replace(/\{attachment\}/g, 'YES')
     .replace(/\{balance\}/g, `${currencySymbol}12,500.00`)
-    .replace(/\{changed_fields\}/g, '<strong>Amount and Category</strong>')
-    .replace(/\{updated_by\}/g, 'Anita (Admin)');
+    .replace(/\{changed_fields\}/g, 'Amount and Category')
+    .replace(/\{updated_by\}/g, 'Anita');
 }
 
 /**
@@ -123,7 +121,8 @@ export function substituteSampleTags(
  */
 export function buildModernHtmlEmailFromText(
   title: string,
-  bodyText: string
+  bodyText: string,
+  borderColor: string = '#ed3833'
 ): string {
   const blocks = parseBodyTextToBlocks(bodyText);
 
@@ -132,14 +131,16 @@ export function buildModernHtmlEmailFromText(
       const lineHtml = block.lines.map(line => {
         let valueStyle = 'color: #334155;';
         if (line.key.toLowerCase().includes('amount')) {
-          valueStyle = 'color: #ef4444; font-weight: 700;';
+          valueStyle = `color: ${borderColor}; font-weight: 700;`;
         } else if (line.key.toLowerCase().includes('changed')) {
           valueStyle = 'color: #2563eb; font-weight: 600;';
         }
 
         let valueContent = line.value;
         if (line.key.toLowerCase().includes('attachment')) {
-          if (line.value.toUpperCase().startsWith('YES') && !line.value.includes('<a')) {
+          if (line.value.includes('<a')) {
+            valueContent = line.value;
+          } else if (line.value.toUpperCase().startsWith('YES')) {
             valueContent = `<a href="#" target="_blank" style="color: #2563eb; font-weight: 700; text-decoration: underline;">YES</a>`;
           }
         }
@@ -148,8 +149,8 @@ export function buildModernHtmlEmailFromText(
       }).join('');
 
       return `
-      <!-- Details Callout Box (Red Left Border) -->
-      <div style="background-color: #f8fafc; border-left: 4px solid #ef4444; border-radius: 12px; padding: 18px 20px; margin: 20px 0;">
+      <!-- Details Callout Box (Left Accent Border) -->
+      <div style="background-color: #f8fafc; border-left: 4px solid ${borderColor}; border-radius: 12px; padding: 18px 20px; margin: 20px 0;">
         <div style="font-size: 14px; line-height: 1.7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
           ${lineHtml}
         </div>

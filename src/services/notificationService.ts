@@ -53,7 +53,7 @@ export function calculateCashBalance(transactions: Transaction[], currencySymbol
  * Dispatches SMS notification via Self-Hosted Android SMSGate HTTP Endpoint
  */
 export async function sendSmsNotification(
-  type: 'NEW' | 'EDIT',
+  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT',
   txn: Transaction,
   currentUser: User | null,
   transactionsList: Transaction[],
@@ -101,6 +101,14 @@ export async function sendSmsNotification(
       template = (integrationSettings ? integrationSettings.smsTemplateNew : null) ||
         localStorage.getItem('petty_cash_sms_template_new') ||
         'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.';
+    } else if (type === 'INWARD') {
+      template = (integrationSettings ? integrationSettings.smsTemplateInward : null) ||
+        localStorage.getItem('petty_cash_sms_template_inward') ||
+        'Inward Cash Deposit Alert: #{voucher_id} for {amount} received from {paid_to} ({category}). Cash balance: {balance}.';
+    } else if (type === 'INWARD_EDIT') {
+      template = (integrationSettings ? integrationSettings.smsTemplateInwardEdit : null) ||
+        localStorage.getItem('petty_cash_sms_template_inward_edit') ||
+        'Deposit Changes Alert for Cash Deposit #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.';
     } else {
       template = (integrationSettings ? integrationSettings.smsTemplateEdit : null) ||
         localStorage.getItem('petty_cash_sms_template_edit') ||
@@ -229,7 +237,7 @@ export async function sendSmsNotification(
  * Dispatches Corporate Email notification via configured SMTP / API endpoint
  */
 export async function sendEmailNotification(
-  type: 'NEW' | 'EDIT',
+  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT',
   txn: Transaction,
   currentUser: User | null,
   transactionsList: Transaction[],
@@ -293,14 +301,39 @@ export async function sendEmailNotification(
 
     const boldChangedFields = `<strong>${changedFieldsStr}</strong>`;
 
+    let cardTitle = 'New Voucher Alert';
+    let cardBorderColor = '#ed3833';
+
     if (type === 'NEW') {
+      cardTitle = 'New Voucher Alert';
+      cardBorderColor = '#ed3833'; // Requirement: New Voucher Alert #ed3833
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectNew : null) ||
         localStorage.getItem('petty_cash_email_subject_new') ||
         '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyNew : null) ||
         localStorage.getItem('petty_cash_email_body_new') ||
         'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    } else if (type === 'INWARD') {
+      cardTitle = 'Deposit Alert';
+      cardBorderColor = '#00bc7d'; // Requirement: New Deposit Alert #00bc7d
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectInward : null) ||
+        localStorage.getItem('petty_cash_email_subject_inward') ||
+        '[Petty Cash Alert] Inward Deposit #{voucher_id} - {amount} ({category})';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInward : null) ||
+        localStorage.getItem('petty_cash_email_body_inward') ||
+        'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    } else if (type === 'INWARD_EDIT') {
+      cardTitle = 'Deposit Changes Alert';
+      cardBorderColor = '#f7b944'; // Requirement: Both Voucher and Deposit change alert #f7b944
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectInwardEdit : null) ||
+        localStorage.getItem('petty_cash_email_subject_inward_edit') ||
+        '[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInwardEdit : null) ||
+        localStorage.getItem('petty_cash_email_body_inward_edit') ||
+        'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     } else {
+      cardTitle = 'Voucher Changes Alert';
+      cardBorderColor = '#f7b944'; // Requirement: Both Voucher and Deposit change alert #f7b944
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectEdit : null) ||
         localStorage.getItem('petty_cash_email_subject_edit') ||
         '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
@@ -329,8 +362,7 @@ export async function sendEmailNotification(
       .replace(/\{changed_fields\}/g, boldChangedFields)
       .replace(/\{updated_by\}/g, updaterName);
 
-    const cardTitle = type === 'NEW' ? 'New Voucher Alert' : 'Voucher Changes Alert';
-    const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed);
+    const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor);
 
     console.log('[EmailAlert] Dispatching Email Alert via Microsoft Graph Proxy:', {
       tenantId,

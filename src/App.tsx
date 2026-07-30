@@ -198,6 +198,7 @@ export default function App() {
                 if (merged.smsRecipients) localStorage.setItem('petty_cash_sms_recipients', merged.smsRecipients);
                 if (merged.smsTemplateNew) localStorage.setItem('petty_cash_sms_template_new', merged.smsTemplateNew);
                 if (merged.smsTemplateEdit) localStorage.setItem('petty_cash_sms_template_edit', merged.smsTemplateEdit);
+                if (merged.smsTemplateInward) localStorage.setItem('petty_cash_sms_template_inward', merged.smsTemplateInward);
 
                 if (merged.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(merged.emailEnabled));
                 if (merged.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', merged.msTenantId);
@@ -210,6 +211,8 @@ export default function App() {
                 if (merged.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', merged.emailBodyNew);
                 if (merged.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', merged.emailSubjectEdit);
                 if (merged.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', merged.emailBodyEdit);
+                if (merged.emailSubjectInward) localStorage.setItem('petty_cash_email_subject_inward', merged.emailSubjectInward);
+                if (merged.emailBodyInward) localStorage.setItem('petty_cash_email_body_inward', merged.emailBodyInward);
               }
             });
           }
@@ -368,8 +371,9 @@ export default function App() {
     addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
 
     // Dispatch automated SMS & Email alerts
-    sendSmsNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
-    sendEmailNotification('NEW', newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
+    const notificationType = newTxn.type === 'IN' ? 'INWARD' : 'NEW';
+    sendSmsNotification(notificationType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
+    sendEmailNotification(notificationType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
   };
 
   // Handler: Update transaction (for edits)
@@ -476,8 +480,10 @@ export default function App() {
     // Dispatch automated SMS & Email alerts with dynamic changed fields
     if (changes.length > 0) {
       const changedFieldLabels = changes.map(c => c.field);
-      sendSmsNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
-      sendEmailNotification('EDIT', finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
+      const isDeposit = finalTxn.type === 'IN';
+      const notificationType = isDeposit ? 'INWARD_EDIT' : 'EDIT';
+      sendSmsNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
+      sendEmailNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
     }
   };
 
@@ -540,6 +546,10 @@ export default function App() {
     localStorage.setItem('petty_cash_sms_recipients', newSettings.smsRecipients);
     localStorage.setItem('petty_cash_sms_template_new', newSettings.smsTemplateNew);
     localStorage.setItem('petty_cash_sms_template_edit', newSettings.smsTemplateEdit);
+    localStorage.setItem('petty_cash_sms_template_inward', newSettings.smsTemplateInward);
+    if (newSettings.smsTemplateInwardEdit) {
+      localStorage.setItem('petty_cash_sms_template_inward_edit', newSettings.smsTemplateInwardEdit);
+    }
 
     localStorage.setItem('petty_cash_email_enabled', String(newSettings.emailEnabled));
     localStorage.setItem('ms_graph_tenant_id', newSettings.msTenantId);
@@ -552,6 +562,14 @@ export default function App() {
     localStorage.setItem('petty_cash_email_body_new', newSettings.emailBodyNew);
     localStorage.setItem('petty_cash_email_subject_edit', newSettings.emailSubjectEdit);
     localStorage.setItem('petty_cash_email_body_edit', newSettings.emailBodyEdit);
+    localStorage.setItem('petty_cash_email_subject_inward', newSettings.emailSubjectInward);
+    localStorage.setItem('petty_cash_email_body_inward', newSettings.emailBodyInward);
+    if (newSettings.emailSubjectInwardEdit) {
+      localStorage.setItem('petty_cash_email_subject_inward_edit', newSettings.emailSubjectInwardEdit);
+    }
+    if (newSettings.emailBodyInwardEdit) {
+      localStorage.setItem('petty_cash_email_body_inward_edit', newSettings.emailBodyInwardEdit);
+    }
 
     // Persist to Firestore for multi-domain, multi-session synchronization
     setDoc(doc(db, 'app_settings', 'integrations'), newSettings).catch(e => console.warn(e));
