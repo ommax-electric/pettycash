@@ -102,6 +102,13 @@ export default function RegisterView({
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
   const formatDate = (dateStr: string) => formatDateToDMY(dateStr, dateFormat);
   const forceTypeVal: string | undefined = forceType;
+
+  // Company Stamp Settings
+  const companyStampUrl = appSettings?.companyStampUrl || '';
+  const companyStampEnabled = appSettings?.companyStampEnabled !== false && !!companyStampUrl;
+  const companyStampRotate = appSettings?.companyStampRotate ?? -12;
+  const companyStampOpacity = appSettings?.companyStampOpacity ?? 0.85;
+  const companyStampWidth = appSettings?.companyStampWidth ?? 85;
   // Query Filter States
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -890,8 +897,26 @@ export default function RegisterView({
             .header-row {
               display: flex;
               justify-content: space-between;
-              align-items: flex-start;
+              align-items: center;
               margin-bottom: 3mm;
+              position: relative;
+              min-height: 20mm;
+            }
+            .header-stamp-box {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex: 1;
+              padding: 0 4mm;
+              pointer-events: none;
+            }
+            .company-stamp-img {
+              width: ${companyStampWidth}px;
+              height: auto;
+              max-width: 100%;
+              object-fit: contain;
+              transform: rotate(${companyStampRotate}deg);
+              opacity: ${companyStampOpacity};
             }
             .meta-table {
               border-collapse: collapse;
@@ -1024,9 +1049,15 @@ export default function RegisterView({
                   </tr>
                 </table>
 
+                ${companyStampEnabled ? `
+                  <div class="header-stamp-box">
+                    <img src="${companyStampUrl}" class="company-stamp-img" alt="Company Seal" />
+                  </div>
+                ` : ''}
+
                 <div class="header-right">
                   <div class="company-name">Ommax Electric Private Limited</div>
-                  <div class="voucher-title">CASH VOUCHER</div>
+                  <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}</div>
                 </div>
               </div>
 
@@ -1122,6 +1153,12 @@ export default function RegisterView({
                   <td class="meta-value">${formattedAmount}</td>
                 </tr>
               </table>
+
+              ${companyStampEnabled ? `
+                <div class="header-stamp-box">
+                  <img src="${companyStampUrl}" class="company-stamp-img" alt="Company Seal" />
+                </div>
+              ` : ''}
 
               <div class="header-right">
                 <div class="company-name">Ommax Electric Private Limited</div>
@@ -1261,8 +1298,26 @@ export default function RegisterView({
             .header-row {
               display: flex;
               justify-content: space-between;
-              align-items: flex-start;
+              align-items: center;
               margin-bottom: 2.5mm;
+              position: relative;
+              min-height: 18mm;
+            }
+            .header-stamp-box {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex: 1;
+              padding: 0 3mm;
+              pointer-events: none;
+            }
+            .company-stamp-img {
+              width: ${companyStampWidth}px;
+              height: auto;
+              max-width: 100%;
+              object-fit: contain;
+              transform: rotate(${companyStampRotate}deg);
+              opacity: ${companyStampOpacity};
             }
             .meta-table {
               border-collapse: collapse;

@@ -3,7 +3,12 @@ import { Transaction, CategoryLimit, ActivityLog, User, AppSettings, Integration
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   currencySymbol: '₹',
   dateFormat: 'DD/MM/YYYY',
-  timezone: 'Asia/Kolkata (IST, UTC+05:30)'
+  timezone: 'Asia/Kolkata (IST, UTC+05:30)',
+  companyStampUrl: `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><circle cx='80' cy='80' r='74' fill='none' stroke='%231d4ed8' stroke-width='3.5' stroke-dasharray='7 3'/><circle cx='80' cy='80' r='66' fill='none' stroke='%231e40af' stroke-width='2.5'/><circle cx='80' cy='80' r='48' fill='none' stroke='%231e40af' stroke-width='1.5'/><path id='c1' fill='none' d='M 28,80 A 52,52 0 1,1 132,80' /><text fill='%231e40af' font-size='9.5' font-weight='800' font-family='sans-serif' letter-spacing='1.2'><textPath href='%23c1' startOffset='50%' text-anchor='middle'>OMMAX ELECTRIC PVT LTD</textPath></text><path id='c2' fill='none' d='M 132,80 A 52,52 0 1,1 28,80' /><text fill='%231e40af' font-size='8.5' font-weight='700' font-family='sans-serif' letter-spacing='1'><textPath href='%23c2' startOffset='50%' text-anchor='middle'>★ APPROVED & AUDITED ★</textPath></text><polygon points='80,60 85,74 100,74 88,83 93,98 80,89 67,98 72,83 60,74 75,74' fill='%232563eb'/><text x='80' y='110' text-anchor='middle' fill='%231e40af' font-size='9' font-weight='900' font-family='sans-serif' letter-spacing='0.5'>PETTY CASH</text></svg>`,
+  companyStampEnabled: true,
+  companyStampRotate: -12,
+  companyStampOpacity: 0.85,
+  companyStampWidth: 85
 };
 
 export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {

@@ -92,16 +92,45 @@ export default function AdminSettingsView({
   const [activeTab, setActiveTab] = useState<AdminTab>('APP_SETTINGS');
 
   // --- 1. App Settings Form State ---
+  const defaultSampleStamp = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><circle cx='80' cy='80' r='74' fill='none' stroke='%231d4ed8' stroke-width='3.5' stroke-dasharray='7 3'/><circle cx='80' cy='80' r='66' fill='none' stroke='%231e40af' stroke-width='2.5'/><circle cx='80' cy='80' r='48' fill='none' stroke='%231e40af' stroke-width='1.5'/><path id='c1' fill='none' d='M 28,80 A 52,52 0 1,1 132,80' /><text fill='%231e40af' font-size='9.5' font-weight='800' font-family='sans-serif' letter-spacing='1.2'><textPath href='%23c1' startOffset='50%' text-anchor='middle'>OMMAX ELECTRIC PVT LTD</textPath></text><path id='c2' fill='none' d='M 132,80 A 52,52 0 1,1 28,80' /><text fill='%231e40af' font-size='8.5' font-weight='700' font-family='sans-serif' letter-spacing='1'><textPath href='%23c2' startOffset='50%' text-anchor='middle'>★ APPROVED & AUDITED ★</textPath></text><polygon points='80,60 85,74 100,74 88,83 93,98 80,89 67,98 72,83 60,74 75,74' fill='%232563eb'/><text x='80' y='110' text-anchor='middle' fill='%231e40af' font-size='9' font-weight='900' font-family='sans-serif' letter-spacing='0.5'>PETTY CASH</text></svg>`;
+
   const [formCurrency, setFormCurrency] = useState(appSettings.currencySymbol);
   const [formDateFormat, setFormDateFormat] = useState(appSettings.dateFormat);
   const [formTimezone, setFormTimezone] = useState(appSettings.timezone);
+  const [stampEnabled, setStampEnabled] = useState<boolean>(appSettings.companyStampEnabled !== false);
+  const [stampUrl, setStampUrl] = useState<string>(appSettings.companyStampUrl || defaultSampleStamp);
+  const [stampRotate, setStampRotate] = useState<number>(appSettings.companyStampRotate ?? -12);
+  const [stampOpacity, setStampOpacity] = useState<number>(appSettings.companyStampOpacity ?? 0.85);
+  const [stampWidth, setStampWidth] = useState<number>(appSettings.companyStampWidth ?? 85);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
   useEffect(() => {
     setFormCurrency(appSettings.currencySymbol);
     setFormDateFormat(appSettings.dateFormat);
     setFormTimezone(appSettings.timezone);
+    setStampEnabled(appSettings.companyStampEnabled !== false);
+    setStampUrl(appSettings.companyStampUrl || defaultSampleStamp);
+    setStampRotate(appSettings.companyStampRotate ?? -12);
+    setStampOpacity(appSettings.companyStampOpacity ?? 0.85);
+    setStampWidth(appSettings.companyStampWidth ?? 85);
   }, [appSettings]);
+
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Image file size should be less than 2MB.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setStampUrl(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Category Modal States
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -562,7 +591,12 @@ export default function AdminSettingsView({
     onUpdateAppSettings({
       currencySymbol: formCurrency.trim() || '₹',
       dateFormat: formDateFormat,
-      timezone: formTimezone
+      timezone: formTimezone,
+      companyStampUrl: stampUrl.trim(),
+      companyStampEnabled: stampEnabled,
+      companyStampRotate: stampRotate,
+      companyStampOpacity: stampOpacity,
+      companyStampWidth: stampWidth
     });
     setSettingsSuccess(true);
     setTimeout(() => setSettingsSuccess(false), 3000);
@@ -962,6 +996,273 @@ export default function AdminSettingsView({
                   </button>
                 </div>
               </form>
+            </div>
+
+            {/* Company Stamp & Seal Settings */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-[#f7b944]" />
+                    Company Seal & Stamp Configuration
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Add official corporate stamp/seal to printed vouchers
+                  </p>
+                </div>
+
+                <label className="flex items-center gap-2.5 cursor-pointer bg-slate-50 hover:bg-slate-100/80 px-3.5 py-2 rounded-xl border border-slate-200 transition-all shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={stampEnabled}
+                    onChange={(e) => setStampEnabled(e.target.checked)}
+                    className="w-4 h-4 text-[#f7b944] rounded border-slate-300 focus:ring-[#f7b944]"
+                  />
+                  <span className="text-xs font-extrabold text-slate-800">
+                    {stampEnabled ? 'Seal Enabled on Vouchers' : 'Seal Disabled'}
+                  </span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Left Controls Column (7 cols) */}
+                <div className="lg:col-span-7 space-y-5">
+                  {/* Image URL & File Upload */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-700">Stamp Image URL or File Upload</label>
+                    <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                      <input
+                        type="text"
+                        value={stampUrl}
+                        onChange={(e) => setStampUrl(e.target.value)}
+                        placeholder="Paste image URL (https://... or data:image/...)"
+                        className="flex-1 py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white focus:outline-hidden rounded-xl text-xs font-mono text-slate-800"
+                      />
+                      <label className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors">
+                        <Upload className="w-3.5 h-3.5 text-slate-600" />
+                        <span>Upload File</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setStampUrl(defaultSampleStamp)}
+                        className="text-[11px] font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200/60 transition-colors cursor-pointer"
+                      >
+                        Use Default Ommax Official Seal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStampUrl('')}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 px-2.5 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+                      >
+                        Clear Image
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Basic Image Edit Tools */}
+                  <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-100 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-[#f7b944]" />
+                        Stamp Adjustment & Edit Tools
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStampRotate(-12);
+                          setStampOpacity(0.85);
+                          setStampWidth(85);
+                        }}
+                        className="text-[10px] font-extrabold text-slate-600 hover:text-slate-900 bg-white px-2 py-1 rounded-lg border border-slate-200 transition-all cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3 text-slate-400" />
+                        Reset
+                      </button>
+                    </div>
+
+                    {/* Rotation Tool */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-700">Rotation Angle</span>
+                        <span className="font-mono font-extrabold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md text-[11px]">
+                          {stampRotate}°
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-180"
+                        max="180"
+                        step="1"
+                        value={stampRotate}
+                        onChange={(e) => setStampRotate(Number(e.target.value))}
+                        className="w-full accent-[#f7b944] cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="text-[10px] text-slate-400 font-bold">Quick Angle:</span>
+                        {[-45, -12, 0, 12, 45].map((angle) => (
+                          <button
+                            key={angle}
+                            type="button"
+                            onClick={() => setStampRotate(angle)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition-colors ${
+                              stampRotate === angle
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                            }`}
+                          >
+                            {angle}°
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Opacity Tool */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-700">Stamp Opacity</span>
+                        <span className="font-mono font-extrabold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md text-[11px]">
+                          {Math.round(stampOpacity * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.05"
+                        value={stampOpacity}
+                        onChange={(e) => setStampOpacity(Number(e.target.value))}
+                        className="w-full accent-[#f7b944] cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Stamp Width / Scale Tool */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-700">Stamp Size / Width</span>
+                        <span className="font-mono font-extrabold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md text-[11px]">
+                          {stampWidth} px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="40"
+                        max="160"
+                        step="5"
+                        value={stampWidth}
+                        onChange={(e) => setStampWidth(Number(e.target.value))}
+                        className="w-full accent-[#f7b944] cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="text-[10px] text-slate-400 font-bold">Quick Size:</span>
+                        {[60, 85, 110, 135].map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            onClick={() => setStampWidth(size)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold cursor-pointer transition-colors ${
+                              stampWidth === size
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                            }`}
+                          >
+                            {size}px
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Interactive Live Voucher Preview (5 cols) */}
+                <div className="lg:col-span-5 flex flex-col justify-between space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
+                      <span>Voucher Header Live Preview</span>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 font-extrabold px-2 py-0.5 rounded-md">Header Seal Position</span>
+                    </label>
+
+                    {/* Replica Voucher Header Box */}
+                    <div className="bg-white border-2 border-blue-600 rounded-xl p-3 shadow-xs space-y-2 select-none relative overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 min-h-[80px]">
+                        {/* Date/No Table */}
+                        <div className="border border-blue-600 rounded text-[9px] font-semibold text-blue-900 overflow-hidden bg-blue-50/30 shrink-0 w-28">
+                          <div className="flex border-b border-blue-600">
+                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">No.</span>
+                            <span className="px-1.5 py-0.5 font-mono font-bold text-slate-900">V-101</span>
+                          </div>
+                          <div className="flex border-b border-blue-600">
+                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">Date</span>
+                            <span className="px-1.5 py-0.5 font-mono text-slate-900">15/07/26</span>
+                          </div>
+                          <div className="flex">
+                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">Rs.</span>
+                            <span className="px-1.5 py-0.5 font-mono font-bold text-slate-900">₹3,500</span>
+                          </div>
+                        </div>
+
+                        {/* Middle Seal Placement */}
+                        <div className="flex-1 flex items-center justify-center px-1 overflow-visible">
+                          {stampEnabled && stampUrl ? (
+                            <img
+                              src={stampUrl}
+                              alt="Company Seal Preview"
+                              style={{
+                                width: `${stampWidth}px`,
+                                height: 'auto',
+                                maxWidth: '100%',
+                                objectFit: 'contain',
+                                transform: `rotate(${stampRotate}deg)`,
+                                opacity: stampOpacity,
+                                transition: 'all 0.15s ease-out'
+                              }}
+                            />
+                          ) : (
+                            <div className="text-[10px] font-bold text-slate-300 border border-dashed border-slate-200 rounded-lg p-2 text-center">
+                              No Seal Rendered
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right Cash Voucher Header */}
+                        <div className="text-right shrink-0">
+                          <div className="text-[8px] font-bold text-blue-800 uppercase tracking-tight">Ommax Electric Pvt Ltd</div>
+                          <div className="text-sm font-black text-blue-700 tracking-wider">CASH VOUCHER</div>
+                        </div>
+                      </div>
+
+                      {/* Line preview */}
+                      <div className="border-t border-dashed border-blue-200 pt-1.5 text-[9px] text-slate-400 flex justify-between font-mono">
+                        <span>Pay to: Rahul Sharma</span>
+                        <span>Category: Office Supplies</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-amber-50/80 border border-amber-200/70 rounded-xl text-[11px] text-amber-900 font-medium">
+                    <span className="font-extrabold text-amber-950 block mb-0.5">Seal Placement Standard:</span>
+                    Positioned cleanly in the header area between the Date/No box and the CASH VOUCHER heading for both single and batch voucher printouts.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleSaveAppSettings}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-2.5 px-6 rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <Save className="w-4 h-4 text-[#f7b944]" />
+                  Save App Settings & Seal Configuration
+                </button>
+              </div>
             </div>
 
             {/* Category Management */}

@@ -14,6 +14,11 @@ export interface AppSettings {
   currencySymbol: string; // e.g. "₹", "$", "€", "£", "AED", "SAR", "S$"
   dateFormat: string; // e.g. "DD/MM/YYYY", "YYYY-MM-DD", "MM/DD/YYYY", "DD-MMM-YYYY"
   timezone: string; // e.g. "Asia/Kolkata (IST)", "UTC", "America/New_York (EST)", "Europe/London (GMT)"
+  companyStampUrl?: string;
+  companyStampEnabled?: boolean;
+  companyStampRotate?: number; // rotation in degrees e.g. -180 to 180
+  companyStampOpacity?: number; // opacity e.g. 0.1 to 1.0
+  companyStampWidth?: number; // stamp image width in px e.g. 50 to 150
 }
 
 export interface IntegrationSettings {
