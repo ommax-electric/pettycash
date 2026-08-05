@@ -1189,59 +1189,67 @@ export default function AdminSettingsView({
                       <span className="text-[10px] bg-slate-100 text-slate-600 font-extrabold px-2 py-0.5 rounded-md">Header Seal Position</span>
                     </label>
 
-                    {/* Replica Voucher Header Box */}
-                    <div className="bg-white border-2 border-blue-600 rounded-xl p-3 shadow-xs space-y-2 select-none relative overflow-hidden">
-                      <div className="flex items-center justify-between gap-2 min-h-[80px]">
-                        {/* Date/No Table */}
-                        <div className="border border-blue-600 rounded text-[9px] font-semibold text-blue-900 overflow-hidden bg-blue-50/30 shrink-0 w-28">
-                          <div className="flex border-b border-blue-600">
-                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">No.</span>
-                            <span className="px-1.5 py-0.5 font-mono font-bold text-slate-900">V-101</span>
-                          </div>
-                          <div className="flex border-b border-blue-600">
-                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">Date</span>
-                            <span className="px-1.5 py-0.5 font-mono text-slate-900">15/07/26</span>
-                          </div>
-                          <div className="flex">
-                            <span className="bg-blue-100 px-1.5 py-0.5 font-bold border-r border-blue-600 w-8">Rs.</span>
-                            <span className="px-1.5 py-0.5 font-mono font-bold text-slate-900">₹3,500</span>
-                          </div>
-                        </div>
+                    {/* Mobile Screen Helper Banner */}
+                    <div className="sm:hidden mb-2 px-2.5 py-1.5 bg-amber-50 border border-amber-200/80 rounded-lg text-[11px] text-amber-900 font-medium flex items-center gap-1.5">
+                      <span className="text-amber-600 font-bold">📱 Note:</span>
+                      <span>Preview is scaled for voucher printing. Scroll preview horizontally or switch to desktop for full view.</span>
+                    </div>
 
-                        {/* Middle Seal Placement */}
-                        <div className="flex-1 flex items-center justify-center px-1 overflow-visible">
-                          {stampEnabled && stampUrl ? (
-                            <img
-                              src={stampUrl}
-                              alt="Company Seal Preview"
-                              style={{
-                                width: `${stampWidth}px`,
-                                height: 'auto',
-                                maxWidth: '100%',
-                                objectFit: 'contain',
-                                transform: `rotate(${stampRotate}deg)`,
-                                opacity: stampOpacity,
-                                transition: 'all 0.15s ease-out'
-                              }}
-                            />
-                          ) : (
-                            <div className="text-[10px] font-bold text-slate-300 border border-dashed border-slate-200 rounded-lg p-2 text-center">
-                              No Seal Rendered
+                    {/* Replica Voucher Header Box with overflow scroll wrapper */}
+                    <div className="w-full overflow-x-auto pb-1">
+                      <div className="min-w-[330px] bg-white border-2 border-blue-600 rounded-xl p-3 shadow-xs space-y-2 select-none relative">
+                        <div className="flex items-center justify-between gap-1.5 min-h-[80px]">
+                          {/* Date/No Table */}
+                          <div className="border border-blue-600 rounded text-[9px] font-semibold text-blue-900 overflow-hidden bg-blue-50/30 shrink-0 w-24 sm:w-28">
+                            <div className="flex border-b border-blue-600">
+                              <span className="bg-blue-100 px-1 py-0.5 font-bold border-r border-blue-600 w-7 sm:w-8">No.</span>
+                              <span className="px-1 py-0.5 font-mono font-bold text-slate-900">V-101</span>
                             </div>
-                          )}
+                            <div className="flex border-b border-blue-600">
+                              <span className="bg-blue-100 px-1 py-0.5 font-bold border-r border-blue-600 w-7 sm:w-8">Date</span>
+                              <span className="px-1 py-0.5 font-mono text-slate-900">15/07/26</span>
+                            </div>
+                            <div className="flex">
+                              <span className="bg-blue-100 px-1 py-0.5 font-bold border-r border-blue-600 w-7 sm:w-8">Rs.</span>
+                              <span className="px-1 py-0.5 font-mono font-bold text-slate-900">₹3,500</span>
+                            </div>
+                          </div>
+
+                          {/* Middle Seal Placement */}
+                          <div className="flex-1 flex items-center justify-center px-1 overflow-visible">
+                            {stampEnabled && stampUrl ? (
+                              <img
+                                src={stampUrl}
+                                alt="Company Seal Preview"
+                                style={{
+                                  width: `${stampWidth}px`,
+                                  height: 'auto',
+                                  maxWidth: '100%',
+                                  objectFit: 'contain',
+                                  transform: `rotate(${stampRotate}deg)`,
+                                  opacity: stampOpacity,
+                                  transition: 'all 0.15s ease-out'
+                                }}
+                              />
+                            ) : (
+                              <div className="text-[10px] font-bold text-slate-300 border border-dashed border-slate-200 rounded-lg p-2 text-center">
+                                No Seal Rendered
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Right Cash Voucher Header */}
+                          <div className="text-right shrink-0">
+                            <div className="text-[8px] font-bold text-blue-800 uppercase tracking-tight">Ommax Electric Pvt Ltd</div>
+                            <div className="text-xs sm:text-sm font-black text-blue-700 tracking-wider">CASH VOUCHER</div>
+                          </div>
                         </div>
 
-                        {/* Right Cash Voucher Header */}
-                        <div className="text-right shrink-0">
-                          <div className="text-[8px] font-bold text-blue-800 uppercase tracking-tight">Ommax Electric Pvt Ltd</div>
-                          <div className="text-sm font-black text-blue-700 tracking-wider">CASH VOUCHER</div>
+                        {/* Line preview */}
+                        <div className="border-t border-dashed border-blue-200 pt-1.5 text-[9px] text-slate-400 flex justify-between font-mono">
+                          <span>Pay to: Rahul Sharma</span>
+                          <span>Category: Office Supplies</span>
                         </div>
-                      </div>
-
-                      {/* Line preview */}
-                      <div className="border-t border-dashed border-blue-200 pt-1.5 text-[9px] text-slate-400 flex justify-between font-mono">
-                        <span>Pay to: Rahul Sharma</span>
-                        <span>Category: Office Supplies</span>
                       </div>
                     </div>
                   </div>
