@@ -2,7 +2,7 @@ import { Transaction, CategoryLimit, ActivityLog, User, AppSettings, Integration
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   currencySymbol: '₹',
-  dateFormat: 'DD/MM/YYYY',
+  dateFormat: 'DD-MM-YYYY',
   timezone: 'Asia/Kolkata (IST, UTC+05:30)',
   companyStampUrl: `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><circle cx='80' cy='80' r='74' fill='none' stroke='%231d4ed8' stroke-width='3.5' stroke-dasharray='7 3'/><circle cx='80' cy='80' r='66' fill='none' stroke='%231e40af' stroke-width='2.5'/><circle cx='80' cy='80' r='48' fill='none' stroke='%231e40af' stroke-width='1.5'/><path id='c1' fill='none' d='M 28,80 A 52,52 0 1,1 132,80' /><text fill='%231e40af' font-size='9.5' font-weight='800' font-family='sans-serif' letter-spacing='1.2'><textPath href='%23c1' startOffset='50%' text-anchor='middle'>OMMAX ELECTRIC PVT LTD</textPath></text><path id='c2' fill='none' d='M 132,80 A 52,52 0 1,1 28,80' /><text fill='%231e40af' font-size='8.5' font-weight='700' font-family='sans-serif' letter-spacing='1'><textPath href='%23c2' startOffset='50%' text-anchor='middle'>★ APPROVED & AUDITED ★</textPath></text><polygon points='80,60 85,74 100,74 88,83 93,98 80,89 67,98 72,83 60,74 75,74' fill='%232563eb'/><text x='80' y='110' text-anchor='middle' fill='%231e40af' font-size='9' font-weight='900' font-family='sans-serif' letter-spacing='0.5'>PETTY CASH</text></svg>`,
   companyStampEnabled: true,
@@ -35,7 +35,15 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   emailSubjectInward: '[Petty Cash Alert] Inward Deposit #{voucher_id} - {amount} ({category})',
   emailBodyInward: 'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.',
   emailSubjectInwardEdit: '[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}',
-  emailBodyInwardEdit: 'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.'
+  emailBodyInwardEdit: 'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.',
+  emailSubjectRequestSubmitted: '[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}',
+  emailBodyRequestSubmitted: 'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.',
+  emailSubjectRequestApproved: '[Action Required] Claim #{voucher_id} - {amount} Approved - Issue Cash',
+  emailBodyRequestApproved: 'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.',
+  emailSubjectRequestPaid: '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued',
+  emailBodyRequestPaid: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.',
+  emailSubjectRequestRejected: '[Petty Cash Rejected] Claim #{voucher_id} - {amount}',
+  emailBodyRequestRejected: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.'
 };
 
 export const MOCK_USERS: User[] = [
@@ -44,22 +52,45 @@ export const MOCK_USERS: User[] = [
     empId: 'OEPL-101',
     fullName: 'Sarah Jenkins',
     role: 'ADMIN',
+    email: 'admin@ommaxelectric.com',
     password: 'admin123',
     avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120'
   },
   {
-    username: 'custodian',
+    username: 'manager',
     empId: 'OEPL-102',
-    fullName: 'David Vance',
-    role: 'CUSTODIAN',
-    password: 'custodian123',
+    fullName: 'Mohan K',
+    role: 'MANAGER',
+    email: 'mohan.k@ommaxelectric.com',
+    isManager: true,
+    password: 'manager123',
     avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120'
   },
   {
-    username: 'auditor',
+    username: 'custodian',
     empId: 'OEPL-103',
+    fullName: 'David Vance',
+    role: 'CUSTODIAN',
+    email: 'david.v@ommaxelectric.com',
+    password: 'custodian123',
+    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=120'
+  },
+  {
+    username: 'moorthi',
+    empId: 'OEPL-104',
+    fullName: 'Moorthi',
+    role: 'USER',
+    email: 'moorthi@ommaxelectric.com',
+    reportingTo: 'Mohan K',
+    password: 'user123',
+    avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120'
+  },
+  {
+    username: 'auditor',
+    empId: 'OEPL-105',
     fullName: 'Elena Rostova',
     role: 'AUDITOR',
+    email: 'elena.r@ommaxelectric.com',
     password: 'auditor123',
     avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=120'
   }

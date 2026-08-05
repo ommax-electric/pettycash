@@ -212,7 +212,7 @@ export function buildModernHtmlEmailFromText(
               
               <!-- Footer -->
               <p style="margin: 0; font-size: 12px; color: #94a3b8; line-height: 1.4;">
-                This is an automated notification from the Administration Department.
+                This is an automated notification from the Petty Cash Management System.
               </p>
               
             </td>

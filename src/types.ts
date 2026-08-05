@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'CUSTODIAN' | 'AUDITOR';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CUSTODIAN' | 'AUDITOR' | 'USER';
 
 export interface User {
   id?: string;
@@ -6,8 +6,11 @@ export interface User {
   empId?: string; // Employee ID
   fullName: string;
   role: UserRole;
+  email?: string; // User Email ID
   avatarUrl?: string;
   password?: string;
+  reportingTo?: string; // Username/FullName of reporting manager
+  isManager?: boolean;
 }
 
 export interface AppSettings {
@@ -46,10 +49,18 @@ export interface IntegrationSettings {
   emailBodyInward: string;
   emailSubjectInwardEdit?: string;
   emailBodyInwardEdit?: string;
+  emailSubjectRequestSubmitted?: string;
+  emailBodyRequestSubmitted?: string;
+  emailSubjectRequestApproved?: string;
+  emailBodyRequestApproved?: string;
+  emailSubjectRequestPaid?: string;
+  emailBodyRequestPaid?: string;
+  emailSubjectRequestRejected?: string;
+  emailBodyRequestRejected?: string;
 }
 
 export type TransactionType = 'IN' | 'OUT';
-export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
+export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAID';
 
 export interface EditHistoryEntry {
   timestamp: string;
@@ -78,7 +89,64 @@ export interface Transaction {
   remarks?: string;
   paymentType?: 'CASH' | 'ONLINE';
   editHistory?: EditHistoryEntry[];
+  requestedBy?: string; // Full name or username of requester
+  approverName?: string; // Full name or username of manager assigned to approve
+  approvedBy?: string; // Full name of manager who approved
+  approvedAt?: string; // Timestamp when manager approved
+  paidBy?: string; // Full name of admin/custodian who issued cash
+  paidAt?: string; // Timestamp when admin issued/marked paid
+  rejectedBy?: string; // Full name of person who rejected
+  rejectedAt?: string; // Timestamp if rejected
+  rejectionReason?: string;
 }
+
+export const formatDateToDMY = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  let str = dateStr.trim();
+  if (str.includes('T')) {
+    str = str.split('T')[0];
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [yyyy, mm, dd] = str.split('-');
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [dd, mm, yyyy] = str.split('/');
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+    return str;
+  }
+  return str;
+};
+
+export const formatISTDateTime = (isoOrDateStr?: string | null): string => {
+  if (!isoOrDateStr) return '';
+  const str = isoOrDateStr.trim();
+  if (!str.includes('T') && !str.includes(':')) {
+    return formatDateToDMY(str);
+  }
+  try {
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return str;
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    };
+    const formatted = new Intl.DateTimeFormat('en-GB', options).format(d);
+    const parts = formatted.split(', ');
+    const cleanDate = parts[0].replace(/\//g, '-');
+    const cleanTime = parts[1] ? parts[1].toUpperCase() : '';
+    return `${cleanDate} ${cleanTime} IST`;
+  } catch {
+    return str;
+  }
+};
 
 export interface CategoryLimit {
   id?: string;

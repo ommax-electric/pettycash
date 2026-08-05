@@ -148,9 +148,11 @@ export default function AdminSettingsView({
   const [userFullName, setUserFullName] = useState('');
   const [userEmpId, setUserEmpId] = useState('');
   const [userUsername, setUserUsername] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const [userPassword, setUserPassword] = useState('');
   const [showModalPassword, setShowModalPassword] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('CUSTODIAN');
+  const [userReportingTo, setUserReportingTo] = useState<string>('');
   const [userError, setUserError] = useState('');
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
   const [showPasswords, setShowPasswords] = useState<{ [username: string]: boolean }>({});
@@ -221,7 +223,11 @@ export default function AdminSettingsView({
     new: false,
     edit: false,
     inward: false,
-    inwardEdit: false
+    inwardEdit: false,
+    reqSubmitted: false,
+    reqApproved: false,
+    reqPaid: false,
+    reqRejected: false
   });
 
   const toggleSmsAccordion = (key: string) => {
@@ -298,6 +304,32 @@ export default function AdminSettingsView({
     return saved;
   });
 
+  // Approval Workflow Email Templates: Request Submitted, Approved, Paid, Rejected
+  const [emailSubjectReqSubmitted, setEmailSubjectReqSubmitted] = useState<string>(() => {
+    return integrationSettings?.emailSubjectRequestSubmitted || localStorage.getItem('petty_cash_email_subject_req_submitted') || '[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}';
+  });
+  const [emailBodyReqSubmitted, setEmailBodyReqSubmitted] = useState<string>(() => {
+    return integrationSettings?.emailBodyRequestSubmitted || localStorage.getItem('petty_cash_email_body_req_submitted') || 'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
+  });
+  const [emailSubjectReqApproved, setEmailSubjectReqApproved] = useState<string>(() => {
+    return integrationSettings?.emailSubjectRequestApproved || localStorage.getItem('petty_cash_email_subject_req_approved') || '[Action Required] Claim #{voucher_id} - {amount} Approved - Issue Cash';
+  });
+  const [emailBodyReqApproved, setEmailBodyReqApproved] = useState<string>(() => {
+    return integrationSettings?.emailBodyRequestApproved || localStorage.getItem('petty_cash_email_body_req_approved') || 'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.';
+  });
+  const [emailSubjectReqPaid, setEmailSubjectReqPaid] = useState<string>(() => {
+    return integrationSettings?.emailSubjectRequestPaid || localStorage.getItem('petty_cash_email_subject_req_paid') || '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued';
+  });
+  const [emailBodyReqPaid, setEmailBodyReqPaid] = useState<string>(() => {
+    return integrationSettings?.emailBodyRequestPaid || localStorage.getItem('petty_cash_email_body_req_paid') || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.';
+  });
+  const [emailSubjectReqRejected, setEmailSubjectReqRejected] = useState<string>(() => {
+    return integrationSettings?.emailSubjectRequestRejected || localStorage.getItem('petty_cash_email_subject_req_rejected') || '[Petty Cash Rejected] Claim #{voucher_id} - {amount}';
+  });
+  const [emailBodyReqRejected, setEmailBodyReqRejected] = useState<string>(() => {
+    return integrationSettings?.emailBodyRequestRejected || localStorage.getItem('petty_cash_email_body_req_rejected') || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.';
+  });
+
   useEffect(() => {
     if (integrationSettings) {
       setSmsEnabled(integrationSettings.smsEnabled);
@@ -325,6 +357,14 @@ export default function AdminSettingsView({
       setEmailBodyInward(integrationSettings.emailBodyInward || 'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
       setEmailSubjectInwardEdit(integrationSettings.emailSubjectInwardEdit || '[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}');
       setEmailBodyInwardEdit(integrationSettings.emailBodyInwardEdit || 'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.');
+      setEmailSubjectReqSubmitted(integrationSettings.emailSubjectRequestSubmitted || '[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}');
+      setEmailBodyReqSubmitted(integrationSettings.emailBodyRequestSubmitted || 'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.');
+      setEmailSubjectReqApproved(integrationSettings.emailSubjectRequestApproved || '[Action Required] Claim #{voucher_id} - {amount} Approved - Issue Cash');
+      setEmailBodyReqApproved(integrationSettings.emailBodyRequestApproved || 'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.');
+      setEmailSubjectReqPaid(integrationSettings.emailSubjectRequestPaid || '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued');
+      setEmailBodyReqPaid(integrationSettings.emailBodyRequestPaid || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.');
+      setEmailSubjectReqRejected(integrationSettings.emailSubjectRequestRejected || '[Petty Cash Rejected] Claim #{voucher_id} - {amount}');
+      setEmailBodyReqRejected(integrationSettings.emailBodyRequestRejected || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.');
     }
   }, [integrationSettings]);
 
@@ -359,7 +399,15 @@ export default function AdminSettingsView({
       emailSubjectInward,
       emailBodyInward,
       emailSubjectInwardEdit,
-      emailBodyInwardEdit
+      emailBodyInwardEdit,
+      emailSubjectRequestSubmitted: emailSubjectReqSubmitted,
+      emailBodyRequestSubmitted: emailBodyReqSubmitted,
+      emailSubjectRequestApproved: emailSubjectReqApproved,
+      emailBodyRequestApproved: emailBodyReqApproved,
+      emailSubjectRequestPaid: emailSubjectReqPaid,
+      emailBodyRequestPaid: emailBodyReqPaid,
+      emailSubjectRequestRejected: emailSubjectReqRejected,
+      emailBodyRequestRejected: emailBodyReqRejected
     };
 
     if (onUpdateIntegrationSettings) {
@@ -405,7 +453,15 @@ export default function AdminSettingsView({
       emailSubjectInward,
       emailBodyInward,
       emailSubjectInwardEdit,
-      emailBodyInwardEdit
+      emailBodyInwardEdit,
+      emailSubjectRequestSubmitted: emailSubjectReqSubmitted,
+      emailBodyRequestSubmitted: emailBodyReqSubmitted,
+      emailSubjectRequestApproved: emailSubjectReqApproved,
+      emailBodyRequestApproved: emailBodyReqApproved,
+      emailSubjectRequestPaid: emailSubjectReqPaid,
+      emailBodyRequestPaid: emailBodyReqPaid,
+      emailSubjectRequestRejected: emailSubjectReqRejected,
+      emailBodyRequestRejected: emailBodyReqRejected
     };
 
     if (onUpdateIntegrationSettings) {
@@ -426,6 +482,14 @@ export default function AdminSettingsView({
       localStorage.setItem('petty_cash_email_body_inward', emailBodyInward);
       localStorage.setItem('petty_cash_email_subject_inward_edit', emailSubjectInwardEdit);
       localStorage.setItem('petty_cash_email_body_inward_edit', emailBodyInwardEdit);
+      localStorage.setItem('petty_cash_email_subject_req_submitted', emailSubjectReqSubmitted);
+      localStorage.setItem('petty_cash_email_body_req_submitted', emailBodyReqSubmitted);
+      localStorage.setItem('petty_cash_email_subject_req_approved', emailSubjectReqApproved);
+      localStorage.setItem('petty_cash_email_body_req_approved', emailBodyReqApproved);
+      localStorage.setItem('petty_cash_email_subject_req_paid', emailSubjectReqPaid);
+      localStorage.setItem('petty_cash_email_body_req_paid', emailBodyReqPaid);
+      localStorage.setItem('petty_cash_email_subject_req_rejected', emailSubjectReqRejected);
+      localStorage.setItem('petty_cash_email_body_req_rejected', emailBodyReqRejected);
     }
     setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
@@ -673,9 +737,11 @@ export default function AdminSettingsView({
     setUserFullName('');
     setUserEmpId('');
     setUserUsername('');
+    setUserEmail('');
     setUserPassword('');
     setShowModalPassword(false);
     setUserRole('CUSTODIAN');
+    setUserReportingTo('');
     setUserError('');
     setIsUserModalOpen(true);
   };
@@ -685,9 +751,11 @@ export default function AdminSettingsView({
     setUserFullName(u.fullName);
     setUserEmpId(u.empId || '');
     setUserUsername(u.username);
+    setUserEmail(u.email || '');
     setUserPassword(u.password || '');
     setShowModalPassword(false);
     setUserRole(u.role);
+    setUserReportingTo(u.reportingTo || '');
     setUserError('');
     setIsUserModalOpen(true);
   };
@@ -736,16 +804,20 @@ export default function AdminSettingsView({
         username: trimmedUsername,
         empId: trimmedEmpId,
         fullName: userFullName.trim(),
+        email: userEmail.trim(),
         role: userRole,
         password: userPassword.trim() || 'user123',
+        reportingTo: userReportingTo.trim()
       });
     } else {
       onUpdateUser({
         ...editingUser,
         fullName: userFullName.trim(),
         empId: trimmedEmpId,
+        email: userEmail.trim(),
         role: userRole,
-        password: userPassword.trim() || editingUser.password
+        password: userPassword.trim() || editingUser.password,
+        reportingTo: userReportingTo.trim()
       });
     }
 
@@ -1402,12 +1474,19 @@ export default function AdminSettingsView({
                             </h4>
                             <p className="text-xs font-mono text-slate-700 font-bold">Emp ID: {u.empId || u.username.toUpperCase()}</p>
                             <p className="text-[11px] font-mono text-slate-400">Username: {u.username}</p>
+                            {u.email && (
+                              <p className="text-[11px] font-mono text-slate-500 font-medium truncate" title={u.email}>
+                                Email: {u.email}
+                              </p>
+                            )}
                           </div>
                         </div>
 
                         <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase ${
                           u.role === 'ADMIN'
                             ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                            : u.role === 'MANAGER'
+                            ? 'bg-purple-100 text-purple-900 border border-purple-200'
                             : u.role === 'CUSTODIAN'
                             ? 'bg-blue-100 text-blue-800 border border-blue-200'
                             : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
@@ -2371,7 +2450,7 @@ export default function AdminSettingsView({
 
                               <div className="border-t border-slate-100 my-4"></div>
                               <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Administration Department.
+                                This is an automated notification from the Petty Cash Management System.
                               </p>
                             </div>
                           </div>
@@ -2521,7 +2600,7 @@ export default function AdminSettingsView({
 
                               <div className="border-t border-slate-100 my-4"></div>
                               <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Administration Department.
+                                This is an automated notification from the Petty Cash Management System.
                               </p>
                             </div>
                           </div>
@@ -2682,7 +2761,7 @@ export default function AdminSettingsView({
 
                               <div className="border-t border-slate-100 my-4"></div>
                               <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Administration Department.
+                                This is an automated notification from the Petty Cash Management System.
                               </p>
                             </div>
                           </div>
@@ -2845,7 +2924,577 @@ export default function AdminSettingsView({
 
                               <div className="border-t border-slate-100 my-4"></div>
                               <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Administration Department.
+                                This is an automated notification from the Petty Cash Management System.
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 6: CLAIM REQUEST SUBMITTED TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('reqSubmitted')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">6. Claim Submitted (Pending Approval) Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Approval Manager when a custodian submits a new petty cash claim</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      {openEmailAccordions.reqSubmitted ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.reqSubmitted && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                            <button
+                              key={`req-sub-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyReqSubmitted(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectReqSubmitted}
+                            onChange={(e) => setEmailSubjectReqSubmitted(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyReqSubmitted}
+                            onChange={(e) => setEmailBodyReqSubmitted(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectReqSubmitted, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyReqSubmitted, appSettings.currencySymbol, false);
+                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                Claim Submitted HTML Email Card Preview
+                              </span>
+                            </div>
+
+                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
+                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
+                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-sans font-bold">
+                                  Pending Approval
+                                </span>
+                              </div>
+
+                              <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                                  Petty Cash Claim Pending Approval
+                                </h3>
+                                <div className="text-xs font-semibold text-slate-500 mt-1">
+                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                </div>
+                                <div className="w-11 h-1 bg-amber-500 rounded-full mt-2.5 mb-4"></div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {previewBlocks.map((block, idx) => {
+                                  if (block.type === 'callout' && block.lines) {
+                                    return (
+                                      <div key={`req-sub-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-amber-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
+                                        {block.lines.map((line, lIdx) => (
+                                          <div key={`rsline-${lIdx}`}>
+                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
+                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-amber-700 font-bold' : 'text-slate-700 font-medium'}>
+                                              {line.value}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }
+                                  if (block.type === 'balance') {
+                                    const line = block.lines ? block.lines[0] : null;
+                                    return (
+                                      <div key={`req-sub-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
+                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
+                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <p key={`req-sub-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                                      {block.text}
+                                    </p>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="border-t border-slate-100 my-4"></div>
+                              <p className="text-[11px] text-slate-400 leading-normal">
+                                This is an automated notification from the Petty Cash Management System.
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 7: CLAIM APPROVED (READY FOR PAYMENT) TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('reqApproved')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">7. Claim Approved (Ready for Payment) Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Finance Admin & Claimant when a claim is approved by Manager</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      {openEmailAccordions.reqApproved ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.reqApproved && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{approved_by}', '{date}', '{remarks}', '{balance}'].map((tag) => (
+                            <button
+                              key={`req-app-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyReqApproved(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-blue-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectReqApproved}
+                            onChange={(e) => setEmailSubjectReqApproved(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyReqApproved}
+                            onChange={(e) => setEmailBodyReqApproved(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectReqApproved, appSettings.currencySymbol, false)
+                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                        const previewBodyRaw = substituteSampleTags(emailBodyReqApproved, appSettings.currencySymbol, false)
+                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Claim Approved HTML Email Card Preview (Manager / Admin View)
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-semibold text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/60">
+                                🔒 Balance hidden automatically for Claimant
+                              </span>
+                            </div>
+
+                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
+                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
+                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                                <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-sans font-bold">
+                                  Action Required: Issue Cash
+                                </span>
+                              </div>
+
+                              <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                                  Claim Approved & Ready for Payment
+                                </h3>
+                                <div className="text-xs font-semibold text-slate-500 mt-1">
+                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                </div>
+                                <div className="w-11 h-1 bg-blue-600 rounded-full mt-2.5 mb-4"></div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {previewBlocks.map((block, idx) => {
+                                  if (block.type === 'callout' && block.lines) {
+                                    return (
+                                      <div key={`req-app-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-blue-600 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
+                                        {block.lines.map((line, lIdx) => (
+                                          <div key={`raline-${lIdx}`}>
+                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
+                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-blue-700 font-bold' : 'text-slate-700 font-medium'}>
+                                              {line.value}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }
+                                  if (block.type === 'balance') {
+                                    const line = block.lines ? block.lines[0] : null;
+                                    return (
+                                      <div key={`req-app-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
+                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
+                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <p key={`req-app-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                                      {block.text}
+                                    </p>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="border-t border-slate-100 my-4"></div>
+                              <p className="text-[11px] text-slate-400 leading-normal">
+                                This is an automated notification from the Petty Cash Management System.
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 8: CLAIM DISBURSED & PAID TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('reqPaid')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">8. Claim Disbursed & Paid Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Claimant, Manager & Admin when cash is issued and marked as PAID</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      {openEmailAccordions.reqPaid ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.reqPaid && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{paid_by}', '{approved_by}', '{date}', '{balance}'].map((tag) => (
+                            <button
+                              key={`req-paid-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyReqPaid(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectReqPaid}
+                            onChange={(e) => setEmailSubjectReqPaid(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyReqPaid}
+                            onChange={(e) => setEmailBodyReqPaid(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectReqPaid, appSettings.currencySymbol, false)
+                          .replace(/\{paid_by\}/g, 'Anita (Admin)')
+                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                        const previewBodyRaw = substituteSampleTags(emailBodyReqPaid, appSettings.currencySymbol, false)
+                          .replace(/\{paid_by\}/g, 'Anita (Admin)')
+                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Payment Disbursed HTML Email Card Preview (Manager / Admin View)
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60">
+                                🔒 Balance hidden automatically for Claimant
+                              </span>
+                            </div>
+
+                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
+                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
+                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-sans font-bold">
+                                  Cash Disbursed
+                                </span>
+                              </div>
+
+                              <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                                  Petty Cash Issued & Paid
+                                </h3>
+                                <div className="text-xs font-semibold text-slate-500 mt-1">
+                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                </div>
+                                <div className="w-11 h-1 bg-emerald-500 rounded-full mt-2.5 mb-4"></div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {previewBlocks.map((block, idx) => {
+                                  if (block.type === 'callout' && block.lines) {
+                                    return (
+                                      <div key={`req-paid-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-emerald-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
+                                        {block.lines.map((line, lIdx) => (
+                                          <div key={`rpline-${lIdx}`}>
+                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
+                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-emerald-700 font-bold' : 'text-slate-700 font-medium'}>
+                                              {line.value}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }
+                                  if (block.type === 'balance') {
+                                    const line = block.lines ? block.lines[0] : null;
+                                    return (
+                                      <div key={`req-paid-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
+                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
+                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <p key={`req-paid-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                                      {block.text}
+                                    </p>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="border-t border-slate-100 my-4"></div>
+                              <p className="text-[11px] text-slate-400 leading-normal">
+                                This is an automated notification from the Petty Cash Management System.
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 9: CLAIM REJECTED TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('reqRejected')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">9. Claim Rejected Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Claimant when a request is rejected by Manager/Admin</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      {openEmailAccordions.reqRejected ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.reqRejected && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{rejected_by}', '{remarks}', '{date}'].map((tag) => (
+                            <button
+                              key={`req-rej-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyReqRejected(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-rose-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectReqRejected}
+                            onChange={(e) => setEmailSubjectReqRejected(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyReqRejected}
+                            onChange={(e) => setEmailBodyReqRejected(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectReqRejected, appSettings.currencySymbol, false)
+                          .replace(/\{rejected_by\}/g, 'Parthiban (Manager)');
+                        const previewBodyRaw = substituteSampleTags(emailBodyReqRejected, appSettings.currencySymbol, false)
+                          .replace(/\{rejected_by\}/g, 'Parthiban (Manager)');
+                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                Claim Rejected HTML Email Card Preview
+                              </span>
+                            </div>
+
+                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
+                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
+                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
+                                <span className="text-[10px] bg-rose-50 text-rose-700 px-2 py-0.5 rounded-md font-sans font-bold">
+                                  Request Rejected
+                                </span>
+                              </div>
+
+                              <div>
+                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                                  Petty Cash Claim Rejected
+                                </h3>
+                                <div className="text-xs font-semibold text-slate-500 mt-1">
+                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                </div>
+                                <div className="w-11 h-1 bg-rose-500 rounded-full mt-2.5 mb-4"></div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {previewBlocks.map((block, idx) => {
+                                  if (block.type === 'callout' && block.lines) {
+                                    return (
+                                      <div key={`req-rej-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-rose-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
+                                        {block.lines.map((line, lIdx) => (
+                                          <div key={`rrline-${lIdx}`}>
+                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
+                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-rose-700 font-bold' : 'text-slate-700 font-medium'}>
+                                              {line.value}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  }
+                                  if (block.type === 'balance') {
+                                    const line = block.lines ? block.lines[0] : null;
+                                    return (
+                                      <div key={`req-rej-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
+                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
+                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <p key={`req-rej-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                                      {block.text}
+                                    </p>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="border-t border-slate-100 my-4"></div>
+                              <p className="text-[11px] text-slate-400 leading-normal">
+                                This is an automated notification from the Petty Cash Management System.
                               </p>
                             </div>
                           </div>
@@ -3176,6 +3825,17 @@ export default function AdminSettingsView({
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="e.g. ramesh@ommaxelectric.com"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
                 <div className="relative">
                   <input
@@ -3204,9 +3864,31 @@ export default function AdminSettingsView({
                   className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold"
                 >
                   <option value="CUSTODIAN">User / Petty Cash Custodian</option>
+                  <option value="MANAGER">Manager (Approver)</option>
                   <option value="ADMIN">System Administrator</option>
                   <option value="AUDITOR">Auditor</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Reporting To (Approval Manager)</label>
+                <select
+                  value={userReportingTo}
+                  onChange={(e) => setUserReportingTo(e.target.value)}
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold text-slate-800"
+                >
+                  <option value="">-- Direct Admin / No Manager Assigned --</option>
+                  {users
+                    .filter(u => u.username !== userUsername)
+                    .map(u => (
+                      <option key={u.username} value={u.fullName}>
+                        {u.fullName} ({u.role})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Petty cash claims raised by this user will be routed to this person for authorization.
+                </p>
               </div>
 
               <div className="pt-2 flex justify-end gap-2">

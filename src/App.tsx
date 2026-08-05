@@ -5,6 +5,7 @@ import {
   LayoutDashboard, 
   ArrowDownCircle, 
   ArrowUpCircle, 
+  CheckCircle2,
   FileText, 
   Settings, 
   ShieldAlert, 
@@ -23,10 +24,11 @@ import { sendSmsNotification, sendEmailNotification } from './services/notificat
 import LoginScreen from './components/LoginScreen';
 import DashboardView from './components/DashboardView';
 import RegisterView from './components/RegisterView';
+import ApprovalsView from './components/ApprovalsView';
 import SettingsView from './components/SettingsView';
 import AdminSettingsView from './components/AdminSettingsView';
 
-type NavigationTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'SETTINGS' | 'ADMIN_SETTINGS';
+type NavigationTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS' | 'SETTINGS' | 'ADMIN_SETTINGS';
 
 const getInitials = (name: string) => {
   if (!name) return '';
@@ -43,6 +45,8 @@ const getActiveTabClass = (tabId: NavigationTab) => {
       return 'bg-emerald-600 text-white shadow-md shadow-emerald-950/20';
     case 'OUTWARD':
       return 'bg-rose-600 text-white shadow-md shadow-rose-950/20';
+    case 'APPROVALS':
+      return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
     case 'SETTINGS':
       return 'bg-slate-600 text-white shadow-md shadow-slate-950/20';
     case 'ADMIN_SETTINGS':
@@ -213,6 +217,14 @@ export default function App() {
                 if (merged.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', merged.emailBodyEdit);
                 if (merged.emailSubjectInward) localStorage.setItem('petty_cash_email_subject_inward', merged.emailSubjectInward);
                 if (merged.emailBodyInward) localStorage.setItem('petty_cash_email_body_inward', merged.emailBodyInward);
+                if (merged.emailSubjectRequestSubmitted) localStorage.setItem('petty_cash_email_subject_req_submitted', merged.emailSubjectRequestSubmitted);
+                if (merged.emailBodyRequestSubmitted) localStorage.setItem('petty_cash_email_body_req_submitted', merged.emailBodyRequestSubmitted);
+                if (merged.emailSubjectRequestApproved) localStorage.setItem('petty_cash_email_subject_req_approved', merged.emailSubjectRequestApproved);
+                if (merged.emailBodyRequestApproved) localStorage.setItem('petty_cash_email_body_req_approved', merged.emailBodyRequestApproved);
+                if (merged.emailSubjectRequestPaid) localStorage.setItem('petty_cash_email_subject_req_paid', merged.emailSubjectRequestPaid);
+                if (merged.emailBodyRequestPaid) localStorage.setItem('petty_cash_email_body_req_paid', merged.emailBodyRequestPaid);
+                if (merged.emailSubjectRequestRejected) localStorage.setItem('petty_cash_email_subject_req_rejected', merged.emailSubjectRequestRejected);
+                if (merged.emailBodyRequestRejected) localStorage.setItem('petty_cash_email_body_req_rejected', merged.emailBodyRequestRejected);
               }
             });
           }
@@ -368,12 +380,17 @@ export default function App() {
     setTransactions(updatedTxnsList);
     setDoc(doc(db, 'transactions', newTxnId), newTxn).catch(e => console.warn(e));
 
-    addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
+    if (newTxn.status === 'PENDING') {
+      addLog('TXN_REQUEST', `User "${currentUser.fullName}" requested petty cash voucher ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} for ${newTxn.merchant} (${newTxn.category})`);
+    } else {
+      addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
+    }
 
     // Dispatch automated SMS & Email alerts
-    const notificationType = newTxn.type === 'IN' ? 'INWARD' : 'NEW';
-    sendSmsNotification(notificationType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
-    sendEmailNotification(notificationType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
+    const smsType = newTxn.type === 'IN' ? 'INWARD' : 'NEW';
+    const emailType = newTxn.type === 'IN' ? 'INWARD' : (newTxn.status === 'PENDING' ? 'REQUEST_SUBMITTED' : 'NEW');
+    sendSmsNotification(smsType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
+    sendEmailNotification(emailType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings, users);
   };
 
   // Handler: Update transaction (for edits)
@@ -499,31 +516,125 @@ export default function App() {
     addLog('TXN_DELETE', `Deleted transaction reference ${targetTxn.reference} of ${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)}`);
   };
 
-  // Handler: Admin Claims Authorization
-  const handleUpdateStatus = (id: string, status: TransactionStatus) => {
-    if (!currentUser || currentUser.role !== 'ADMIN') return;
+  const isRoleTitleName = (name: string | undefined | null): boolean => {
+    if (!name) return true;
+    const s = name.trim().toLowerCase();
+    const genericTerms = [
+      'administrator', 'admin', 'manager', 'custodian', 'auditor', 'user',
+      'administrator / manager', 'manager / admin', 'custodian / admin',
+      'admin user', 'manager user', 'custodian user', 'auditor user', 'role'
+    ];
+    return genericTerms.some(term => s === term || s === term + 's');
+  };
 
-    setTransactions(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-    updateDoc(doc(db, 'transactions', id), { status }).catch(e => console.warn(e));
+  const resolveRealPersonName = (name: string | undefined | null, roleCategory: 'ADMIN' | 'MANAGER' | 'CUSTODIAN'): string => {
+    if (name && !isRoleTitleName(name)) return name;
+    if (currentUser?.fullName && !isRoleTitleName(currentUser.fullName)) return currentUser.fullName;
+    if (roleCategory === 'ADMIN') {
+      const found = users.find(u => u.role === 'ADMIN');
+      if (found?.fullName) return found.fullName;
+    } else if (roleCategory === 'MANAGER') {
+      const found = users.find(u => u.role === 'MANAGER');
+      if (found?.fullName) return found.fullName;
+    }
+    if (roleCategory === 'ADMIN') return 'Sarah Jenkins';
+    if (roleCategory === 'CUSTODIAN') return 'David Vance';
+    return 'Mohan K';
+  };
 
+  // Workflow Handler: Manager / Admin Approval
+  const handleApproveRequest = (id: string, approverName: string) => {
+    if (!currentUser) return;
     const targetTxn = transactions.find(t => t.id === id);
-    if (targetTxn) {
-      addLog(
-        status === 'APPROVED' ? 'TXN_APPROVE' : 'TXN_REJECT',
-        `${status === 'APPROVED' ? 'Approved' : 'Rejected'} cash voucher reference ${targetTxn.reference} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)})`
-      );
+    if (!targetTxn) return;
 
-      if (status === 'APPROVED' && targetTxn.type === 'OUT') {
-        const updatedCats = categories.map(cat => {
-          if (cat.name === targetTxn.category) {
-            const newSpent = cat.spent + targetTxn.amount;
-            updateDoc(doc(db, 'categories', String(cat.id)), { spent: newSpent }).catch(e => console.warn(e));
-            return { ...cat, spent: newSpent };
-          }
-          return cat;
-        });
-        setCategories(updatedCats);
+    const realApprover = resolveRealPersonName(approverName, currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER');
+    const now = new Date().toISOString();
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      status: 'APPROVED',
+      approvedAt: now,
+      approverName: realApprover,
+      approvedBy: realApprover
+    };
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('TXN_APPROVE', `Approved petty cash request ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)} for ${updatedTxn.merchant}`);
+
+    sendEmailNotification('REQUEST_APPROVED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+  };
+
+  // Workflow Handler: Admin / Custodian Issue Cash & Mark Paid
+  const handlePayRequest = (id: string, paidBy: string) => {
+    if (!currentUser) return;
+    const targetTxn = transactions.find(t => t.id === id);
+    if (!targetTxn) return;
+
+    const realPayer = resolveRealPersonName(paidBy, currentUser.role === 'CUSTODIAN' ? 'CUSTODIAN' : 'ADMIN');
+    const now = new Date().toISOString();
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      status: 'PAID',
+      paidAt: now,
+      paidBy: realPayer
+    };
+
+    // Deduct from Category limit / add to spent
+    const updatedCats = categories.map(cat => {
+      if (cat.name === targetTxn.category) {
+        const newSpent = cat.spent + targetTxn.amount;
+        updateDoc(doc(db, 'categories', String(cat.id)), { spent: newSpent }).catch(e => console.warn(e));
+        return { ...cat, spent: newSpent };
       }
+      return cat;
+    });
+    setCategories(updatedCats);
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('TXN_PAY', `Issued cash payment for voucher ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)} to ${updatedTxn.merchant}`);
+
+    sendEmailNotification('REQUEST_PAID', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+  };
+
+  // Workflow Handler: Rejection
+  const handleRejectRequest = (id: string, reason: string, rejectedBy: string) => {
+    if (!currentUser) return;
+    const targetTxn = transactions.find(t => t.id === id);
+    if (!targetTxn) return;
+
+    const realRejecter = resolveRealPersonName(rejectedBy, currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER');
+    const now = new Date().toISOString();
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      status: 'REJECTED',
+      rejectedAt: now,
+      rejectedBy: realRejecter,
+      rejectionReason: reason
+    };
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('TXN_REJECT', `Rejected petty cash request ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)}: ${reason}`);
+
+    sendEmailNotification('REQUEST_REJECTED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+  };
+
+  // General Status Update Handler
+  const handleUpdateStatus = (id: string, status: TransactionStatus) => {
+    if (status === 'APPROVED') {
+      handleApproveRequest(id, currentUser?.fullName || '');
+    } else if (status === 'PAID') {
+      handlePayRequest(id, currentUser?.fullName || '');
+    } else if (status === 'REJECTED') {
+      handleRejectRequest(id, 'Status updated by admin', currentUser?.fullName || '');
+    } else {
+      setTransactions(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+      updateDoc(doc(db, 'transactions', id), { status }).catch(e => console.warn(e));
     }
   };
 
@@ -730,25 +841,70 @@ export default function App() {
     }
   };
 
+  // Calculate Pending Approvals Count for Badging
+  const pendingApprovalsCount = React.useMemo(() => {
+    if (!currentUser) return 0;
+    return transactions.filter(t => {
+      if (t.type !== 'OUT') return false;
+      if (currentUser.role === 'ADMIN') {
+        return t.status === 'PENDING' || t.status === 'APPROVED';
+      }
+      const reqUser = users.find(u => 
+        u.fullName.toLowerCase() === (t.requestedBy || '').toLowerCase() ||
+        u.username.toLowerCase() === (t.requestedBy || '').toLowerCase()
+      );
+      const isReportingToMe = reqUser?.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() ||
+                              reqUser?.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase();
+      return t.status === 'PENDING' && (isReportingToMe || currentUser.isManager);
+    }).length;
+  }, [transactions, currentUser, users]);
+
+  // Dynamic Navigation Tabs per Role
+  const roleTabs = React.useMemo(() => {
+    if (!currentUser) return [];
+
+    const isUserAdmin = currentUser.role === 'ADMIN';
+    const isUserCustodian = currentUser.role === 'CUSTODIAN';
+
+    const tabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
+      { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard }
+    ];
+
+    // Inward is only shown for Admin & Custodian (Requirement #4)
+    if (isUserAdmin || isUserCustodian) {
+      tabs.push({ id: 'INWARD', label: 'Inward', icon: ArrowDownCircle });
+    }
+
+    // Outward is shown for all users
+    tabs.push({ id: 'OUTWARD', label: 'Outward', icon: ArrowUpCircle });
+
+    // Approvals tab for Managers, Admins, Custodians or users with subordinates
+    const isManagerOrAdmin = isUserAdmin || isUserCustodian || currentUser.isManager || users.some(u => u.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() || u.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase());
+
+    if (isManagerOrAdmin) {
+      tabs.push({ 
+        id: 'APPROVALS', 
+        label: 'Approvals', 
+        icon: CheckCircle2,
+        badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined
+      });
+    }
+
+    // Settings
+    tabs.push({ id: 'SETTINGS', label: 'Settings', icon: Settings });
+
+    // Admin Settings
+    if (isUserAdmin) {
+      tabs.push({ id: 'ADMIN_SETTINGS', label: 'Admin Settings', icon: ShieldAlert });
+    }
+
+    return tabs;
+  }, [currentUser, users, pendingApprovalsCount]);
+
   // Guard: Redirect to secure login
   if (!currentUser) {
     return <LoginScreen onLoginSuccess={handleLogin} usersList={users} />;
   }
-
-  const roleTabs = currentUser ? (
-    currentUser.role === 'ADMIN' ? [
-      { id: 'DASHBOARD' as const, label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'INWARD' as const, label: 'Inward', icon: ArrowDownCircle },
-      { id: 'OUTWARD' as const, label: 'Outward', icon: ArrowUpCircle },
-      { id: 'SETTINGS' as const, label: 'Settings', icon: Settings },
-      { id: 'ADMIN_SETTINGS' as const, label: 'Admin Settings', icon: ShieldAlert },
-    ] : [
-      { id: 'DASHBOARD' as const, label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'INWARD' as const, label: 'Inward', icon: ArrowDownCircle },
-      { id: 'OUTWARD' as const, label: 'Outward', icon: ArrowUpCircle },
-      { id: 'SETTINGS' as const, label: 'Settings', icon: Settings },
-    ]
-  ) : [];
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-800">
@@ -775,10 +931,17 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
                 >
-                  <IconComponent className="w-4 h-4 shrink-0" />
-                  {tab.label}
+                  <div className="flex items-center gap-3">
+                    <IconComponent className="w-4 h-4 shrink-0" />
+                    <span>{tab.label}</span>
+                  </div>
+                  {tab.badge !== undefined && tab.badge > 0 && (
+                    <span className="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-xs">
+                      {tab.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -824,9 +987,12 @@ export default function App() {
           </div>
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="text-slate-400 hover:text-white transition-all cursor-pointer"
+            className="text-slate-400 hover:text-white transition-all cursor-pointer relative"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {pendingApprovalsCount > 0 && !isMobileMenuOpen && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping" />
+            )}
           </button>
         </header>
 
@@ -880,10 +1046,17 @@ export default function App() {
                         <button
                           key={tab.id}
                           onClick={() => { setActiveTab(tab.id); setIsMobileMenuOpen(false); }}
-                          className={`w-full flex items-center gap-3 py-3 px-4 rounded-xl text-xs font-bold transition-all text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
+                          className={`w-full flex items-center justify-between py-3 px-4 rounded-xl text-xs font-bold transition-all text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
                         >
-                          <IconComponent className="w-4.5 h-4.5 shrink-0" />
-                          {tab.label}
+                          <div className="flex items-center gap-3">
+                            <IconComponent className="w-4.5 h-4.5 shrink-0" />
+                            <span>{tab.label}</span>
+                          </div>
+                          {tab.badge !== undefined && tab.badge > 0 && (
+                            <span className="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-xs">
+                              {tab.badge}
+                            </span>
+                          )}
                         </button>
                       );
                     })}
@@ -963,6 +1136,18 @@ export default function App() {
                   appSettings={appSettings}
                 />
               )}
+              {activeTab === 'APPROVALS' && (
+                <ApprovalsView 
+                  transactions={transactions}
+                  categories={categories}
+                  currentUser={currentUser}
+                  users={users}
+                  onApproveRequest={handleApproveRequest}
+                  onPayRequest={handlePayRequest}
+                  onRejectRequest={handleRejectRequest}
+                  appSettings={appSettings}
+                />
+              )}
               {activeTab === 'SETTINGS' && (
                 <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
               )}
@@ -971,6 +1156,8 @@ export default function App() {
                   currentUser={currentUser}
                   appSettings={appSettings}
                   onUpdateAppSettings={handleUpdateAppSettings}
+                  integrationSettings={integrationSettings}
+                  onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
                   users={users}
                   onAddUser={handleAddUser}
                   onUpdateUser={handleUpdateUser}
@@ -1001,12 +1188,14 @@ export default function App() {
               {activeTab === 'DASHBOARD' && <LayoutDashboard className="w-5 h-5 text-sky-600" />}
               {activeTab === 'INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
               {activeTab === 'OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
+              {activeTab === 'APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
               {activeTab === 'SETTINGS' && <Settings className="w-5 h-5 text-slate-600" />}
               {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-5 h-5 text-[#f7b944]" />}
               <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
                 {activeTab === 'DASHBOARD' && 'Financial Overview'}
                 {activeTab === 'INWARD' && 'Inward Cash Registry'}
                 {activeTab === 'OUTWARD' && 'Outward Expenses Registry'}
+                {activeTab === 'APPROVALS' && 'Petty Cash Approvals Console'}
                 {activeTab === 'SETTINGS' && 'User Settings & Security'}
                 {activeTab === 'ADMIN_SETTINGS' && 'Administrator Control Node'}
               </h1>
@@ -1015,6 +1204,7 @@ export default function App() {
               {activeTab === 'DASHBOARD' && 'Overview of inflows, record disbursements, and monitor petty cash balances.'}
               {activeTab === 'INWARD' && 'Log and record of deposits.'}
               {activeTab === 'OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
+              {activeTab === 'APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
               {activeTab === 'SETTINGS' && 'Manage password credentials, workspace preferences'}
               {activeTab === 'ADMIN_SETTINGS' && 'Configure app settings, user credentials, system audit timeline, and data operations.'}
             </p>
@@ -1064,6 +1254,18 @@ export default function App() {
                   onUpdateTransaction={handleUpdateTransaction}
                   onDeleteTransaction={handleDeleteTransaction}
                   forceType="OUT"
+                  appSettings={appSettings}
+                />
+              )}
+              {activeTab === 'APPROVALS' && (
+                <ApprovalsView 
+                  transactions={transactions}
+                  categories={categories}
+                  currentUser={currentUser}
+                  users={users}
+                  onApproveRequest={handleApproveRequest}
+                  onPayRequest={handlePayRequest}
+                  onRejectRequest={handleRejectRequest}
                   appSettings={appSettings}
                 />
               )}

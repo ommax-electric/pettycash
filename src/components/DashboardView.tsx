@@ -39,6 +39,21 @@ export default function DashboardView({ transactions, categories, currentUser, o
   const symbol = appSettings?.currencySymbol || '₹';
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
 
+  const isStandardUser = currentUser.role === 'USER';
+
+  // Filter transactions for standard users to only show their own requests
+  const visibleTransactions = React.useMemo(() => {
+    if (!isStandardUser) return transactions;
+    const uName = (currentUser.fullName || '').toLowerCase();
+    const uId = (currentUser.username || '').toLowerCase();
+    return transactions.filter(t => {
+      const recBy = (t.recordedBy || '').toLowerCase();
+      const reqBy = (t.requestedBy || '').toLowerCase();
+      const merch = (t.merchant || '').toLowerCase();
+      return recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
+    });
+  }, [transactions, currentUser, isStandardUser]);
+
   // 1. Calculate actual current year and dynamic available years from transactions
   const actualCurrentYear = new Date().getFullYear().toString();
 
@@ -46,7 +61,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
     const yearsSet = new Set<string>();
     yearsSet.add(actualCurrentYear);
 
-    transactions.forEach(t => {
+    visibleTransactions.forEach(t => {
       if (t.date && t.date.length >= 4) {
         const y = t.date.split('-')[0];
         if (/^\d{4}$/.test(y)) {
@@ -56,73 +71,89 @@ export default function DashboardView({ transactions, categories, currentUser, o
     });
 
     return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a));
-  }, [transactions, actualCurrentYear]);
+  }, [visibleTransactions, actualCurrentYear]);
 
   const [selectedYear, setSelectedYear] = React.useState<string>(actualCurrentYear);
 
   // Fallback to actualCurrentYear if selectedYear is not present
   const effectiveYear = availableYears.includes(selectedYear) ? selectedYear : actualCurrentYear;
 
-  // 2. Calculations based on APPROVED transactions
-  // Overall Deposit (for selected year)
-  const overallDepositSelectedYear = transactions
-    .filter(t => t.type === 'IN' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear))
+  // Helper function to check if a transaction is completed (APPROVED or PAID)
+  const isCompleted = (status?: string) => status === 'APPROVED' || status === 'PAID';
+
+  // 2. Calculations based on transactions
+  // Overall Deposit (for selected year) - Admin/Custodian only
+  const overallDepositSelectedYear = visibleTransactions
+    .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Overall Expenses (for selected year)
-  const overallExpensesSelectedYear = transactions
-    .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear))
+  // Overall Expenses / User Total Paid Expenses (for selected year)
+  const overallExpensesSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const cashExpensesSelectedYear = transactions
-    .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
+  const cashExpensesSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const onlineExpensesSelectedYear = transactions
-    .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
+  const onlineExpensesSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Cash on hand accumulated up to the end of selected year (since balance carries forward)
-  const approvedInflowUpToSelectedYear = transactions
-    .filter(t => t.type === 'IN' && t.status === 'APPROVED' && t.date && t.date <= `${effectiveYear}-12-31`)
+  // User pending requests (for standard users)
+  const userPendingSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && t.status === 'PENDING' && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const approvedOutflowCashUpToSelectedYear = transactions
-    .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
+  const userPendingCount = visibleTransactions
+    .filter(t => t.type === 'OUT' && t.status === 'PENDING' && t.date.startsWith(effectiveYear)).length;
+
+  // User rejected requests
+  const userRejectedSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && t.status === 'REJECTED' && t.date.startsWith(effectiveYear))
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // Cash on hand accumulated up to the end of selected year
+  const approvedInflowUpToSelectedYear = visibleTransactions
+    .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date && t.date <= `${effectiveYear}-12-31`)
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const approvedOutflowCashUpToSelectedYear = visibleTransactions
+    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
     .reduce((sum, t) => sum + t.amount, 0);
 
   const cashOnHandSelectedYear = approvedInflowUpToSelectedYear - approvedOutflowCashUpToSelectedYear;
 
   // Avg. Expenses for the selected year
-  const selectedYearExpenses = transactions
-    .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear));
+  const selectedYearExpenses = visibleTransactions
+    .filter(t => t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear));
   const avgExpensesSelectedYear = selectedYearExpenses.length > 0
     ? selectedYearExpenses.reduce((sum, t) => sum + t.amount, 0) / selectedYearExpenses.length
     : 0;
 
-  // Monthly trend data for the selected year (strict calculation, no mock fallback)
+  // Monthly trend data for the selected year
   const monthlyTrendData = React.useMemo(() => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return monthNames.map((m, idx) => {
       const monthStr = String(idx + 1).padStart(2, '0');
       const prefix = `${effectiveYear}-${monthStr}`;
-      const inflow = transactions
-        .filter(t => t.type === 'IN' && t.status === 'APPROVED' && t.date && t.date.startsWith(prefix))
+      const inflow = visibleTransactions
+        .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
-      const outflow = transactions
-        .filter(t => t.type === 'OUT' && t.status === 'APPROVED' && t.date && t.date.startsWith(prefix))
+      const outflow = visibleTransactions
+        .filter(t => t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
       return { month: m, inflow, outflow };
     });
-  }, [transactions, effectiveYear]);
+  }, [visibleTransactions, effectiveYear]);
 
-  // Format Category Spent data for Pie Chart (for the selected year, outward categories only)
+  // Format Category Spent data for Pie Chart
   const categoryChartData = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => ({
       name: cat.name,
-      value: transactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear))
+      value: visibleTransactions
+        .filter(t => t.category === cat.name && t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0),
       color: cat.color
     })).filter(data => data.value > 0);
@@ -132,12 +163,12 @@ export default function DashboardView({ transactions, categories, currentUser, o
     { name: 'No Expenses', value: 1, color: '#cbd5e1' }
   ];
 
-  // Dynamic calculations for progress bars (for the selected year, outward categories sorted by spent descending)
+  // Dynamic calculations for progress bars
   const computedCategories = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => {
-      const currentSpent = transactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && t.status === 'APPROVED' && t.date.startsWith(effectiveYear))
+      const currentSpent = visibleTransactions
+        .filter(t => t.category === cat.name && t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0);
       return {
         ...cat,
@@ -146,7 +177,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
     })
     .sort((a, b) => b.spent - a.spent);
 
-  const recentTransactions = [...transactions]
+  const recentTransactions = [...visibleTransactions]
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
     .slice(0, 5);
 
@@ -194,112 +225,222 @@ export default function DashboardView({ transactions, categories, currentUser, o
 
       {/* 4 STATS CARDS GRID - 2x2 on mobile, 4 columns on desktop */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4 col-span-1">
-        {/* CARD 1: OVERALL DEPOSIT */}
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
-        >
-          <div className="flex justify-between items-start">
-            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
-              Overall Deposit ({effectiveYear})
-            </span>
-            <span className="text-emerald-600 bg-emerald-50 p-1.5 rounded-lg shrink-0">
-              <Landmark className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight leading-none">
-              {symbol}{overallDepositSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
-              <ArrowUpRight className="w-3 h-3 text-emerald-500 shrink-0" />
-              Annual float deposits
-            </p>
-          </div>
-        </motion.div>
+        {isStandardUser ? (
+          <>
+            {/* USER CARD 1: MY PAID/APPROVED EXPENSES */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  My Expenses ({effectiveYear})
+                </span>
+                <span className="text-emerald-600 bg-emerald-50 p-1.5 rounded-lg shrink-0">
+                  <Activity className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight leading-none">
+                  {symbol}{overallExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <ArrowUpRight className="w-3 h-3 text-emerald-500 shrink-0" />
+                  Processed & paid petty cash
+                </p>
+              </div>
+            </motion.div>
 
-        {/* CARD 2: OVERALL EXPENSES */}
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
-        >
-          <div className="flex justify-between items-start">
-            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
-              Overall Expenses ({effectiveYear})
-            </span>
-            <span className="text-rose-600 bg-rose-50 p-1.5 rounded-lg shrink-0">
-              <Activity className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-black text-rose-600 tracking-tight leading-none">
-              {symbol}{overallExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <p className="text-[10px] font-semibold text-slate-500 mt-1.5 leading-snug">
-              (Cash: {symbol}{cashExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + Online: {symbol}{onlineExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-            </p>
-            <p className="text-[9px] text-slate-400 mt-1 flex items-center gap-1">
-              <ArrowDownRight className="w-3 h-3 text-rose-500 shrink-0" />
-              Annual disbursements
-            </p>
-          </div>
-        </motion.div>
+            {/* USER CARD 2: MY PENDING REQUESTS */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  My Pending Claims
+                </span>
+                <span className="text-amber-600 bg-amber-50 p-1.5 rounded-lg shrink-0 font-bold text-xs">
+                  {userPendingCount}
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-amber-600 tracking-tight leading-none">
+                  {symbol}{userPendingSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                  Awaiting manager approval
+                </p>
+              </div>
+            </motion.div>
 
-        {/* CARD 3: CASH ON HAND */}
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
-        >
-          <div className="flex justify-between items-start">
-            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
-              Cash on Hand
-            </span>
-            <span className="text-blue-600 bg-blue-50 p-1.5 rounded-lg shrink-0">
-              <Wallet className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
-              {symbol}{cashOnHandSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
-              <Clock className="w-3 h-3 text-blue-500 shrink-0" />
-              Active balance as of {effectiveYear}
-            </p>
-          </div>
-        </motion.div>
+            {/* USER CARD 3: MY REJECTED REQUESTS */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Rejected Claims
+                </span>
+                <span className="text-rose-600 bg-rose-50 p-1.5 rounded-lg shrink-0">
+                  <ArrowDownRight className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-rose-600 tracking-tight leading-none">
+                  {symbol}{userRejectedSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-rose-500 shrink-0" />
+                  Returned or rejected claims
+                </p>
+              </div>
+            </motion.div>
 
-        {/* CARD 4: AVG. EXPENSES */}
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
-        >
-          <div className="flex justify-between items-start">
-            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
-              Avg. Expense's
-            </span>
-            <span className="text-amber-600 bg-amber-50 p-1.5 rounded-lg shrink-0 font-bold text-[11px] font-mono">
-              {symbol}
-            </span>
-          </div>
-          <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight leading-none">
-              {symbol}{avgExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
-              <Activity className="w-3 h-3 text-amber-500 shrink-0" />
-              Average per expense ({effectiveYear})
-            </p>
-          </div>
-        </motion.div>
+            {/* USER CARD 4: MY AVG CLAIM */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Avg. Claim Amount
+                </span>
+                <span className="text-blue-600 bg-blue-50 p-1.5 rounded-lg shrink-0 font-bold text-[11px] font-mono">
+                  {symbol}
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight leading-none">
+                  {symbol}{avgExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-blue-500 shrink-0" />
+                  Average per claim ({effectiveYear})
+                </p>
+              </div>
+            </motion.div>
+          </>
+        ) : (
+          <>
+            {/* CARD 1: OVERALL DEPOSIT */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Overall Deposit ({effectiveYear})
+                </span>
+                <span className="text-emerald-600 bg-emerald-50 p-1.5 rounded-lg shrink-0">
+                  <Landmark className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight leading-none">
+                  {symbol}{overallDepositSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <ArrowUpRight className="w-3 h-3 text-emerald-500 shrink-0" />
+                  Annual float deposits
+                </p>
+              </div>
+            </motion.div>
+
+            {/* CARD 2: OVERALL EXPENSES */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Overall Expenses ({effectiveYear})
+                </span>
+                <span className="text-rose-600 bg-rose-50 p-1.5 rounded-lg shrink-0">
+                  <Activity className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-rose-600 tracking-tight leading-none">
+                  {symbol}{overallExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[10px] font-semibold text-slate-500 mt-1.5 leading-snug">
+                  (Cash: {symbol}{cashExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + Online: {symbol}{onlineExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1 flex items-center gap-1">
+                  <ArrowDownRight className="w-3 h-3 text-rose-500 shrink-0" />
+                  Annual disbursements
+                </p>
+              </div>
+            </motion.div>
+
+            {/* CARD 3: CASH ON HAND */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Cash on Hand
+                </span>
+                <span className="text-blue-600 bg-blue-50 p-1.5 rounded-lg shrink-0">
+                  <Wallet className="w-4 h-4" />
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
+                  {symbol}{cashOnHandSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-blue-500 shrink-0" />
+                  Active balance as of {effectiveYear}
+                </p>
+              </div>
+            </motion.div>
+
+            {/* CARD 4: AVG. EXPENSES */}
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]"
+            >
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
+                  Avg. Expense's
+                </span>
+                <span className="text-amber-600 bg-amber-50 p-1.5 rounded-lg shrink-0 font-bold text-[11px] font-mono">
+                  {symbol}
+                </span>
+              </div>
+              <div className="mt-2">
+                <p className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight leading-none">
+                  {symbol}{avgExpensesSelectedYear.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-amber-500 shrink-0" />
+                  Average per expense ({effectiveYear})
+                </p>
+              </div>
+            </motion.div>
+          </>
+        )}
       </div>
 
       {/* GROUP CONTAINER FOR CHART (60%) AND BREAKDOWN (40%) SIDE-BY-SIDE ON LARGE SCREENS */}

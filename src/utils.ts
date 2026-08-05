@@ -83,3 +83,66 @@ export const formatTimestampInTimezone = (
     return String(dateInput);
   }
 };
+
+/**
+ * Safely opens file attachments (data URLs, blob URLs, or web URLs) in a new browser tab.
+ * Browser security policies block opening raw base64 data: URLs via target="_blank" links directly.
+ * This helper converts data URLs into Object Blobs to bypass iframe/browser security restrictions.
+ */
+export const openAttachmentInNewTab = (url?: string | null, fileName?: string): void => {
+  if (!url) return;
+
+  try {
+    if (url.startsWith('data:')) {
+      const parts = url.split(',');
+      if (parts.length >= 2) {
+        const mimeMatch = parts[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+        const binary = atob(parts[1]);
+        const array = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          array[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([array], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
+        const newWindow = window.open(blobUrl, '_blank');
+        if (!newWindow) {
+          // If popup is blocked, open window then assign location
+          const w = window.open('', '_blank');
+          if (w) {
+            w.location.href = blobUrl;
+          }
+        }
+        return;
+      }
+    }
+
+    // Standard HTTP or Blob URL
+    const win = window.open(url, '_blank');
+    if (!win) {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.location.href = url;
+      }
+    }
+  } catch (err) {
+    console.error('Error opening attachment in new tab:', err);
+    // Fallback: open iframe in empty window
+    try {
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(`
+          <html>
+            <head><title>${fileName || 'Attachment Preview'}</title></head>
+            <body style="margin:0; background:#0f172a; display:flex; align-items:center; justify-center; height:100vh;">
+              <iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>
+            </body>
+          </html>
+        `);
+      }
+    } catch (e) {
+      console.error('Fallback window open failed:', e);
+    }
+  }
+};
+

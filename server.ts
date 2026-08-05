@@ -91,9 +91,20 @@ async function startServer() {
         return res.status(400).json({ error: "No recipient email addresses provided" });
       }
 
-      const recipientList = Array.isArray(recipients)
+      const rawRecipients = Array.isArray(recipients)
         ? recipients.map((r: string) => String(r).trim()).filter(Boolean)
         : String(recipients).split(",").map((r: string) => r.trim()).filter(Boolean);
+
+      const uniqueRecipientsSet = new Set<string>();
+      const recipientList: string[] = [];
+
+      for (const email of rawRecipients) {
+        const lower = email.toLowerCase();
+        if (!uniqueRecipientsSet.has(lower)) {
+          uniqueRecipientsSet.add(lower);
+          recipientList.push(email);
+        }
+      }
 
       if (recipientList.length === 0) {
         return res.status(400).json({ error: "No valid recipient email addresses found" });

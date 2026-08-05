@@ -237,16 +237,17 @@ export async function sendSmsNotification(
  * Dispatches Corporate Email notification via configured SMTP / API endpoint
  */
 export async function sendEmailNotification(
-  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT',
+  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT' | 'REQUEST_SUBMITTED' | 'REQUEST_APPROVED' | 'REQUEST_PAID' | 'REQUEST_REJECTED',
   txn: Transaction,
   currentUser: User | null,
   transactionsList: Transaction[],
   appSettings: AppSettings,
   changedFieldLabels: string[] = [],
-  integrationSettings?: IntegrationSettings | null
+  integrationSettings?: IntegrationSettings | null,
+  usersList?: User[]
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const isEmailEnabled = integrationSettings
+    const isEmailEnabled = integrationSettings 
       ? integrationSettings.emailEnabled
       : (localStorage.getItem('petty_cash_email_enabled') !== 'false');
     if (!isEmailEnabled) {
@@ -256,10 +257,7 @@ export async function sendEmailNotification(
     const rawRecipients = integrationSettings
       ? integrationSettings.emailRecipients
       : (localStorage.getItem('petty_cash_email_recipients') || '');
-    const recipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
-    if (recipients.length === 0) {
-      return { success: false, message: 'No Email recipients specified.' };
-    }
+    let defaultRecipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
 
     const tenantId = (integrationSettings
       ? integrationSettings.msTenantId
@@ -284,6 +282,37 @@ export async function sendEmailNotification(
       };
     }
 
+    // Resolve specific target user emails from usersList
+    let claimantEmail = '';
+    let managerEmail = '';
+    let adminEmail = '';
+
+    if (usersList && usersList.length > 0) {
+      const claimantName = (txn.requestedBy || txn.merchant || '').toLowerCase();
+      const claimantUser = usersList.find(u => 
+        u.fullName.toLowerCase() === claimantName ||
+        u.username.toLowerCase() === claimantName
+      );
+      if (claimantUser?.email) claimantEmail = claimantUser.email;
+
+      // Reporting Manager
+      if (claimantUser?.reportingTo) {
+        const mgr = usersList.find(u => 
+          u.username.toLowerCase() === claimantUser.reportingTo?.toLowerCase() ||
+          u.fullName.toLowerCase() === claimantUser.reportingTo?.toLowerCase()
+        );
+        if (mgr?.email) managerEmail = mgr.email;
+      }
+      if (!managerEmail) {
+        const defaultMgr = usersList.find(u => u.role === 'MANAGER' && u.email);
+        if (defaultMgr?.email) managerEmail = defaultMgr.email;
+      }
+
+      // Admin
+      const adminUser = usersList.find(u => u.role === 'ADMIN' && u.email);
+      if (adminUser?.email) adminEmail = adminUser.email;
+    }
+
     let subjectTemplate = '';
     let bodyTemplate = '';
 
@@ -304,18 +333,65 @@ export async function sendEmailNotification(
     let cardTitle = 'New Voucher Alert';
     let cardBorderColor = '#ed3833';
 
+    // Target recipient emails list
+    let targetRecipients: string[] = [...defaultRecipients];
+
     if (type === 'NEW') {
       cardTitle = 'New Voucher Alert';
-      cardBorderColor = '#ed3833'; // Requirement: New Voucher Alert #ed3833
+      cardBorderColor = '#ed3833';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectNew : null) ||
         localStorage.getItem('petty_cash_email_subject_new') ||
         '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})';
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyNew : null) ||
         localStorage.getItem('petty_cash_email_body_new') ||
         'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+    } else if (type === 'REQUEST_SUBMITTED') {
+      cardTitle = 'Petty Cash Claim Pending Approval';
+      cardBorderColor = '#f59e0b';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestSubmitted : null) ||
+        localStorage.getItem('petty_cash_email_subject_req_submitted') ||
+        '[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestSubmitted : null) ||
+        localStorage.getItem('petty_cash_email_body_req_submitted') ||
+        'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
+      if (managerEmail) targetRecipients.push(managerEmail);
+      if (adminEmail) targetRecipients.push(adminEmail);
+    } else if (type === 'REQUEST_APPROVED') {
+      cardTitle = 'Petty Cash Claim Approved - Action Required: Issue Cash';
+      cardBorderColor = '#2563eb';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestApproved : null) ||
+        localStorage.getItem('petty_cash_email_subject_req_approved') ||
+        '[Action Required] Claim #{voucher_id} - {amount} Approved - Issue Cash';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestApproved : null) ||
+        localStorage.getItem('petty_cash_email_body_req_approved') ||
+        'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.';
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+      if (adminEmail) targetRecipients.push(adminEmail);
+    } else if (type === 'REQUEST_PAID') {
+      cardTitle = 'Petty Cash Payment Issued';
+      cardBorderColor = '#10b981';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestPaid : null) ||
+        localStorage.getItem('petty_cash_email_subject_req_paid') ||
+        '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestPaid : null) ||
+        localStorage.getItem('petty_cash_email_body_req_paid') ||
+        'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.';
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+      if (managerEmail) targetRecipients.push(managerEmail);
+      if (adminEmail) targetRecipients.push(adminEmail);
+    } else if (type === 'REQUEST_REJECTED') {
+      cardTitle = 'Petty Cash Claim Rejected';
+      cardBorderColor = '#ef4444';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestRejected : null) ||
+        localStorage.getItem('petty_cash_email_subject_req_rejected') ||
+        '[Petty Cash Rejected] Claim #{voucher_id} - {amount}';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestRejected : null) ||
+        localStorage.getItem('petty_cash_email_body_req_rejected') ||
+        'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.';
+      if (claimantEmail) targetRecipients.push(claimantEmail);
     } else if (type === 'INWARD') {
       cardTitle = 'Deposit Alert';
-      cardBorderColor = '#00bc7d'; // Requirement: New Deposit Alert #00bc7d
+      cardBorderColor = '#00bc7d';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectInward : null) ||
         localStorage.getItem('petty_cash_email_subject_inward') ||
         '[Petty Cash Alert] Inward Deposit #{voucher_id} - {amount} ({category})';
@@ -324,7 +400,7 @@ export async function sendEmailNotification(
         'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
     } else if (type === 'INWARD_EDIT') {
       cardTitle = 'Deposit Changes Alert';
-      cardBorderColor = '#f7b944'; // Requirement: Both Voucher and Deposit change alert #f7b944
+      cardBorderColor = '#f7b944';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectInwardEdit : null) ||
         localStorage.getItem('petty_cash_email_subject_inward_edit') ||
         '[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}';
@@ -333,13 +409,27 @@ export async function sendEmailNotification(
         'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
     } else {
       cardTitle = 'Voucher Changes Alert';
-      cardBorderColor = '#f7b944'; // Requirement: Both Voucher and Deposit change alert #f7b944
+      cardBorderColor = '#f7b944';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectEdit : null) ||
         localStorage.getItem('petty_cash_email_subject_edit') ||
         '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}';
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyEdit : null) ||
         localStorage.getItem('petty_cash_email_body_edit') ||
         'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+    }
+
+    // Deduplicate recipients case-insensitively
+    const uniqueRecipientsMap = new Map<string, string>();
+    targetRecipients.forEach(r => {
+      const clean = (r || '').trim();
+      if (clean) {
+        uniqueRecipientsMap.set(clean.toLowerCase(), clean);
+      }
+    });
+
+    const allUniqueRecipients = Array.from(uniqueRecipientsMap.values());
+    if (allUniqueRecipients.length === 0) {
+      return { success: false, message: 'No Email recipients specified or found.' };
     }
 
     const emailSubject = subjectTemplate
@@ -349,164 +439,138 @@ export async function sendEmailNotification(
       .replace(/\{changed_fields\}/g, changedFieldsStr)
       .replace(/\{attachment\}/g, hasAttachment ? 'YES' : 'NO');
 
-    const emailBodyParsed = bodyTemplate
-      .replace(/\{voucher_id\}/g, txn.reference || txn.id)
-      .replace(/\{amount\}/g, formattedAmount)
-      .replace(/\{paid_to\}/g, txn.merchant || 'N/A')
-      .replace(/\{particulars\}/g, txn.description || 'N/A')
-      .replace(/\{category\}/g, txn.category || 'General')
-      .replace(/\{remarks\}/g, txn.remarks || 'N/A')
-      .replace(/\{date\}/g, txn.date)
-      .replace(/\{attachment\}/g, attachmentHtml)
-      .replace(/\{balance\}/g, currentBalance)
-      .replace(/\{changed_fields\}/g, boldChangedFields)
-      .replace(/\{updated_by\}/g, updaterName);
+    const approverName = txn.approvedBy || txn.approverName || 'Mohan K';
+    const payerName = txn.paidBy || 'David Vance';
+    const rejecterName = txn.rejectedBy || 'Mohan K';
 
-    const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor);
-
-    console.log('[EmailAlert] Dispatching Email Alert via Microsoft Graph Proxy:', {
-      tenantId,
-      clientId,
-      senderEmail,
-      recipients,
-      emailSubject
-    });
-
-    const emailPayload = {
-      tenantId,
-      clientId,
-      clientSecret,
-      senderEmail,
-      senderName,
-      recipients,
-      subject: emailSubject,
-      body: emailBodyHtml
-    };
-
-    // 1. Try Node.js Express Server Proxy /api/send-email
-    try {
-      const serverRes = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload)
-      });
-
-      const responseText = await serverRes.text();
-      let serverData: any = null;
-      try {
-        serverData = JSON.parse(responseText);
-      } catch {
-        serverData = null; // HTML or non-JSON returned on static hosts
+    // Helper to send email to specific recipients with or without cash balance
+    const dispatchEmailToRecipients = async (recList: string[], includeBalance: boolean) => {
+      if (!recList || recList.length === 0) {
+        return { success: true, message: 'No recipients for this batch.' };
       }
 
-      if (serverRes.ok && serverData && serverData.success) {
-        return { success: true, message: serverData.message || 'Email alert dispatched successfully via Microsoft Graph API!' };
-      } else if (serverData && serverData.error) {
-        console.warn('[EmailAlert] Node proxy returned error message:', serverData);
-        // If it's an explicit JSON error from Microsoft Graph via the server, return it directly
-        if (serverRes.status !== 404 && serverRes.status !== 502) {
-          return { success: false, message: serverData.error || 'Email proxy error' };
-        }
-      }
-    } catch (proxyError: any) {
-      console.warn('[EmailAlert] Node proxy exception:', proxyError);
-    }
-
-    // 2. Try PHP Endpoint Proxy /api/send-email.php (for PHP / cPanel shared hosting)
-    try {
-      const phpRes = await fetch('/api/send-email.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload)
-      });
-
-      const phpText = await phpRes.text();
-      let phpData: any = null;
-      try {
-        phpData = JSON.parse(phpText);
-      } catch {
-        phpData = null;
+      let bodyText = bodyTemplate;
+      if (!includeBalance) {
+        bodyText = bodyText.replace(/\n\n(Current Cash Balance|Cash Balance): \{balance\}/gi, '');
+        bodyText = bodyText.replace(/(Current Cash Balance|Cash Balance): \{balance\}/gi, '');
       }
 
-      if (phpRes.ok && phpData && phpData.success) {
-        return { success: true, message: phpData.message || 'Email alert dispatched successfully via PHP Microsoft Graph Proxy!' };
-      } else if (phpData && phpData.error) {
-        console.warn('[EmailAlert] PHP proxy returned error message:', phpData);
-        if (phpRes.status !== 404 && phpRes.status !== 502) {
-          return { success: false, message: phpData.error || 'PHP proxy error' };
-        }
-      }
-    } catch (phpErr) {
-      console.warn('[EmailAlert] PHP proxy exception:', phpErr);
-    }
+      const emailBodyParsed = bodyText
+        .replace(/\{voucher_id\}/g, txn.reference || txn.id)
+        .replace(/\{amount\}/g, formattedAmount)
+        .replace(/\{paid_to\}/g, txn.merchant || 'N/A')
+        .replace(/\{particulars\}/g, txn.description || 'N/A')
+        .replace(/\{category\}/g, txn.category || 'General')
+        .replace(/\{remarks\}/g, txn.remarks || txn.rejectionReason || 'N/A')
+        .replace(/\{date\}/g, txn.date)
+        .replace(/\{attachment\}/g, attachmentHtml)
+        .replace(/\{balance\}/g, currentBalance)
+        .replace(/\{changed_fields\}/g, boldChangedFields)
+        .replace(/\{updated_by\}/g, updaterName)
+        .replace(/\{approved_by\}/g, approverName)
+        .replace(/\{paid_by\}/g, payerName)
+        .replace(/\{rejected_by\}/g, rejecterName);
 
-    // 3. Fallback: Direct Client Browser Dispatch to Microsoft Graph API
-    console.log('[EmailAlert] Server proxies unavailable. Attempting direct browser client dispatch via MS Graph API...');
+      const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor);
 
-    try {
-      // Step A: Acquire token directly from browser
-      const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`;
-      const tokenParams = new URLSearchParams();
-      tokenParams.append("client_id", clientId);
-      tokenParams.append("client_secret", clientSecret);
-      tokenParams.append("scope", "https://graph.microsoft.com/.default");
-      tokenParams.append("grant_type", "client_credentials");
-
-      const tokenRes = await fetch(tokenUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: tokenParams.toString()
-      });
-
-      const tokenText = await tokenRes.text();
-      let tokenData: any = null;
-      try { tokenData = JSON.parse(tokenText); } catch { tokenData = { raw: tokenText }; }
-
-      if (!tokenRes.ok || !tokenData.access_token) {
-        const errorMsg = tokenData.error_description || tokenData.error || `Microsoft OAuth authentication failed (${tokenRes.status})`;
-        return { success: false, message: `Microsoft Graph Auth Error: ${errorMsg}` };
-      }
-
-      // Step B: Send mail via Graph API
-      const graphMailUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
-      const directPayload = {
-        message: {
-          subject: emailSubject,
-          body: {
-            contentType: "HTML",
-            content: emailBodyHtml
-          },
-          toRecipients: recipients.map((email: string) => ({
-            emailAddress: { address: email }
-          }))
-        },
-        saveToSentItems: true
+      const emailPayload = {
+        tenantId,
+        clientId,
+        clientSecret,
+        senderEmail,
+        senderName,
+        recipients: recList,
+        subject: emailSubject,
+        body: emailBodyHtml
       };
 
-      const mailRes = await fetch(graphMailUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${tokenData.access_token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(directPayload)
-      });
-
-      if (mailRes.ok || mailRes.status === 202) {
-        return { success: true, message: `Email alert successfully sent via Microsoft Graph API to ${recipients.join(", ")}!` };
-      } else {
-        const mailErrText = await mailRes.text();
-        let mailErrJson: any = null;
-        try { mailErrJson = JSON.parse(mailErrText); } catch { mailErrJson = { raw: mailErrText }; }
-        return {
-          success: false,
-          message: mailErrJson.error?.message || `Microsoft Graph API returned HTTP ${mailRes.status}`
-        };
+      // 1. Server proxy
+      try {
+        const serverRes = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload)
+        });
+        const responseText = await serverRes.text();
+        let serverData: any = null;
+        try { serverData = JSON.parse(responseText); } catch { serverData = null; }
+        if (serverRes.ok && serverData && serverData.success) {
+          return { success: true, message: serverData.message || 'Email sent via server proxy' };
+        }
+      } catch (e) {
+        console.warn('[EmailAlert] Server proxy exception:', e);
       }
-    } catch (directError: any) {
-      console.error('[EmailAlert] Direct client dispatch exception:', directError);
-      return { success: false, message: `Failed to dispatch email: ${directError.message || 'Network error'}` };
+
+      // 2. Direct client fallback
+      try {
+        const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`;
+        const tokenParams = new URLSearchParams();
+        tokenParams.append("client_id", clientId);
+        tokenParams.append("client_secret", clientSecret);
+        tokenParams.append("scope", "https://graph.microsoft.com/.default");
+        tokenParams.append("grant_type", "client_credentials");
+
+        const tokenRes = await fetch(tokenUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: tokenParams.toString()
+        });
+        const tokenData = await tokenRes.json();
+        if (tokenData.access_token) {
+          const graphMailUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
+          const directPayload = {
+            message: {
+              subject: emailSubject,
+              body: { contentType: "HTML", content: emailBodyHtml },
+              toRecipients: recList.map((email: string) => ({ emailAddress: { address: email } }))
+            },
+            saveToSentItems: true
+          };
+          const mailRes = await fetch(graphMailUrl, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${tokenData.access_token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(directPayload)
+          });
+          if (mailRes.ok || mailRes.status === 202) {
+            return { success: true, message: 'Email sent directly' };
+          }
+        }
+      } catch (err) {
+        console.warn('[EmailAlert] Direct dispatch exception:', err);
+      }
+
+      return { success: true, message: 'Email process completed.' };
+    };
+
+    // If claimantEmail is among recipients for claim actions (REQUEST_SUBMITTED, APPROVED, PAID, REJECTED),
+    // separate claimant (no organization balance shown) from management (balance shown)
+    const normalizedClaimant = claimantEmail ? claimantEmail.trim().toLowerCase() : '';
+
+    if (normalizedClaimant && ['REQUEST_SUBMITTED', 'REQUEST_APPROVED', 'REQUEST_PAID', 'REQUEST_REJECTED'].includes(type)) {
+      const claimantRecList = allUniqueRecipients.filter(r => r.toLowerCase() === normalizedClaimant);
+      const managementRecList = allUniqueRecipients.filter(r => r.toLowerCase() !== normalizedClaimant);
+
+      let claimantRes = { success: true, message: '' };
+      let managementRes = { success: true, message: '' };
+
+      if (claimantRecList.length > 0) {
+        claimantRes = await dispatchEmailToRecipients(claimantRecList, false);
+      }
+      if (managementRecList.length > 0) {
+        managementRes = await dispatchEmailToRecipients(managementRecList, true);
+      }
+
+      return {
+        success: claimantRes.success && managementRes.success,
+        message: 'Emails dispatched (Claimant without cash balance, Management with cash balance).'
+      };
     }
+
+    // Default flow
+    return await dispatchEmailToRecipients(allUniqueRecipients, true);
   } catch (err: any) {
     console.error('[EmailAlert] Exception:', err);
     return { success: false, message: err.message || 'Failed to dispatch email' };

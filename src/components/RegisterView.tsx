@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings } from '../types';
+import { openAttachmentInNewTab } from '../utils';
 
 interface RegisterViewProps {
   transactions: Transaction[];
@@ -102,6 +103,7 @@ export default function RegisterView({
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
   const formatDate = (dateStr: string) => formatDateToDMY(dateStr, dateFormat);
   const forceTypeVal: string | undefined = forceType;
+  const todayStr = new Date().toISOString().split('T')[0];
 
   // Company Stamp Settings
   const companyStampUrl = appSettings?.companyStampUrl || '';
@@ -273,6 +275,10 @@ export default function RegisterView({
     )
   ).sort((a, b) => a.localeCompare(b));
 
+  const expenseCategories = React.useMemo(() => {
+    return categories.filter(c => c.type !== 'IN' && c.name !== 'Cash Source');
+  }, [categories]);
+
   // Apply filters
   const filteredTransactions = transactions.filter(txn => {
     const matchesType = forceType ? txn.type === forceType : (filterType === 'ALL' || txn.type === filterType);
@@ -285,8 +291,20 @@ export default function RegisterView({
     } else if (forceType === 'OUT') {
       const matchesPayee = filterPayee === 'ALL' || txn.merchant.trim() === filterPayee;
       const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
+      const matchesStatus = filterStatus === 'ALL' || (txn.status || 'PAID') === filterStatus;
 
-      return matchesType && matchesDate && matchesPayee && matchesCategory;
+      let matchesUser = true;
+      if (currentUser.role === 'USER') {
+        const uName = (currentUser.fullName || '').toLowerCase();
+        const uId = (currentUser.username || '').toLowerCase();
+        const recBy = (txn.recordedBy || '').toLowerCase();
+        const reqBy = (txn.requestedBy || '').toLowerCase();
+        const merch = (txn.merchant || '').toLowerCase();
+
+        matchesUser = recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
+      }
+
+      return matchesType && matchesDate && matchesPayee && matchesCategory && matchesStatus && matchesUser;
     } else {
       const matchesSearch = 
         txn.merchant.toLowerCase().includes(search.toLowerCase()) ||
@@ -365,6 +383,26 @@ export default function RegisterView({
     }
   };
 
+  const getNextOutwardVoucherNumber = (txns: Transaction[], excludeId?: string): number => {
+    let maxNum = 26; // Baseline requirement: 1 to 26 exist, so next generated is at least 27
+    txns.forEach(t => {
+      if (excludeId && t.id === excludeId) return;
+      const refStr = (t.reference || '').trim();
+      if (refStr) {
+        const matches = refStr.match(/\d+/g);
+        if (matches) {
+          matches.forEach(m => {
+            const val = parseInt(m, 10);
+            if (val > maxNum && val < 1000) {
+              maxNum = val;
+            }
+          });
+        }
+      }
+    });
+    return maxNum + 1;
+  };
+
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingTransaction(null);
@@ -379,6 +417,30 @@ export default function RegisterView({
     setFormPaymentType('CASH');
     setReceiptFile(null);
     setFormError('');
+  };
+
+  const handleOpenAddModal = () => {
+    setEditingTransaction(null);
+    setFormDate(new Date().toISOString().split('T')[0]);
+    setFormType(forceType || 'OUT');
+    if (forceTypeVal !== 'IN') {
+      const nextNum = getNextOutwardVoucherNumber(transactions);
+      setFormReference(String(nextNum));
+    } else {
+      setFormReference('');
+    }
+    if (expenseCategories.length > 0) {
+      setFormCategory(expenseCategories[0].name);
+    }
+    setFormAmount('');
+    setFormMerchant(currentUser.fullName || '');
+    setShowMerchantSuggestions(false);
+    setFormDescription('');
+    setFormRemarks('');
+    setFormPaymentType('CASH');
+    setReceiptFile(null);
+    setFormError('');
+    setIsModalOpen(true);
   };
 
   const handleEditClick = (txn: Transaction) => {
@@ -406,6 +468,11 @@ export default function RegisterView({
     e.preventDefault();
     setFormError('');
 
+    if (formDate > todayStr) {
+      setFormError('Future dates cannot be selected for posting entries.');
+      return;
+    }
+
     const parsedAmount = parseFloat(formAmount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setFormError('Amount must be a positive number greater than zero.');
@@ -415,7 +482,7 @@ export default function RegisterView({
     let refVal = formReference.trim();
     let merchVal = formMerchant.trim();
 
-    // Helper to get numeric value from voucher ID string (e.g. "012", "0012", "OW-012" -> 12)
+    // Helper to get numeric value from voucher ID string (e.g. "27", "OW-012" -> 27)
     const getNumericPart = (str: string): number | null => {
       if (!str) return null;
       const match = str.trim().match(/\d+/);
@@ -443,22 +510,14 @@ export default function RegisterView({
         merchVal = 'Corporate Treasury';
       }
     } else {
-      // Outward / Expense: reference (Voucher ID) is optional. Paid to (merchant), category, particulars (description), amount are required.
+      // Outward / Expense: Paid to (merchant), category, particulars (description), amount, and Voucher No. are required.
       if (!merchVal) {
         setFormError('Paid To is required.');
         return;
       }
       if (!refVal) {
-        // Auto-generate optional Voucher ID if omitted, skipping any existing voucher numbers
-        const existingNums = new Set<number>();
-        transactions.forEach(t => {
-          if (editingTransaction && t.id === editingTransaction.id) return;
-          const num = getNumericPart(t.reference);
-          if (num !== null) existingNums.add(num);
-        });
-        let nextNum = 1;
-        while (existingNums.has(nextNum)) { nextNum++; }
-        refVal = `OW-${String(nextNum).padStart(3, '0')}`;
+        const nextNum = getNextOutwardVoucherNumber(transactions, editingTransaction?.id);
+        refVal = String(nextNum);
       }
     }
 
@@ -481,7 +540,7 @@ export default function RegisterView({
     });
 
     if (duplicateTxn) {
-      setFormError(`Voucher ID "${refVal}" (Voucher No. ${refValNum ?? refVal}) already exists as "${duplicateTxn.reference}". Duplicate Voucher numbers are not allowed.`);
+      setFormError(`Voucher No. "${refVal}" already exists as "${duplicateTxn.reference}". Duplicate Voucher numbers are not allowed.`);
       return;
     }
 
@@ -509,6 +568,8 @@ export default function RegisterView({
         });
       }
     } else {
+      const isNonAdmin = currentUser.role !== 'ADMIN';
+
       onAddTransaction({
         date: formDate,
         type: formType,
@@ -516,7 +577,9 @@ export default function RegisterView({
         category: formType === 'IN' ? 'Cash Source' : formCategory,
         merchant: merchVal,
         reference: refVal,
-        status: 'APPROVED', // Instant posting
+        status: formType === 'IN' ? 'APPROVED' : (isNonAdmin ? 'PENDING' : 'PAID'),
+        requestedBy: currentUser.fullName,
+        approverName: currentUser.reportingTo || 'admin',
         description: formDescription,
         receiptName: receiptFile ? receiptFile.name : null,
         receiptSize: receiptFile ? receiptFile.size : null,
@@ -2247,16 +2310,26 @@ export default function RegisterView({
                 <div className="px-5 py-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5 bg-white">
                   <div className="flex items-center gap-2">
                     {hasUrl && (
-                      <a
-                        href={attachmentBlobUrl || url}
-                        download={name}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Download File
-                      </a>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openAttachmentInNewTab(url, name)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Open in New Tab
+                        </button>
+                        <a
+                          href={attachmentBlobUrl || url}
+                          download={name}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download File
+                        </a>
+                      </>
                     )}
                   </div>
                   <button
@@ -2312,6 +2385,7 @@ export default function RegisterView({
                     id="inward-to"
                     type="date" 
                     value={toDate}
+                    max={todayStr}
                     onChange={(e) => {
                       setToDate(e.target.value);
                       setIsAllTime(false);
@@ -2667,6 +2741,7 @@ export default function RegisterView({
                       id="form-date-in"
                       type="date" 
                       value={formDate}
+                      max={todayStr}
                       onChange={(e) => setFormDate(e.target.value)}
                       required
                       className="w-full py-3 px-4 bg-white border border-slate-200 focus:border-[#009660] focus:ring-1 focus:ring-[#009660] focus:outline-hidden rounded-[14px] text-xs font-semibold text-slate-800 transition-all"
@@ -2743,25 +2818,105 @@ export default function RegisterView({
       <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden flex flex-col flex-1 min-h-0">
         
         {/* Table Controls & Filtering Header */}
-        <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/20 flex flex-col xl:flex-row xl:items-center justify-between gap-4 shrink-0">
-          <div>
-            <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">
-              {forceTypeVal === 'OUT' ? 'Filter Outward' : 'Account Ledger'}
-            </h3>
-            {forceTypeVal !== 'OUT' && (
-              <p className="text-[10px] text-slate-400 mt-1">
-                Showing {filteredTransactions.length} transaction entries
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-100 bg-white space-y-4 shrink-0">
+          {/* Top Row: Title & Action Buttons */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="font-extrabold text-slate-900 text-sm sm:text-base uppercase tracking-wider flex items-center gap-2">
+                <ArrowUpRight className="w-4.5 h-4.5 text-rose-600 stroke-[2.5]" />
+                {forceTypeVal === 'OUT' ? 'Outward Expenses Registry' : 'Account Ledger'}
+              </h3>
+              <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                Record cash disbursements and track voucher disbursements.
               </p>
-            )}
+            </div>
+            
+            {/* Top Right Actions */}
+            <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 shrink-0 w-full sm:w-auto">
+              {/* Export Button */}
+              <div className="relative col-span-1 sm:col-span-auto">
+                <button 
+                  type="button"
+                  onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                  style={{ backgroundColor: '#f7b944' }}
+                  className="w-full sm:w-auto py-2 px-3.5 hover:opacity-90 text-amber-950 rounded-xl border border-amber-300/30 transition-all text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs h-[36px] shrink-0 whitespace-nowrap"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-amber-900 shrink-0" />
+                  <span>Export Report</span>
+                </button>
+                {isExportDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setIsExportDropdownOpen(false)}></div>
+                    <div className="absolute right-0 mt-1.5 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-20 animate-in fade-in slide-in-from-top-1 duration-150">
+                      <button
+                        onClick={() => {
+                          handleExportCSV();
+                          setIsExportDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                        Export as CSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleExportXLSX();
+                          setIsExportDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        Export as XLSX
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleExportPDF();
+                          setIsExportDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                        Export as PDF
+                      </button>
+                      <div className="my-1 border-t border-slate-100"></div>
+                      <button
+                        onClick={() => {
+                          setIsExportDropdownOpen(false);
+                          handleSelectLatest3();
+                          setIsBatchModalOpen(true);
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-emerald-50 text-emerald-900 font-bold text-xs flex items-center gap-2 cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-emerald-600" />
+                        Batch Print (3/A4)
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {currentUser.role !== 'AUDITOR' && (
+                <button 
+                  onClick={handleOpenAddModal}
+                  className="col-span-1 sm:col-span-auto w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-xl text-xs shadow-md shadow-rose-950/15 transition-all flex items-center justify-center gap-1.5 cursor-pointer h-[36px] shrink-0 whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4 stroke-[3] shrink-0" />
+                  <span>New expense</span>
+                </button>
+              )}
+            </div>
           </div>
-          
-          {/* Filtering & Action Buttons Row */}
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between xl:justify-end gap-4 flex-wrap">
-            {/* Outward filters with responsive mobile grid */}
-            <div className="grid grid-cols-2 sm:flex sm:items-end gap-3 w-full sm:w-auto">
+
+          {/* Bottom Row: Filter Controls Toolbar */}
+          <div className="pt-3 border-t border-slate-100/80 bg-slate-50/60 p-3 rounded-2xl border border-slate-100">
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 lg:hidden">
+              Filter Outward Expenses
+            </div>
+
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-2.5">
               {/* From Date */}
-              <div className="col-span-1 sm:flex-none sm:w-[130px]">
-                <label htmlFor="outward-from" className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">From Date</label>
+              <div className="col-span-1 sm:w-[130px]">
+                <label htmlFor="outward-from" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">From Date</label>
                 <input 
                   id="outward-from"
                   type="date" 
@@ -2771,13 +2926,13 @@ export default function RegisterView({
                     setIsAllTime(false);
                   }}
                   disabled={isAllTime}
-                  className={`w-full py-1.5 px-3 bg-white border border-slate-200 focus:border-slate-300 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[34px] ${isAllTime ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  className={`w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] ${isAllTime ? 'opacity-40 cursor-not-allowed' : ''}`}
                 />
               </div>
 
               {/* To Date */}
-              <div className="col-span-1 sm:flex-none sm:w-[130px]">
-                <label htmlFor="outward-to" className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">To Date</label>
+              <div className="col-span-1 sm:w-[130px]">
+                <label htmlFor="outward-to" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">To Date</label>
                 <input 
                   id="outward-to"
                   type="date" 
@@ -2787,12 +2942,13 @@ export default function RegisterView({
                     setIsAllTime(false);
                   }}
                   disabled={isAllTime}
-                  className={`w-full py-1.5 px-3 bg-white border border-slate-200 focus:border-slate-300 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[34px] ${isAllTime ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  className={`w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] ${isAllTime ? 'opacity-40 cursor-not-allowed' : ''}`}
                 />
               </div>
 
               {/* All time Reset Button */}
-              <div className="col-span-2 sm:flex-none sm:w-[85px]">
+              <div className="col-span-1 sm:w-[85px]">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Period</label>
                 <button
                   type="button"
                   onClick={() => {
@@ -2805,20 +2961,20 @@ export default function RegisterView({
                       setIsAllTime(true);
                     }
                   }}
-                  className="w-full py-1.5 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition-all text-xs font-bold flex items-center justify-center cursor-pointer shadow-xs h-[34px]"
+                  className="w-full py-1.5 px-2.5 bg-white hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-200 transition-all text-xs font-bold flex items-center justify-center cursor-pointer shadow-xs h-[36px]"
                 >
                   {isAllTime ? 'Reset' : 'All time'}
                 </button>
               </div>
 
               {/* Category Filter */}
-              <div className="col-span-1 sm:flex-none sm:w-[135px]">
-                <label htmlFor="outward-cat-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Category</label>
+              <div className="col-span-1 sm:w-[135px]">
+                <label htmlFor="outward-cat-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Category</label>
                 <select 
                   id="outward-cat-filter"
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
-                  className="w-full py-1.5 px-3 bg-white border border-slate-200 focus:border-slate-300 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[34px] cursor-pointer"
+                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
                 >
                   <option value="ALL">All Categories</option>
                   {categories.map((cat, idx) => (
@@ -2828,13 +2984,13 @@ export default function RegisterView({
               </div>
 
               {/* Paid To Filter */}
-              <div className="col-span-1 sm:flex-none sm:w-[145px]">
-                <label htmlFor="outward-paid-to-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Paid to</label>
+              <div className="col-span-1 sm:w-[135px]">
+                <label htmlFor="outward-paid-to-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Paid to</label>
                 <select 
                   id="outward-paid-to-filter"
                   value={filterPayee}
                   onChange={(e) => setFilterPayee(e.target.value)}
-                  className="w-full py-1.5 px-3 bg-white border border-slate-200 focus:border-slate-300 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[34px] cursor-pointer"
+                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
                 >
                   <option value="ALL">All Payees</option>
                   {uniquePayees.map((payee, idx) => (
@@ -2843,164 +2999,22 @@ export default function RegisterView({
                 </select>
               </div>
 
-              {/* Desktop-only Action Buttons sitting right next to "Paid to" */}
-              <div className="hidden sm:flex flex-col sm:flex-none justify-end">
-                <span className="block text-[10px] font-bold text-transparent select-none mb-1.5 uppercase tracking-wider">Actions</span>
-                <div className="flex items-center gap-2">
-                  {/* Export Button */}
-                <div className="relative">
-                  <button 
-                    type="button"
-                    onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-                    style={{ backgroundColor: '#f7b944' }}
-                    className="py-2 px-3.5 hover:opacity-90 text-amber-950 rounded-xl border border-amber-300/30 transition-all text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs h-[34px]"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-amber-900" />
-                    Export Report
-                  </button>
-                  {isExportDropdownOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setIsExportDropdownOpen(false)}></div>
-                      <div className="absolute right-0 mt-1.5 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-20 animate-in fade-in slide-in-from-top-1 duration-150">
-                        <button
-                          onClick={() => {
-                            handleExportCSV();
-                            setIsExportDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                          Export as CSV
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleExportXLSX();
-                            setIsExportDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                          Export as XLSX
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleExportPDF();
-                            setIsExportDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                          Export as PDF
-                        </button>
-                        <div className="my-1 border-t border-slate-100"></div>
-                        <button
-                          onClick={() => {
-                            setIsExportDropdownOpen(false);
-                            handleSelectLatest3();
-                            setIsBatchModalOpen(true);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-emerald-50 text-emerald-900 font-bold text-xs flex items-center gap-2"
-                        >
-                          <Printer className="w-3.5 h-3.5 text-emerald-600" />
-                          Batch Print (3/A4)
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {currentUser.role !== 'AUDITOR' && (
-                  <button 
-                    onClick={() => {
-                      setEditingTransaction(null);
-                      setIsModalOpen(true);
-                    }}
-                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-xl text-xs shadow-md shadow-rose-950/15 transition-all flex items-center gap-1.5 cursor-pointer h-[34px] whitespace-nowrap"
-                  >
-                    <Plus className="w-4 h-4" />
-                    New expense
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-            {/* Mobile-only Action Buttons below the filters */}
-            <div className="flex sm:hidden items-center gap-2 w-full justify-end flex-wrap">
-              {/* Export Button */}
-              <div className="relative">
-                <button 
-                  type="button"
-                  onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-                  style={{ backgroundColor: '#f7b944' }}
-                  className="py-2 px-3 hover:opacity-90 text-amber-950 rounded-xl border border-amber-300/30 transition-all text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs h-[34px]"
+              {/* Status Filter */}
+              <div className="col-span-1 sm:w-[125px]">
+                <label htmlFor="outward-status-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Status</label>
+                <select 
+                  id="outward-status-filter"
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-4 h-4 text-amber-900" />
-                  Export
-                </button>
-                {isExportDropdownOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setIsExportDropdownOpen(false)}></div>
-                    <div className="absolute right-0 mt-1.5 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-20 animate-in fade-in slide-in-from-top-1 duration-150">
-                      <button
-                        onClick={() => {
-                          handleExportCSV();
-                          setIsExportDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        Export as CSV
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleExportXLSX();
-                          setIsExportDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                        Export as XLSX
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleExportPDF();
-                          setIsExportDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                        Export as PDF
-                      </button>
-                      <div className="my-1 border-t border-slate-100"></div>
-                      <button
-                        onClick={() => {
-                          setIsExportDropdownOpen(false);
-                          handleSelectLatest3();
-                          setIsBatchModalOpen(true);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-emerald-50 text-emerald-900 font-bold text-xs flex items-center gap-2"
-                      >
-                        <Printer className="w-3.5 h-3.5 text-emerald-600" />
-                        Batch Print (3/A4)
-                      </button>
-                    </div>
-                  </>
-                )}
+                  <option value="ALL">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="PAID">Paid</option>
+                  <option value="REJECTED">Rejected</option>
+                </select>
               </div>
-
-              {currentUser.role !== 'AUDITOR' && (
-                <button 
-                  onClick={() => {
-                    setEditingTransaction(null);
-                    setIsModalOpen(true);
-                  }}
-                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3 rounded-xl text-xs shadow-md shadow-rose-950/15 transition-all flex items-center gap-1.5 cursor-pointer h-[34px] whitespace-nowrap"
-                >
-                  <Plus className="w-4 h-4" />
-                  New expense
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -3018,13 +3032,14 @@ export default function RegisterView({
                   <th className="py-3.5 px-6">Particulars</th>
                   <th className="py-3.5 px-6">Debit Amount</th>
                   <th className="py-3.5 px-6">Category</th>
+                  <th className="py-3.5 px-6">Status</th>
                   <th className="py-3.5 px-6 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 font-medium text-slate-700">
                 {filteredTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-slate-400">
+                    <td colSpan={8} className="py-16 text-center text-slate-400">
                       <AlertCircle className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                       No transactions match the given criteria.
                     </td>
@@ -3083,10 +3098,63 @@ export default function RegisterView({
                           {txn.category}
                         </span>
                       </td>
+
+                      {/* Status Badge */}
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        {(() => {
+                          const st = txn.status || 'PAID';
+                          if (st === 'PENDING') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                Pending
+                              </span>
+                            );
+                          }
+                          if (st === 'APPROVED') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                Approved
+                              </span>
+                            );
+                          }
+                          if (st === 'PAID') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                Paid
+                              </span>
+                            );
+                          }
+                          if (st === 'REJECTED') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                Rejected
+                              </span>
+                            );
+                          }
+                          return <span className="text-[10px] font-bold text-slate-500">{st}</span>;
+                        })()}
+                      </td>
                       
                       {/* Actions */}
                       <td className="py-4 px-6 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {/* Attachment / Receipt view button */}
+                          <button
+                            onClick={() => setViewingAttachment(txn)}
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                              txn.receiptUrl || txn.receiptName
+                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 shadow-2xs border border-indigo-200/80'
+                                : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
+                            }`}
+                            title={txn.receiptUrl || txn.receiptName ? 'View Attached Receipt Document' : 'View Voucher & Details'}
+                          >
+                            <Paperclip className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* Print action (accessible to all, including auditors) */}
                           <button
                             onClick={() => handlePrintSingleVoucher(txn)}
@@ -3327,6 +3395,7 @@ export default function RegisterView({
                           id="inward-date"
                           type="date" 
                           value={formDate}
+                          max={todayStr}
                           onChange={(e) => setFormDate(e.target.value)}
                           required
                           className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-emerald-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all font-semibold text-slate-700"
@@ -3519,19 +3588,27 @@ export default function RegisterView({
                       </div>
                     )}
 
-                    {/* Row 1: Voucher ID & Date */}
+                    {/* Row 1: Voucher No. & Date */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor="form-ref" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
-                          ID (Optional)
+                          Voucher No.
                         </label>
                         <input 
                           id="form-ref"
                           type="text" 
                           value={formReference}
-                          onChange={(e) => setFormReference(e.target.value)}
-                          placeholder="e.g. OW-001"
-                          className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all font-mono font-semibold"
+                          onChange={(e) => {
+                            if (currentUser.role === 'ADMIN') setFormReference(e.target.value);
+                          }}
+                          readOnly={currentUser.role !== 'ADMIN'}
+                          placeholder="e.g. 27"
+                          required
+                          className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-mono font-bold ${
+                            currentUser.role !== 'ADMIN'
+                              ? 'bg-slate-100/80 border-slate-200 text-slate-600 cursor-not-allowed'
+                              : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-900'
+                          }`}
                         />
                       </div>
                       <div>
@@ -3542,16 +3619,17 @@ export default function RegisterView({
                           id="form-date"
                           type="date" 
                           value={formDate}
+                          max={todayStr}
                           onChange={(e) => setFormDate(e.target.value)}
                           required
-                          className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all font-semibold"
+                          className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all font-semibold text-slate-800"
                         />
                       </div>
                     </div>
 
-                    {/* Row 2: Amount ({currencySymbol}) & Payment Type */}
+                    {/* Row 2: Amount ({currencySymbol}) & Payment Type (Admin only) */}
                     <div className="grid grid-cols-2 gap-4">
-                      <div>
+                      <div className={currentUser.role !== 'ADMIN' ? 'col-span-2' : ''}>
                         <label htmlFor="form-amount" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
                           Amount ({currencySymbol})
                         </label>
@@ -3569,21 +3647,23 @@ export default function RegisterView({
                           />
                         </div>
                       </div>
-                      <div>
-                        <label htmlFor="form-payment-type" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
-                          Payment Type
-                        </label>
-                        <select 
-                          id="form-payment-type"
-                          value={formPaymentType}
-                          onChange={(e) => setFormPaymentType(e.target.value as 'CASH' | 'ONLINE')}
-                          required
-                          className="w-full py-2.5 px-3 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-600 transition-all cursor-pointer font-semibold"
-                        >
-                          <option value="CASH">Cash</option>
-                          <option value="ONLINE">Online</option>
-                        </select>
-                      </div>
+                      {currentUser.role === 'ADMIN' && (
+                        <div>
+                          <label htmlFor="form-payment-type" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
+                            Payment Type
+                          </label>
+                          <select 
+                            id="form-payment-type"
+                            value={formPaymentType}
+                            onChange={(e) => setFormPaymentType(e.target.value as 'CASH' | 'ONLINE')}
+                            required
+                            className="w-full py-2.5 px-3 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-600 transition-all cursor-pointer font-semibold"
+                          >
+                            <option value="CASH">Cash</option>
+                            <option value="ONLINE">Online</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
 
                     {/* Row 3: Expense Category & Paid To */}
@@ -3599,7 +3679,7 @@ export default function RegisterView({
                           required
                           className="w-full py-2.5 px-3 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-600 transition-all cursor-pointer font-semibold"
                         >
-                          {categories.map((cat, idx) => (
+                          {expenseCategories.map((cat, idx) => (
                             <option key={idx} value={cat.name}>{cat.name}</option>
                           ))}
                         </select>
@@ -3613,17 +3693,26 @@ export default function RegisterView({
                           type="text" 
                           value={formMerchant}
                           onChange={(e) => {
-                            setFormMerchant(e.target.value);
-                            setShowMerchantSuggestions(true);
+                            if (currentUser.role === 'ADMIN') {
+                              setFormMerchant(e.target.value);
+                              setShowMerchantSuggestions(true);
+                            }
                           }}
-                          onFocus={() => setShowMerchantSuggestions(true)}
+                          onFocus={() => {
+                            if (currentUser.role === 'ADMIN') setShowMerchantSuggestions(true);
+                          }}
                           onBlur={() => {
                             setTimeout(() => setShowMerchantSuggestions(false), 200);
                           }}
+                          readOnly={currentUser.role !== 'ADMIN'}
                           placeholder="Name of payee"
                           required
                           autoComplete="off"
-                          className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all text-slate-700 font-semibold"
+                          className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-semibold ${
+                            currentUser.role !== 'ADMIN'
+                              ? 'bg-slate-100/80 border-slate-200 cursor-not-allowed text-slate-700 font-bold'
+                              : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-700'
+                          }`}
                         />
 
                         {/* Recommendations Popup (shown after typing 2+ characters) */}
