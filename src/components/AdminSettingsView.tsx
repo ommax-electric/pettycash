@@ -39,11 +39,16 @@ import {
   Smartphone,
   ShieldCheck,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  HardDrive,
+  Folder,
+  FolderCheck,
+  Cloud
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendSmsNotification, sendEmailNotification, calculateCashBalance } from '../services/notificationService';
+import { testCloudinaryConnection, uploadReceiptToCloudinary } from '../services/cloudinaryService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 
 interface AdminSettingsViewProps {
@@ -62,6 +67,7 @@ interface AdminSettingsViewProps {
   onDeleteCategory: (catName: string) => void;
   logs: ActivityLog[];
   transactions: Transaction[];
+  onUpdateTransaction?: (updatedTxn: Transaction) => void;
   onBackupData: () => void;
   onRestoreData: (jsonContent: string) => boolean | Promise<boolean>;
   onWipeAllData: () => void | Promise<void>;
@@ -85,6 +91,7 @@ export default function AdminSettingsView({
   onDeleteCategory,
   logs,
   transactions,
+  onUpdateTransaction,
   onBackupData,
   onRestoreData,
   onWipeAllData
@@ -166,57 +173,148 @@ export default function AdminSettingsView({
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [wipeConfirmInput, setWipeConfirmInput] = useState('');
 
-  // --- 5. Integration Settings State (SMS & Email) ---
-  const [integrationSubTab, setIntegrationSubTab] = useState<'SMS' | 'EMAIL'>('SMS');
+  // --- 5. Integration Settings State (Cloudinary & Email) ---
+  const [integrationSubTab, setIntegrationSubTab] = useState<'CLOUDINARY' | 'EMAIL'>('CLOUDINARY');
 
-  // SMS State
-  const [smsEnabled, setSmsEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('petty_cash_sms_enabled') !== 'false';
+  // Cloudinary State
+  const [cloudinaryEnabled, setCloudinaryEnabled] = useState<boolean>(() => {
+    return integrationSettings?.cloudinaryEnabled ?? (localStorage.getItem('petty_cash_cloudinary_enabled') !== 'false');
   });
-  const [smsGatewayUrl, setSmsGatewayUrl] = useState<string>(() => {
-    const saved = (localStorage.getItem('petty_cash_sms_url') || '').trim();
-    if (!saved || saved.includes('mobile/v1') || saved === 'https://api.sms-gate.app' || saved === 'https://api.sms-gate.app/') {
-      return 'https://api.sms-gate.app/3rdparty/v1/message';
+  const [cloudinaryCloudName, setCloudinaryCloudName] = useState<string>(() => {
+    return integrationSettings?.cloudinaryCloudName || localStorage.getItem('petty_cash_cloudinary_cloud_name') || 'ommaxelectric';
+  });
+  const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState<string>(() => {
+    return integrationSettings?.cloudinaryUploadPreset || localStorage.getItem('petty_cash_cloudinary_upload_preset') || 'petty_cash_receipts';
+  });
+  const [cloudinaryApiKey, setCloudinaryApiKey] = useState<string>(() => {
+    return integrationSettings?.cloudinaryApiKey || localStorage.getItem('petty_cash_cloudinary_api_key') || '';
+  });
+  const [cloudinaryFolderName, setCloudinaryFolderName] = useState<string>(() => {
+    return integrationSettings?.cloudinaryFolderName || localStorage.getItem('petty_cash_cloudinary_folder_name') || 'Petty Cash Register';
+  });
+  const [cloudinaryStorageMode, setCloudinaryStorageMode] = useState<'DIRECT_CLOUDINARY' | 'HYBRID_FIRESTORE'>(() => {
+    return integrationSettings?.cloudinaryStorageMode || 'HYBRID_FIRESTORE';
+  });
+  const [isTestingCloudinary, setIsTestingCloudinary] = useState(false);
+  const [cloudinaryTestMsg, setCloudinaryTestMsg] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Cloudinary Migration State Engine
+  const [isMigratingCloudinary, setIsMigratingCloudinary] = useState(false);
+  const [cloudinaryMigrationProgress, setCloudinaryMigrationProgress] = useState<{ current: number; total: number; currentVoucher: string } | null>(null);
+  const [cloudinaryMigrationSummary, setCloudinaryMigrationSummary] = useState<{
+    migratedCount: number;
+    failedCount: number;
+    details: Array<{ voucherNo: string; name: string; oldUrl: string; newUrl?: string; error?: string }>;
+  } | null>(null);
+
+  const handleMigrateFirestoreAttachmentsToCloudinary = async () => {
+    const eligibleTxns = transactions.filter(t => {
+      const url = t.receiptUrl || '';
+      return Boolean(url && url.trim() !== '' && !url.includes('res.cloudinary.com'));
+    });
+
+    if (eligibleTxns.length === 0) {
+      setCloudinaryMigrationSummary({
+        migratedCount: 0,
+        failedCount: 0,
+        details: []
+      });
+      return;
     }
-    return saved;
-  });
-  const [smsUsername, setSmsUsername] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_sms_username') || 'WRJ0SQ';
-  });
-  const [smsPassword, setSmsPassword] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_sms_password') || 'sdoaxryxfmy5qh';
-  });
-  const [showSmsPass, setShowSmsPass] = useState<boolean>(false);
-  const [smsRecipients, setSmsRecipients] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_sms_recipients') || '+91 90259 76761';
-  });
 
-  // SMS Templates: New Voucher, Voucher Modifications & Inward Entry
-  const [smsTemplateNew, setSmsTemplateNew] = useState<string>(() => {
-    return localStorage.getItem('petty_cash_sms_template_new') || 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.';
-  });
-  const [smsTemplateEdit, setSmsTemplateEdit] = useState<string>(() => {
-    const saved = localStorage.getItem('petty_cash_sms_template_edit');
-    if (!saved || saved.includes('Name/amount/paid to/category/date/attachment/remarks/particulars')) {
-      return 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.';
+    setIsMigratingCloudinary(true);
+    setCloudinaryMigrationSummary(null);
+
+    let successCount = 0;
+    let failCount = 0;
+    const detailsList: Array<{ voucherNo: string; name: string; oldUrl: string; newUrl?: string; error?: string }> = [];
+
+    const currentIntSettings: IntegrationSettings = {
+      emailEnabled: false,
+      msTenantId: '',
+      msClientId: '',
+      msClientSecret: '',
+      msSenderEmail: '',
+      msSenderName: '',
+      emailRecipients: '',
+      emailSubjectNew: '',
+      emailBodyNew: '',
+      emailSubjectEdit: '',
+      emailBodyEdit: '',
+      emailSubjectInward: '',
+      emailBodyInward: '',
+      ...(integrationSettings || {}),
+      cloudinaryCloudName,
+      cloudinaryApiKey,
+      cloudinaryUploadPreset,
+      cloudinaryFolderName,
+      cloudinaryEnabled: true
+    };
+
+    for (let i = 0; i < eligibleTxns.length; i++) {
+      const txn = eligibleTxns[i];
+      const voucherNo = txn.reference || txn.id.substring(0, 6);
+
+      setCloudinaryMigrationProgress({
+        current: i + 1,
+        total: eligibleTxns.length,
+        currentVoucher: `Voucher #${voucherNo} (${txn.receiptName || 'Receipt Document'})`
+      });
+
+      try {
+        const uploadRes = await uploadReceiptToCloudinary(
+          txn.receiptUrl!,
+          txn.receiptName || `receipt_${voucherNo}.png`,
+          voucherNo,
+          txn.date,
+          currentIntSettings
+        );
+
+        if (uploadRes.success && uploadRes.url) {
+          successCount++;
+          const updatedTxn: Transaction = {
+            ...txn,
+            receiptUrl: uploadRes.url
+          };
+
+          if (onUpdateTransaction) {
+            await onUpdateTransaction(updatedTxn);
+          }
+
+          detailsList.push({
+            voucherNo,
+            name: txn.receiptName || 'Attachment',
+            oldUrl: 'Firestore Data Blob',
+            newUrl: uploadRes.url
+          });
+        } else {
+          failCount++;
+          detailsList.push({
+            voucherNo,
+            name: txn.receiptName || 'Attachment',
+            oldUrl: 'Firestore Data Blob',
+            error: uploadRes.message || 'Upload failed'
+          });
+        }
+      } catch (err: any) {
+        failCount++;
+        detailsList.push({
+          voucherNo,
+          name: txn.receiptName || 'Attachment',
+          oldUrl: 'Firestore Data Blob',
+          error: err?.message || 'Error uploading file'
+        });
+      }
     }
-    return saved;
-  });
-  const [smsTemplateInward, setSmsTemplateInward] = useState<string>(() => {
-    return integrationSettings?.smsTemplateInward || localStorage.getItem('petty_cash_sms_template_inward') || 'Inward Cash Deposit Alert: #{voucher_id} for {amount} received from {paid_to} ({category}). Cash balance: {balance}.';
-  });
-  const [smsTemplateInwardEdit, setSmsTemplateInwardEdit] = useState<string>(() => {
-    return integrationSettings?.smsTemplateInwardEdit || localStorage.getItem('petty_cash_sms_template_inward_edit') || 'Deposit Changes Alert for Cash Deposit #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.';
-  });
 
-  // Accordion State Management
-  const [openSmsAccordions, setOpenSmsAccordions] = useState<Record<string, boolean>>({
-    config: true,
-    new: false,
-    edit: false,
-    inward: false,
-    inwardEdit: false
-  });
+    setIsMigratingCloudinary(false);
+    setCloudinaryMigrationProgress(null);
+    setCloudinaryMigrationSummary({
+      migratedCount: successCount,
+      failedCount: failCount,
+      details: detailsList
+    });
+  };
 
   const [openEmailAccordions, setOpenEmailAccordions] = useState<Record<string, boolean>>({
     config: true,
@@ -229,10 +327,6 @@ export default function AdminSettingsView({
     reqPaid: false,
     reqRejected: false
   });
-
-  const toggleSmsAccordion = (key: string) => {
-    setOpenSmsAccordions(prev => ({ ...prev, [key]: !prev[key] }));
-  };
 
   const toggleEmailAccordion = (key: string) => {
     setOpenEmailAccordions(prev => ({ ...prev, [key]: !prev[key] }));
@@ -332,15 +426,12 @@ export default function AdminSettingsView({
 
   useEffect(() => {
     if (integrationSettings) {
-      setSmsEnabled(integrationSettings.smsEnabled);
-      setSmsGatewayUrl(integrationSettings.smsGatewayUrl || 'https://api.sms-gate.app/3rdparty/v1/message');
-      setSmsUsername(integrationSettings.smsUsername || 'WRJ0SQ');
-      setSmsPassword(integrationSettings.smsPassword || 'sdoaxryxfmy5qh');
-      setSmsRecipients(integrationSettings.smsRecipients || '+91 90259 76761');
-      setSmsTemplateNew(integrationSettings.smsTemplateNew || 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.');
-      setSmsTemplateEdit(integrationSettings.smsTemplateEdit || 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.');
-      setSmsTemplateInward(integrationSettings.smsTemplateInward || 'Inward Cash Deposit Alert: #{voucher_id} for {amount} received from {paid_to} ({category}). Cash balance: {balance}.');
-      setSmsTemplateInwardEdit(integrationSettings.smsTemplateInwardEdit || 'Deposit Changes Alert for Cash Deposit #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.');
+      setCloudinaryEnabled(integrationSettings.cloudinaryEnabled ?? true);
+      setCloudinaryCloudName(integrationSettings.cloudinaryCloudName || 'ommaxelectric');
+      setCloudinaryUploadPreset(integrationSettings.cloudinaryUploadPreset || 'petty_cash_receipts');
+      setCloudinaryApiKey(integrationSettings.cloudinaryApiKey || '');
+      setCloudinaryFolderName(integrationSettings.cloudinaryFolderName || 'PettyCashRegister');
+      setCloudinaryStorageMode(integrationSettings.cloudinaryStorageMode || 'HYBRID_FIRESTORE');
 
       setEmailEnabled(integrationSettings.emailEnabled);
       setMsTenantId(integrationSettings.msTenantId || 'a63883ba-4173-48a2-a29d-247ca0c8e59a');
@@ -373,18 +464,18 @@ export default function AdminSettingsView({
   const [integrationSuccess, setIntegrationSuccess] = useState<string>('');
   const [testNotificationModal, setTestNotificationModal] = useState<{ title: string; content: string; type: 'SMS' | 'EMAIL' } | null>(null);
 
-  const handleSaveSmsSettings = (e: React.FormEvent) => {
+  const handleSaveCloudinarySettings = (e: React.FormEvent) => {
     e.preventDefault();
     const updated: IntegrationSettings = {
-      smsEnabled,
-      smsGatewayUrl,
-      smsUsername,
-      smsPassword,
-      smsRecipients,
-      smsTemplateNew,
-      smsTemplateEdit,
-      smsTemplateInward,
-      smsTemplateInwardEdit,
+      ...integrationSettings,
+      smsEnabled: false,
+      cloudinaryEnabled,
+      cloudinaryCloudName,
+      cloudinaryUploadPreset,
+      cloudinaryApiKey,
+      cloudinaryFolderName,
+      cloudinaryStorageMode,
+      googleDriveEnabled: false,
       emailEnabled,
       msTenantId,
       msClientId,
@@ -413,32 +504,36 @@ export default function AdminSettingsView({
     if (onUpdateIntegrationSettings) {
       onUpdateIntegrationSettings(updated);
     } else {
-      localStorage.setItem('petty_cash_sms_enabled', String(smsEnabled));
-      localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
-      localStorage.setItem('petty_cash_sms_username', smsUsername);
-      localStorage.setItem('petty_cash_sms_password', smsPassword);
-      localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
-      localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
-      localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
-      localStorage.setItem('petty_cash_sms_template_inward', smsTemplateInward);
-      localStorage.setItem('petty_cash_sms_template_inward_edit', smsTemplateInwardEdit);
+      localStorage.setItem('petty_cash_cloudinary_enabled', String(cloudinaryEnabled));
+      localStorage.setItem('petty_cash_cloudinary_cloud_name', cloudinaryCloudName);
+      localStorage.setItem('petty_cash_cloudinary_upload_preset', cloudinaryUploadPreset);
+      localStorage.setItem('petty_cash_cloudinary_api_key', cloudinaryApiKey);
+      localStorage.setItem('petty_cash_cloudinary_folder_name', cloudinaryFolderName);
     }
-    setIntegrationSuccess('SMS Gate API credentials & message templates saved successfully to Firestore!');
+    setIntegrationSuccess('Cloudinary Storage configuration saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleTestCloudinary = async () => {
+    setIsTestingCloudinary(true);
+    setCloudinaryTestMsg(null);
+    const res = await testCloudinaryConnection(cloudinaryCloudName, cloudinaryUploadPreset);
+    setIsTestingCloudinary(false);
+    setCloudinaryTestMsg(res);
   };
 
   const handleSaveEmailSettings = (e: React.FormEvent) => {
     e.preventDefault();
     const updated: IntegrationSettings = {
-      smsEnabled,
-      smsGatewayUrl,
-      smsUsername,
-      smsPassword,
-      smsRecipients,
-      smsTemplateNew,
-      smsTemplateEdit,
-      smsTemplateInward,
-      smsTemplateInwardEdit,
+      ...integrationSettings,
+      smsEnabled: false,
+      cloudinaryEnabled,
+      cloudinaryCloudName,
+      cloudinaryUploadPreset,
+      cloudinaryApiKey,
+      cloudinaryFolderName,
+      cloudinaryStorageMode,
+      googleDriveEnabled: false,
       emailEnabled,
       msTenantId,
       msClientId,
@@ -495,65 +590,6 @@ export default function AdminSettingsView({
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
 
-  const handleTestSms = async () => {
-    // Persist current settings first
-    localStorage.setItem('petty_cash_sms_enabled', 'true');
-    localStorage.setItem('petty_cash_sms_url', smsGatewayUrl);
-    localStorage.setItem('petty_cash_sms_username', smsUsername);
-    localStorage.setItem('petty_cash_sms_password', smsPassword);
-    localStorage.setItem('petty_cash_sms_recipients', smsRecipients);
-    localStorage.setItem('petty_cash_sms_template_new', smsTemplateNew);
-    localStorage.setItem('petty_cash_sms_template_edit', smsTemplateEdit);
-
-    const testTxn: Transaction = {
-      id: 'VOUCHER-TEST-104',
-      type: 'OUT',
-      amount: 3500,
-      category: 'Office Supplies',
-      merchant: 'Rahul Sharma',
-      description: 'A4 printer paper',
-      remarks: 'A4 printer paper',
-      date: '2026-07-28',
-      status: 'APPROVED',
-      recordedBy: currentUser ? currentUser.fullName : 'Admin (Anita)',
-      reference: 'VOUCHER-104',
-      receiptName: null,
-      receiptSize: null
-    };
-
-    setIntegrationSuccess('Dispatching test SMS via SMSGate endpoint...');
-
-    const result = await sendSmsNotification(
-      'EDIT',
-      testTxn,
-      currentUser,
-      transactions,
-      appSettings,
-      ['Name', 'Amount']
-    );
-
-    if (result.success) {
-      setIntegrationSuccess(`Test SMS Sent Successfully to ${smsRecipients}!`);
-    } else {
-      setIntegrationSuccess(`SMS Dispatch Status: ${result.message}`);
-    }
-
-    setTestNotificationModal({
-      title: result.success ? 'SMS Dispatched Successfully!' : 'SMS Dispatch Result',
-      type: 'SMS',
-      content: `Dispatched API Endpoint: ${smsGatewayUrl}\nAuth Credentials: Username="${smsUsername}"\nRecipients: ${smsRecipients}\n\nGATEWAY RESPONSE:\n${result.message}\n\nDISPATCHED SMS TEXT:\n"${smsTemplateEdit
-        .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-        .replace(/Name\/amount\/paid to\/category\/date\/attachment\/remarks\/particulars/gi, 'Name and amount')
-        .replace(/\{changed_fields\}/g, 'Name and amount')
-        .replace(/\{updated_by\}/g, currentUser ? currentUser.fullName : 'Admin (Anita)')
-        .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-        .replace(/\{paid_to\}/g, 'Rahul Sharma')
-        .replace(/\{category\}/g, 'Office Supplies')
-        .replace(/\{date\}/g, '2026-07-28')
-        .replace(/\{balance\}/g, calculateCashBalance(transactions, appSettings.currencySymbol))}"`
-    });
-  };
-
   const handleTestEmail = async () => {
     // Persist current settings first
     localStorage.setItem('petty_cash_email_enabled', 'true');
@@ -604,14 +640,15 @@ export default function AdminSettingsView({
     };
 
     const currentIntegrationSettings: IntegrationSettings = {
-      smsEnabled,
-      smsGatewayUrl,
-      smsUsername,
-      smsPassword,
-      smsRecipients,
-      smsTemplateNew,
-      smsTemplateEdit,
-      smsTemplateInward,
+      ...integrationSettings,
+      smsEnabled: false,
+      cloudinaryEnabled,
+      cloudinaryCloudName,
+      cloudinaryUploadPreset,
+      cloudinaryApiKey,
+      cloudinaryFolderName,
+      cloudinaryStorageMode,
+      googleDriveEnabled: false,
       emailEnabled: true,
       msTenantId,
       msClientId,
@@ -1669,23 +1706,23 @@ export default function AdminSettingsView({
                     Voucher Alert & Notification Integrations
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Configure automated alert dispatches via Self-Hosted Android SMS Gateway (SMSGate) and Microsoft Graph API Email Integration (Office 365).
+                    Configure automated document attachment syncing via Cloudinary Cloud Storage and email alert dispatches via Microsoft Graph API Email Integration (Office 365).
                   </p>
                 </div>
 
-                {/* Integration Sub-tabs (SMS vs Email) */}
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0">
+                {/* Integration Sub-tabs (Cloudinary vs Email) */}
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0 flex-wrap sm:flex-nowrap">
                   <button
                     type="button"
-                    onClick={() => setIntegrationSubTab('SMS')}
+                    onClick={() => setIntegrationSubTab('CLOUDINARY')}
                     className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                      integrationSubTab === 'SMS'
+                      integrationSubTab === 'CLOUDINARY'
                         ? 'bg-white text-slate-900 shadow-xs font-extrabold'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                    SMS Gateway (SMSGate)
+                    <Cloud className="w-3.5 h-3.5 text-sky-500" />
+                    Cloudinary Cloud Storage
                   </button>
 
                   <button
@@ -1697,8 +1734,8 @@ export default function AdminSettingsView({
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <Mail className="w-3.5 h-3.5 text-sky-600" />
-                    Microsoft Graph Email (Office 365)
+                    <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                    Microsoft Email
                   </button>
                 </div>
               </div>
@@ -1712,23 +1749,22 @@ export default function AdminSettingsView({
             </div>
 
             {/* ======================================================== */}
+            {/* SUB-SECTION 0: CLOUDINARY ATTACHMENT STORAGE INTEGRATION */}
             {/* ======================================================== */}
-            {/* SUB-SECTION 1: SMS GATEWAY INTEGRATION (ACCORDION STYLE) */}
-            {/* ======================================================== */}
-            {integrationSubTab === 'SMS' && (
-              <form onSubmit={handleSaveSmsSettings} className="space-y-4">
+            {integrationSubTab === 'CLOUDINARY' && (
+              <form onSubmit={handleSaveCloudinarySettings} className="space-y-4">
                 {/* Status Toggle Card */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
-                      smsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'
+                      cloudinaryEnabled ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'
                     }`}>
-                      <Smartphone className="w-5 h-5" />
+                      <Cloud className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm text-slate-800">Self-Hosted Android SMS Gate Service</h4>
+                      <h4 className="font-bold text-sm text-slate-800">Cloudinary Receipt & Document Cloud Storage</h4>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {smsEnabled ? 'Active — Automatically dispatches instant SMS alerts upon voucher events' : 'Disabled — No SMS notifications will be dispatched'}
+                        {cloudinaryEnabled ? 'Active — Unsigned direct upload for receipt images and PDF documents' : 'Disabled — Using local/Firestore storage'}
                       </p>
                     </div>
                   </div>
@@ -1736,411 +1772,247 @@ export default function AdminSettingsView({
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={smsEnabled}
-                      onChange={(e) => setSmsEnabled(e.target.checked)}
+                      checked={cloudinaryEnabled}
+                      onChange={(e) => setCloudinaryEnabled(e.target.checked)}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#f7b944]"></div>
                   </label>
                 </div>
 
-                {/* ACCORDION 1: CONFIGURATION SETTINGS */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleSmsAccordion('config')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                        <Server className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">1. Configuration Settings</h4>
-                        <p className="text-xs text-slate-400">Gateway API Endpoint, Login Credentials & Recipient Phone Numbers</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-mono font-semibold">
-                        {smsGatewayUrl ? 'Configured' : 'Not Configured'}
-                      </span>
-                      {openSmsAccordions.config ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openSmsAccordions.config && (
-                    <div className="p-6 border-t border-slate-100 space-y-4 animate-in fade-in duration-200">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="md:col-span-3 space-y-1.5">
-                          <label className="block text-xs font-bold text-slate-700">
-                            Android Gateway API Endpoint URL
-                          </label>
-                          <input
-                            type="url"
-                            value={smsGatewayUrl}
-                            onChange={(e) => setSmsGatewayUrl(e.target.value)}
-                            placeholder="http://192.168.1.100:8080/message"
-                            className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                            required
-                          />
-                          <span className="text-[10px] text-slate-400">Exact API endpoint provided by your Android SMS Gate application</span>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="block text-xs font-bold text-slate-700">
-                            SMS Gate Username / Login ID
-                          </label>
-                          <input
-                            type="text"
-                            value={smsUsername}
-                            onChange={(e) => setSmsUsername(e.target.value)}
-                            placeholder="admin"
-                            className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                            required
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="block text-xs font-bold text-slate-700">
-                            SMS Gate Password / Secret Key
-                          </label>
-                          <div className="relative">
-                            <input
-                              type={showSmsPass ? 'text' : 'password'}
-                              value={smsPassword}
-                              onChange={(e) => setSmsPassword(e.target.value)}
-                              placeholder="Password"
-                              className="w-full py-2.5 pl-3 pr-9 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                              required
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowSmsPass(!showSmsPass)}
-                              className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                            >
-                              {showSmsPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="block text-xs font-bold text-slate-700">
-                            Alert Recipient Phone Numbers
-                          </label>
-                          <input
-                            type="text"
-                            value={smsRecipients}
-                            onChange={(e) => setSmsRecipients(e.target.value)}
-                            placeholder="+91 98765 43210, +91 91234 56789"
-                            className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                            required
-                          />
-                          <span className="text-[10px] text-slate-400">Comma separated numbers</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ACCORDION 2: NEW VOUCHER TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleSmsAccordion('new')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">2. New Voucher Template & Preview</h4>
-                        <p className="text-xs text-slate-400">SMS text dispatched when a new payment voucher is registered</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      {openSmsAccordions.new ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openSmsAccordions.new && (
-                    <div className="p-6 border-t border-slate-100 space-y-4 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
-                            <button
-                              key={`new-sms-${tag}`}
-                              type="button"
-                              onClick={() => setSmsTemplateNew(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <textarea
-                          value={smsTemplateNew}
-                          onChange={(e) => setSmsTemplateNew(e.target.value)}
-                          rows={2}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                          required
-                        />
-                      </div>
-
-                      {/* Realtime Live SMS Preview */}
-                      <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
-                          <span className="text-emerald-400 font-bold uppercase">LIVE OUTPUT PREVIEW — NEW VOUCHER</span>
-                          <span>Target: {smsRecipients}</span>
-                        </div>
-                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
-                          "{smsTemplateNew
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
-                            .replace(/\{category\}/g, 'Office Supplies')
-                            .replace(/\{date\}/g, '28-07-2026')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}"
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ACCORDION 3: VOUCHER CHANGES TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleSmsAccordion('edit')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">3. Voucher Changes Template & Preview</h4>
-                        <p className="text-xs text-slate-400">SMS text dispatched when an existing voucher is modified</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      {openSmsAccordions.edit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openSmsAccordions.edit && (
-                    <div className="p-6 border-t border-slate-100 space-y-4 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
-                            <button
-                              key={`edit-sms-${tag}`}
-                              type="button"
-                              onClick={() => setSmsTemplateEdit(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <textarea
-                          value={smsTemplateEdit}
-                          onChange={(e) => setSmsTemplateEdit(e.target.value)}
-                          rows={3}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                          required
-                        />
-                      </div>
-
-                      {/* Realtime Live SMS Preview */}
-                      <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
-                          <span className="text-amber-400 font-bold uppercase">LIVE OUTPUT PREVIEW — VOUCHER CHANGES</span>
-                          <span>Target: {smsRecipients}</span>
-                        </div>
-                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
-                          "{smsTemplateEdit
-                            .replace(/\{voucher_id\}/g, 'VOUCHER-104')
-                            .replace(/\{changed_fields\}/g, 'Name and Amount')
-                            .replace(/\{updated_by\}/g, 'Anita')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}3,500`)
-                            .replace(/\{paid_to\}/g, 'Rahul Sharma')
-                            .replace(/\{category\}/g, 'Office Supplies')
-                            .replace(/\{date\}/g, '28-07-2026')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}12,500`)}"
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ACCORDION 4: DEPOSIT TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleSmsAccordion('inward')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
+                {/* Cloudinary Config Card */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-4 h-4" />
+                        <Folder className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">4. Deposit Template & Preview</h4>
-                        <p className="text-xs text-slate-400">SMS text dispatched when money is added / deposited into petty cash</p>
+                        <h4 className="font-bold text-sm text-slate-800">Cloudinary Credentials & Preset Settings</h4>
+                        <p className="text-xs text-slate-400">Configure Cloud Name, Unsigned Upload Preset & Target Folder</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-sky-500"></span>
-                      {openSmsAccordions.inward ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Cloudinary Cloud Name <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={cloudinaryCloudName}
+                        onChange={(e) => setCloudinaryCloudName(e.target.value)}
+                        placeholder="ommaxelectric"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Your Cloud Name from Cloudinary Dashboard</span>
                     </div>
-                  </button>
 
-                  {openSmsAccordions.inward && (
-                    <div className="p-6 border-t border-slate-100 space-y-4 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
-                            <button
-                              key={`inward-sms-${tag}`}
-                              type="button"
-                              onClick={() => setSmsTemplateInward(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-sky-50 border border-slate-200 hover:border-sky-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-sky-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Unsigned Upload Preset <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={cloudinaryUploadPreset}
+                        onChange={(e) => setCloudinaryUploadPreset(e.target.value)}
+                        placeholder="petty_cash_receipts"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-400">Unsigned preset created in Cloudinary Settings -&gt; Upload</span>
+                    </div>
 
-                        <textarea
-                          value={smsTemplateInward}
-                          onChange={(e) => setSmsTemplateInward(e.target.value)}
-                          rows={2}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                          required
-                        />
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Cloudinary Target Folder
+                      </label>
+                      <input
+                        type="text"
+                        value={cloudinaryFolderName}
+                        onChange={(e) => setCloudinaryFolderName(e.target.value)}
+                        placeholder="PettyCashRegister"
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                      />
+                      <span className="text-[10px] text-slate-400">Folder inside Cloudinary Media Library for storing voucher receipts</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Storage Sync Mode
+                      </label>
+                      <select
+                        value={cloudinaryStorageMode}
+                        onChange={(e) => setCloudinaryStorageMode(e.target.value as any)}
+                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                      >
+                        <option value="HYBRID_FIRESTORE">Hybrid Mode (Cloudinary CDN URL + Firestore Ledger Sync)</option>
+                        <option value="DIRECT_CLOUDINARY">Direct Cloudinary (CDN Links Only)</option>
+                      </select>
+                      <span className="text-[10px] text-slate-400">Hybrid mode stores high-speed Cloudinary CDN URLs in Firestore</span>
+                    </div>
+                  </div>
+
+                  {/* Setup Guidance Box */}
+                  <div className="bg-sky-50/60 rounded-xl p-4 border border-sky-100 space-y-3 text-xs">
+                    <h5 className="font-bold text-sky-900 flex items-center gap-1.5 text-sm">
+                      <Info className="w-4 h-4 text-sky-600" />
+                      Cloudinary Upload Preset & Storage Structure Guide
+                    </h5>
+
+                    <div className="p-3 bg-white/80 rounded-lg border border-sky-200/80 text-[11px] space-y-1.5 text-slate-700">
+                      <p className="font-bold text-sky-950 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Preset Review Confirmation: Your Upload Preset (<code className="font-mono bg-sky-100 px-1 py-0.5 rounded text-sky-900 font-bold">petty_cash_receipts</code>) is perfectly configured!
+                      </p>
+                      <p className="text-slate-600">
+                        In Cloudinary, setting <strong>Signing Mode</strong> to <strong>Unsigned</strong> and <strong>Asset Folder</strong> to <code className="font-mono bg-slate-100 px-1 text-slate-800 font-bold">Petty Cash Register</code> matches your exact requirements.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                      <div className="p-2.5 bg-white/80 rounded-lg border border-sky-150 space-y-1">
+                        <span className="font-extrabold text-sky-900 block">📁 Automatic Folder Hierarchy:</span>
+                        <code className="block bg-slate-100 p-1.5 rounded font-mono text-[10px] text-slate-800">
+                          /Petty Cash Register / {"{Year}"} / {"{Month}"} /
+                        </code>
+                        <span className="text-slate-500 text-[10px] block">Example: <span className="font-mono text-slate-700">/Petty Cash Register/2026/August/</span></span>
                       </div>
 
-                      {/* Realtime Live SMS Preview */}
-                      <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
-                          <span className="text-sky-400 font-bold uppercase">LIVE OUTPUT PREVIEW — CASH DEPOSIT</span>
-                          <span>Target: {smsRecipients}</span>
-                        </div>
-                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
-                          "{smsTemplateInward
-                            .replace(/\{voucher_id\}/g, 'IW-101')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}25,000`)
-                            .replace(/\{paid_to\}/g, 'HDFC Bank (Parthiban)')
-                            .replace(/\{category\}/g, 'Bank Cash Withdrawal')
-                            .replace(/\{date\}/g, '28-07-2026')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}37,500`)}"
-                        </p>
+                      <div className="p-2.5 bg-white/80 rounded-lg border border-sky-150 space-y-1">
+                        <span className="font-extrabold text-sky-900 block">📄 File Naming & Format:</span>
+                        <code className="block bg-slate-100 p-1.5 rounded font-mono text-[10px] text-slate-800">
+                          {"{VoucherNo}"}_{"{OriginalFileName}"}
+                        </code>
+                        <span className="text-slate-500 text-[10px] block">Example: <span className="font-mono text-slate-700">26_bill_receipt.png</span> | Allowed: PNG, JPG, JPEG, PDF</span>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
 
-                {/* ACCORDION 5: DEPOSIT CHANGES TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleSmsAccordion('inwardEdit')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">5. Deposit Changes Template & Preview</h4>
-                        <p className="text-xs text-slate-400">SMS text dispatched when an existing inward deposit is modified</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      {openSmsAccordions.inwardEdit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openSmsAccordions.inwardEdit && (
-                    <div className="p-6 border-t border-slate-100 space-y-4 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{category}', '{date}', '{balance}'].map((tag) => (
-                            <button
-                              key={`inward-edit-sms-${tag}`}
-                              type="button"
-                              onClick={() => setSmsTemplateInwardEdit(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <textarea
-                          value={smsTemplateInwardEdit}
-                          onChange={(e) => setSmsTemplateInwardEdit(e.target.value)}
-                          rows={3}
-                          className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                          required
-                        />
-                      </div>
-
-                      {/* Realtime Live SMS Preview */}
-                      <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2 text-[10px] text-slate-400 font-mono">
-                          <span className="text-amber-400 font-bold uppercase">LIVE OUTPUT PREVIEW — DEPOSIT CHANGES</span>
-                          <span>Target: {smsRecipients}</span>
-                        </div>
-                        <p className="text-xs font-mono text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-800 leading-relaxed">
-                          "{smsTemplateInwardEdit
-                            .replace(/\{voucher_id\}/g, 'IW-101')
-                            .replace(/\{changed_fields\}/g, 'Amount and Category')
-                            .replace(/\{updated_by\}/g, 'Anita')
-                            .replace(/\{amount\}/g, `${appSettings.currencySymbol}25,000`)
-                            .replace(/\{paid_to\}/g, 'HDFC Bank (Parthiban)')
-                            .replace(/\{category\}/g, 'Bank Cash Withdrawal')
-                            .replace(/\{date\}/g, '28-07-2026')
-                            .replace(/\{balance\}/g, `${appSettings.currencySymbol}37,500`)}"
-                        </p>
-                      </div>
+                  {/* Test Connection Result Notice */}
+                  {cloudinaryTestMsg && (
+                    <div className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                      cloudinaryTestMsg.success
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-amber-50 border-amber-200 text-amber-800'
+                    }`}>
+                      {cloudinaryTestMsg.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                      )}
+                      <span>{cloudinaryTestMsg.message}</span>
                     </div>
                   )}
-                </div>
 
-                {/* Bottom Actions Bar */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={handleTestSms}
-                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5 text-emerald-600" />
-                    Test Dispatched SMS Payloads
-                  </button>
-                  <button
-                    type="submit"
-                    className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Save SMS Gateway Settings
-                  </button>
+                  {/* Save & Test Buttons */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleTestCloudinary}
+                      disabled={isTestingCloudinary}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isTestingCloudinary ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5 text-sky-600" />}
+                      {isTestingCloudinary ? 'Testing Connection...' : 'Test Cloudinary Connection'}
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="px-6 py-2.5 bg-[#f7b944] hover:bg-[#e0a434] text-[#112231] font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <Save className="w-4 h-4" />
+                      Save Cloudinary Configuration
+                    </button>
+                  </div>
+
+                  {/* Automated Firestore Attachment Migration Engine */}
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-3 mt-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold shrink-0">
+                          <Upload className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-bold text-amber-950">
+                            Migrate Existing Firestore Attachments to Cloudinary
+                          </h5>
+                          <p className="text-[11px] text-amber-800 font-medium">
+                            Automatically transfer all older voucher receipt attachments stored in Firestore onto Cloudinary CDN.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        <span className="inline-block px-2.5 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-extrabold font-mono">
+                          {transactions.filter(t => t.receiptUrl && t.receiptUrl.trim() !== '' && !t.receiptUrl.includes('res.cloudinary.com')).length} Un-migrated Attachment(s)
+                        </span>
+                      </div>
+                    </div>
+
+                    {cloudinaryMigrationProgress && (
+                      <div className="p-3 bg-white rounded-xl border border-amber-200 space-y-2">
+                        <div className="flex justify-between items-center text-xs text-amber-900 font-bold">
+                          <span>Migrating: {cloudinaryMigrationProgress.currentVoucher}</span>
+                          <span className="font-mono">{cloudinaryMigrationProgress.current} / {cloudinaryMigrationProgress.total}</span>
+                        </div>
+                        <div className="w-full h-2 bg-amber-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-amber-500 transition-all duration-300"
+                            style={{ width: `${(cloudinaryMigrationProgress.current / cloudinaryMigrationProgress.total) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {cloudinaryMigrationSummary && (
+                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2 text-xs text-emerald-900 font-medium">
+                        <div className="flex items-center gap-1.5 font-bold text-emerald-950">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          Migration Complete! Successfully migrated {cloudinaryMigrationSummary.migratedCount} attachment(s) to Cloudinary.
+                        </div>
+                        {cloudinaryMigrationSummary.failedCount > 0 && (
+                          <div className="text-amber-800">
+                            ⚠️ {cloudinaryMigrationSummary.failedCount} attachment(s) failed during migration. You can re-run migration anytime.
+                          </div>
+                        )}
+                        <div className="max-h-36 overflow-y-auto space-y-1 bg-white p-2 rounded border border-emerald-100 font-mono text-[10px]">
+                          {cloudinaryMigrationSummary.details.map((item, idx) => (
+                            <div key={idx} className="flex items-center justify-between border-b border-slate-50 pb-1 gap-2">
+                              <span>Voucher #{item.voucherNo} ({item.name})</span>
+                              {item.newUrl ? (
+                                <a href={item.newUrl} target="_blank" rel="noreferrer" className="text-sky-600 underline truncate max-w-[220px]">
+                                  View on Cloudinary
+                                </a>
+                              ) : (
+                                <span className="text-rose-600">{item.error}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={handleMigrateFirestoreAttachmentsToCloudinary}
+                        disabled={isMigratingCloudinary || !cloudinaryCloudName || !cloudinaryUploadPreset}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                      >
+                        {isMigratingCloudinary ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                        {isMigratingCloudinary ? 'Migrating Attachments...' : 'Migrate All Firestore Attachments to Cloudinary'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </form>
             )}
 
             {/* ======================================================== */}
-            {/* SUB-SECTION 2: MICROSOFT GRAPH API EMAIL INTEGRATION     */}
+            {/* SUB-SECTION 1: MICROSOFT GRAPH API EMAIL INTEGRATION     */}
             {/* ======================================================== */}
             {integrationSubTab === 'EMAIL' && (
               <form onSubmit={handleSaveEmailSettings} className="space-y-4">

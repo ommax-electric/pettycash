@@ -18,8 +18,11 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+const configAny = firebaseConfig as any;
+const databaseId = configAny.firestoreDatabaseId || 'ai-studio-pettycashregiste-730a9cfd-1d99-477c-981b-b9e4babaaa3a';
+
+export const db = databaseId && databaseId !== '(default)'
+  ? getFirestore(app, databaseId)
   : getFirestore(app);
 
 export { 

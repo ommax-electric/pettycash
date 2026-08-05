@@ -1121,6 +1121,7 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   forceType="IN"
                   appSettings={appSettings}
+                  integrationSettings={integrationSettings}
                 />
               )}
               {activeTab === 'OUTWARD' && (
@@ -1134,6 +1135,7 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   forceType="OUT"
                   appSettings={appSettings}
+                  integrationSettings={integrationSettings}
                 />
               )}
               {activeTab === 'APPROVALS' && (
@@ -1168,6 +1170,7 @@ export default function App() {
                   onDeleteCategory={handleDeleteCategory}
                   logs={logs}
                   transactions={transactions}
+                  onUpdateTransaction={handleUpdateTransaction}
                   onBackupData={handleBackupData}
                   onRestoreData={handleRestoreData}
                   onWipeAllData={handleWipeAllData}
@@ -1242,6 +1245,7 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   forceType="IN"
                   appSettings={appSettings}
+                  integrationSettings={integrationSettings}
                 />
               )}
               {activeTab === 'OUTWARD' && (
@@ -1255,6 +1259,7 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   forceType="OUT"
                   appSettings={appSettings}
+                  integrationSettings={integrationSettings}
                 />
               )}
               {activeTab === 'APPROVALS' && (
@@ -1289,6 +1294,7 @@ export default function App() {
                   onDeleteCategory={handleDeleteCategory}
                   logs={logs}
                   transactions={transactions}
+                  onUpdateTransaction={handleUpdateTransaction}
                   onBackupData={handleBackupData}
                   onRestoreData={handleRestoreData}
                   onWipeAllData={handleWipeAllData}

@@ -25,15 +25,26 @@ export interface AppSettings {
 }
 
 export interface IntegrationSettings {
-  smsEnabled: boolean;
-  smsGatewayUrl: string;
-  smsUsername: string;
-  smsPassword: string;
-  smsRecipients: string;
-  smsTemplateNew: string;
-  smsTemplateEdit: string;
-  smsTemplateInward: string;
+  smsEnabled?: boolean;
+  smsGatewayUrl?: string;
+  smsUsername?: string;
+  smsPassword?: string;
+  smsRecipients?: string;
+  smsTemplateNew?: string;
+  smsTemplateEdit?: string;
+  smsTemplateInward?: string;
   smsTemplateInwardEdit?: string;
+  googleDriveEnabled?: boolean;
+  googleDriveFolderName?: string;
+  googleDriveFolderId?: string;
+  googleDriveStorageMode?: 'DIRECT_DRIVE' | 'HYBRID_FIRESTORE';
+  googleDriveConnectedAccount?: string;
+  cloudinaryEnabled?: boolean;
+  cloudinaryCloudName?: string;
+  cloudinaryUploadPreset?: string;
+  cloudinaryApiKey?: string;
+  cloudinaryFolderName?: string;
+  cloudinaryStorageMode?: 'DIRECT_CLOUDINARY' | 'HYBRID_FIRESTORE';
   emailEnabled: boolean;
   msTenantId: string;
   msClientId: string;

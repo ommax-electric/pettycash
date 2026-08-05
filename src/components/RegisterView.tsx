@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink } from 'lucide-react';
-import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings } from '../types';
+import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab } from '../utils';
+import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
 
 interface RegisterViewProps {
   transactions: Transaction[];
@@ -14,6 +15,7 @@ interface RegisterViewProps {
   onDeleteTransaction?: (id: string) => void;
   forceType?: 'IN' | 'OUT';
   appSettings?: AppSettings;
+  integrationSettings?: IntegrationSettings;
 }
 
 const formatDateToDMY = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
@@ -97,7 +99,8 @@ export default function RegisterView({
   onUpdateTransaction,
   onDeleteTransaction,
   forceType,
-  appSettings
+  appSettings,
+  integrationSettings
 }: RegisterViewProps) {
   const currencySymbol = appSettings?.currencySymbol || '₹';
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
@@ -194,7 +197,14 @@ export default function RegisterView({
   
   // Drag and drop / Receipt File states
   const [dragActive, setDragActive] = useState(false);
-  const [receiptFile, setReceiptFile] = useState<{ name: string; size: string; dataUrl?: string | null } | null>(null);
+  const [receiptFile, setReceiptFile] = useState<{ 
+    name: string; 
+    size: string; 
+    dataUrl?: string | null;
+    cloudinaryUrl?: string | null;
+    isUploading?: boolean;
+    uploadError?: string | null;
+  } | null>(null);
 
   const [selectedDetailTransaction, setSelectedDetailTransaction] = useState<Transaction | null>(null);
   const [viewingAttachment, setViewingAttachment] = useState<Transaction | null>(null);
@@ -324,37 +334,79 @@ export default function RegisterView({
     currentPage * itemsPerPage
   );
 
-  // Validate and set uploaded file
-  const validateAndSetFile = (file: File) => {
+  // Validate and set uploaded file with client-side auto compression & instant auto-upload
+  const validateAndSetFile = async (file: File) => {
     setFormError('');
     
-    const allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'webp'];
+    // Strictly allowed 4 formats: PNG, JPG, JPEG, PDF
+    const allowedExtensions = ['png', 'jpg', 'jpeg', 'pdf'];
     const extension = file.name.split('.').pop()?.toLowerCase() || '';
     
     if (!allowedExtensions.includes(extension)) {
-      setFormError('Invalid file format. Only JPG, PNG, WEBP, and PDF files are accepted.');
+      setFormError('Invalid file format. Strictly only PNG, JPG, JPEG, and PDF documents are allowed.');
       setReceiptFile(null);
       return false;
     }
     
-    const maxSizeBytes = 5 * 1024 * 1024; // 5MB limit
+    const maxSizeBytes = 10 * 1024 * 1024; // 10MB limit before auto-compression
     if (file.size > maxSizeBytes) {
-      setFormError('File size exceeds the 5MB limit.');
+      setFormError('File size exceeds the 10MB limit.');
       setReceiptFile(null);
       return false;
     }
     
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
+    try {
+      const processed = await compressAndProcessFile(file);
+      
+      const isCloudinaryActive = Boolean(integrationSettings?.cloudinaryEnabled);
       setReceiptFile({
-        name: file.name,
-        size: (file.size / 1024).toFixed(1) + ' KB',
-        dataUrl: result
+        name: processed.name,
+        size: processed.size,
+        dataUrl: processed.dataUrl,
+        cloudinaryUrl: null,
+        isUploading: isCloudinaryActive,
+        uploadError: null
       });
-    };
-    reader.readAsDataURL(file);
-    return true;
+
+      if (isCloudinaryActive) {
+        // Instant Auto Upload to Cloudinary upon selection!
+        const voucherNo = formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '26';
+        uploadReceiptToCloudinary(
+          processed.dataUrl,
+          processed.name,
+          voucherNo,
+          formDate || new Date().toISOString().split('T')[0],
+          integrationSettings
+        ).then((cRes) => {
+          if (cRes.success && cRes.url) {
+            setReceiptFile(prev => prev ? {
+              ...prev,
+              cloudinaryUrl: cRes.url,
+              isUploading: false
+            } : null);
+          } else {
+            setReceiptFile(prev => prev ? {
+              ...prev,
+              isUploading: false,
+              uploadError: cRes.message || 'Auto-upload failed'
+            } : null);
+          }
+        }).catch((err) => {
+          console.warn('Auto-upload caught error:', err);
+          setReceiptFile(prev => prev ? {
+            ...prev,
+            isUploading: false,
+            uploadError: 'Auto-upload failed'
+          } : null);
+        });
+      }
+
+      return true;
+    } catch (err) {
+      setFormError('Failed to process or compress attachment file.');
+      setReceiptFile(null);
+      return false;
+    }
   };
 
   // Handle Drag & Drop receipts
@@ -464,7 +516,7 @@ export default function RegisterView({
   };
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
@@ -549,6 +601,26 @@ export default function RegisterView({
       return;
     }
 
+    // Process Cloudinary Attachment Upload if enabled
+    let finalReceiptUrl = receiptFile ? (receiptFile.cloudinaryUrl || receiptFile.dataUrl || null) : null;
+
+    if (receiptFile?.dataUrl && !receiptFile.cloudinaryUrl && receiptFile.dataUrl.startsWith('data:') && integrationSettings?.cloudinaryEnabled) {
+      try {
+        const cRes = await uploadReceiptToCloudinary(
+          receiptFile.dataUrl,
+          receiptFile.name,
+          refVal,
+          formDate,
+          integrationSettings
+        );
+        if (cRes.success && cRes.url) {
+          finalReceiptUrl = cRes.url;
+        }
+      } catch (err) {
+        console.warn('Cloudinary upload warning:', err);
+      }
+    }
+
     if (editingTransaction) {
       if (onUpdateTransaction) {
         onUpdateTransaction({
@@ -562,7 +634,7 @@ export default function RegisterView({
           description: formDescription,
           receiptName: receiptFile ? receiptFile.name : null,
           receiptSize: receiptFile ? receiptFile.size : null,
-          receiptUrl: receiptFile ? receiptFile.dataUrl || null : null,
+          receiptUrl: finalReceiptUrl,
           remarks: formRemarks,
           paymentType: formPaymentType
         });
@@ -583,7 +655,7 @@ export default function RegisterView({
         description: formDescription,
         receiptName: receiptFile ? receiptFile.name : null,
         receiptSize: receiptFile ? receiptFile.size : null,
-        receiptUrl: receiptFile ? receiptFile.dataUrl || null : null,
+        receiptUrl: finalReceiptUrl,
         remarks: formRemarks,
         paymentType: formPaymentType
       });
@@ -3811,23 +3883,47 @@ export default function RegisterView({
                             <FileText className="w-7 h-7 text-rose-600 mx-auto" />
                             <p className="text-[11px] font-bold text-slate-800 break-all">{receiptFile.name}</p>
                             <p className="text-[9px] text-slate-400 font-mono">{receiptFile.size}</p>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                setReceiptFile(null);
-                              }}
-                              className="mt-1 text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
-                            >
-                              Remove file
-                            </button>
+
+                            {receiptFile.isUploading && (
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-medium border border-sky-200 animate-pulse">
+                                <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping"></span>
+                                Auto-Uploading to Cloudinary...
+                              </div>
+                            )}
+
+                            {receiptFile.cloudinaryUrl && (
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
+                                <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                Auto-Uploaded to Cloudinary
+                              </div>
+                            )}
+
+                            {receiptFile.uploadError && (
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium border border-amber-200">
+                                <AlertCircle className="w-3 h-3 text-amber-600" />
+                                {receiptFile.uploadError} (Will retry on submit)
+                              </div>
+                            )}
+
+                            <div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  setReceiptFile(null);
+                                }}
+                                className="mt-1 text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
+                              >
+                                Remove file
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <div className="space-y-1">
                             <Paperclip className="w-7 h-7 text-slate-400 mx-auto" />
                             <p className="text-[11px] font-bold text-slate-600">Drag & drop receipt here, or <span className="text-slate-900 underline">browse</span></p>
-                            <p className="text-[9px] text-slate-400">PDF, JPG, or PNG formats (Max 3MB)</p>
+                            <p className="text-[9px] text-slate-400">PNG, JPG, JPEG, or PDF formats (Auto-Compressed & Auto-Uploaded)</p>
                           </div>
                         )}
                       </div>

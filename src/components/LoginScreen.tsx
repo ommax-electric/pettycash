@@ -26,21 +26,27 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
     // Simulate network delay
     setTimeout(() => {
       const trimmedUser = username.trim().toLowerCase();
+      const trimmedPassword = password.trim();
+
       const matchedUser = activeUsers.find(u => 
-        u.username.toLowerCase() === trimmedUser || 
-        (u.empId && u.empId.toLowerCase() === trimmedUser)
+        (u.username && u.username.toLowerCase() === trimmedUser) || 
+        (u.empId && u.empId.toLowerCase() === trimmedUser) ||
+        (u.email && u.email.toLowerCase() === trimmedUser)
       );
 
-      // Check password if set on user, or fallback to default pattern
       let isValidPassword = false;
+
       if (matchedUser) {
         if (matchedUser.password) {
-          isValidPassword = password === matchedUser.password;
+          isValidPassword = password === matchedUser.password || trimmedPassword === matchedUser.password;
         } else {
+          const userKey = (matchedUser.username || '').toLowerCase();
           isValidPassword = 
-            (trimmedUser === 'admin' && (password === 'admin123' || password === 'admin@123')) ||
-            (trimmedUser === 'custodian' && (password === 'custodian123' || password === 'custodian@123')) ||
-            (trimmedUser === 'auditor' && (password === 'auditor123' || password === 'auditor@123'));
+            (userKey === 'admin' && (trimmedPassword === 'admin123' || trimmedPassword === 'admin@123')) ||
+            (userKey === 'manager' && (trimmedPassword === 'manager123' || trimmedPassword === 'manager@123')) ||
+            (userKey === 'custodian' && (trimmedPassword === 'custodian123' || trimmedPassword === 'custodian@123')) ||
+            (userKey === 'moorthi' && (trimmedPassword === 'user123' || trimmedPassword === 'user@123')) ||
+            (userKey === 'auditor' && (trimmedPassword === 'auditor123' || trimmedPassword === 'auditor@123'));
         }
       }
 
@@ -50,7 +56,7 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
         setError('Invalid username or password.');
         setIsSubmitting(false);
       }
-    }, 600);
+    }, 400);
   };
 
   return (
