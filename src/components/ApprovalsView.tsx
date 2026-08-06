@@ -5,7 +5,7 @@ import {
   Eye, FileText, Check, X, Paperclip, ExternalLink
 } from 'lucide-react';
 import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
-import { openAttachmentInNewTab } from '../utils';
+import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 
 interface ApprovalsViewProps {
   transactions: Transaction[];
@@ -106,7 +106,7 @@ export default function ApprovalsView({
     return historyTxns;
   };
 
-  const currentList = getTabTransactions();
+  const currentList = sortTransactionsByIdDesc(getTabTransactions());
 
   const triggerSuccessAlert = (msg: string) => {
     setActionSuccessMsg(msg);
@@ -237,18 +237,18 @@ export default function ApprovalsView({
         ) : (
           <div>
             {/* 1. DESKTOP RESPONSIVE TABLE (MD & UP) */}
-            <div className="hidden md:block rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900">
-              <table className="w-full text-left border-collapse">
+            <div className="hidden md:block rounded-xl border border-slate-200 dark:border-slate-800 overflow-x-auto bg-white dark:bg-slate-900 shadow-xs">
+              <table className="w-full min-w-[820px] text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-3.5">Voucher #</th>
-                    <th className="py-3 px-3.5">Date</th>
-                    <th className="py-3 px-3.5">Claimant / Paid To</th>
-                    <th className="py-3 px-3.5">Category</th>
-                    <th className="py-3 px-3.5">Particulars</th>
-                    <th className="py-3 px-3.5 text-right">Amount</th>
-                    <th className="py-3 px-3.5">Status</th>
-                    <th className="py-3 px-3.5 text-center">Actions</th>
+                    <th className="py-3 px-2.5 sm:px-3">Voucher #</th>
+                    <th className="py-3 px-2.5 sm:px-3">Date</th>
+                    <th className="py-3 px-2.5 sm:px-3">Claimant / Paid To</th>
+                    <th className="py-3 px-2.5 sm:px-3">Category</th>
+                    <th className="py-3 px-2.5 sm:px-3">Particulars</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-right">Amount</th>
+                    <th className="py-3 px-2.5 sm:px-3">Status</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
@@ -260,30 +260,30 @@ export default function ApprovalsView({
 
                     return (
                       <tr key={txn.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3.5 px-3.5 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                        <td className="py-3 px-2.5 sm:px-3 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           #{txn.reference || txn.id}
                         </td>
-                        <td className="py-3.5 px-3.5 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
+                        <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
                           {formatDateToDMY(txn.date)}
                         </td>
-                        <td className="py-3.5 px-3.5 font-semibold text-slate-800 dark:text-slate-200 max-w-[150px] truncate">
+                        <td className="py-3 px-2.5 sm:px-3 font-semibold text-slate-800 dark:text-slate-200 max-w-[140px] truncate">
                           {txn.merchant}
                           {txn.requestedBy && txn.requestedBy !== txn.merchant && (
-                            <span className="block text-[10px] text-slate-400 font-normal">Req: {txn.requestedBy}</span>
+                            <span className="block text-[10px] text-slate-400 font-normal truncate">Req: {txn.requestedBy}</span>
                           )}
                         </td>
-                        <td className="py-3.5 px-3.5 whitespace-nowrap">
+                        <td className="py-3 px-2.5 sm:px-3 whitespace-nowrap">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                             {txn.category}
                           </span>
                         </td>
-                        <td className="py-3.5 px-3.5 text-slate-600 dark:text-slate-400 max-w-[200px] truncate" title={txn.description}>
+                        <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 max-w-[180px] truncate" title={txn.description}>
                           {txn.description || 'N/A'}
                         </td>
-                        <td className="py-3.5 px-3.5 text-right font-black text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                        <td className="py-3 px-2.5 sm:px-3 text-right font-black text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
-                        <td className="py-3.5 px-3.5 whitespace-nowrap">
+                        <td className="py-3 px-2.5 sm:px-3 whitespace-nowrap">
                           {isPending && (
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
                               <Clock className="w-3.5 h-3.5 mr-1" />
@@ -309,7 +309,7 @@ export default function ApprovalsView({
                             </span>
                           )}
                         </td>
-                        <td className="py-3.5 px-3.5 text-center whitespace-nowrap">
+                        <td className="py-3 px-2.5 sm:px-3 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => setSelectedTxn(txn)}

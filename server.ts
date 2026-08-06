@@ -192,6 +192,35 @@ async function startServer() {
     }
   });
 
+  // API Route: Download external legacy attachments (e.g. Cloudinary PDFs) server-side to bypass CORS and return Base64 Data URL
+  app.post("/api/fetch-external-file", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string" || !url.startsWith("http")) {
+        return res.status(400).json({ error: "Invalid or missing URL parameter" });
+      }
+
+      console.log(`[File Proxy] Fetching external file server-side: ${url}`);
+      const fileRes = await fetch(url);
+
+      if (!fileRes.ok) {
+        return res.status(fileRes.status).json({ error: `Failed to fetch external file: ${fileRes.statusText}` });
+      }
+
+      const contentType = fileRes.headers.get("content-type") || "application/pdf";
+      const arrayBuffer = await fileRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64 = buffer.toString("base64");
+      const dataUrl = `data:${contentType};base64,${base64}`;
+
+      console.log(`[File Proxy] Successfully downloaded and converted file (${buffer.length} bytes, type: ${contentType})`);
+      return res.json({ success: true, contentType, size: buffer.length, dataUrl });
+    } catch (err: any) {
+      console.error("[File Proxy] Error fetching external file:", err);
+      return res.status(500).json({ error: err.message || "Failed to fetch external file" });
+    }
+  });
+
   // Vite middleware for development vs static build for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

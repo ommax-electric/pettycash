@@ -31,6 +31,7 @@ import {
   Terminal,
   Layers,
   RefreshCw,
+  FolderPlus,
   Check,
   Share2,
   Send,
@@ -48,8 +49,10 @@ import {
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendSmsNotification, sendEmailNotification, calculateCashBalance } from '../services/notificationService';
-import { testCloudinaryConnection, uploadReceiptToCloudinary } from '../services/cloudinaryService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
+import { convertExternalUrlToDataUrl } from '../services/fileAttachmentService';
+import { db, doc, updateDoc } from '../firebase';
+
 
 interface AdminSettingsViewProps {
   currentUser: User;
@@ -173,150 +176,50 @@ export default function AdminSettingsView({
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [wipeConfirmInput, setWipeConfirmInput] = useState('');
 
-  // --- 5. Integration Settings State (Cloudinary & Email) ---
-  const [integrationSubTab, setIntegrationSubTab] = useState<'CLOUDINARY' | 'EMAIL'>('CLOUDINARY');
+  // Batch Migration State for Legacy Cloudinary/External Attachments
+  const [isMigratingAttachments, setIsMigratingAttachments] = useState(false);
+  const [migrationStatusMsg, setMigrationStatusMsg] = useState<string | null>(null);
 
-  // Cloudinary State
-  const [cloudinaryEnabled, setCloudinaryEnabled] = useState<boolean>(() => {
-    return integrationSettings?.cloudinaryEnabled ?? (localStorage.getItem('petty_cash_cloudinary_enabled') !== 'false');
-  });
-  const [cloudinaryCloudName, setCloudinaryCloudName] = useState<string>(() => {
-    return integrationSettings?.cloudinaryCloudName || localStorage.getItem('petty_cash_cloudinary_cloud_name') || 'ommaxelectric';
-  });
-  const [cloudinaryUploadPreset, setCloudinaryUploadPreset] = useState<string>(() => {
-    return integrationSettings?.cloudinaryUploadPreset || localStorage.getItem('petty_cash_cloudinary_upload_preset') || 'petty_cash_receipts';
-  });
-  const [cloudinaryApiKey, setCloudinaryApiKey] = useState<string>(() => {
-    return integrationSettings?.cloudinaryApiKey || localStorage.getItem('petty_cash_cloudinary_api_key') || '';
-  });
-  const [cloudinaryFolderName, setCloudinaryFolderName] = useState<string>(() => {
-    return integrationSettings?.cloudinaryFolderName || localStorage.getItem('petty_cash_cloudinary_folder_name') || 'Petty Cash Register';
-  });
-  const [cloudinaryStorageMode, setCloudinaryStorageMode] = useState<'DIRECT_CLOUDINARY' | 'HYBRID_FIRESTORE'>(() => {
-    return integrationSettings?.cloudinaryStorageMode || 'HYBRID_FIRESTORE';
-  });
-  const [isTestingCloudinary, setIsTestingCloudinary] = useState(false);
-  const [cloudinaryTestMsg, setCloudinaryTestMsg] = useState<{ success: boolean; message: string } | null>(null);
+  const legacyAttachmentsCount = (transactions || []).filter(t => t.receiptUrl && t.receiptUrl.startsWith('http')).length;
 
-  // Cloudinary Migration State Engine
-  const [isMigratingCloudinary, setIsMigratingCloudinary] = useState(false);
-  const [cloudinaryMigrationProgress, setCloudinaryMigrationProgress] = useState<{ current: number; total: number; currentVoucher: string } | null>(null);
-  const [cloudinaryMigrationSummary, setCloudinaryMigrationSummary] = useState<{
-    migratedCount: number;
-    failedCount: number;
-    details: Array<{ voucherNo: string; name: string; oldUrl: string; newUrl?: string; error?: string }>;
-  } | null>(null);
-
-  const handleMigrateFirestoreAttachmentsToCloudinary = async () => {
-    const eligibleTxns = transactions.filter(t => {
-      const url = t.receiptUrl || '';
-      return Boolean(url && url.trim() !== '' && !url.includes('res.cloudinary.com'));
-    });
-
-    if (eligibleTxns.length === 0) {
-      setCloudinaryMigrationSummary({
-        migratedCount: 0,
-        failedCount: 0,
-        details: []
-      });
+  const handleBatchMigrateAttachments = async () => {
+    setIsMigratingAttachments(true);
+    setMigrationStatusMsg('Starting legacy attachment conversion & pull to Firestore...');
+    const legacyTxns = (transactions || []).filter(t => t.receiptUrl && t.receiptUrl.startsWith('http'));
+    
+    if (legacyTxns.length === 0) {
+      setMigrationStatusMsg('All attachments are already stored natively in Firestore! No legacy external URLs found.');
+      setIsMigratingAttachments(false);
       return;
     }
 
-    setIsMigratingCloudinary(true);
-    setCloudinaryMigrationSummary(null);
-
     let successCount = 0;
-    let failCount = 0;
-    const detailsList: Array<{ voucherNo: string; name: string; oldUrl: string; newUrl?: string; error?: string }> = [];
-
-    const currentIntSettings: IntegrationSettings = {
-      emailEnabled: false,
-      msTenantId: '',
-      msClientId: '',
-      msClientSecret: '',
-      msSenderEmail: '',
-      msSenderName: '',
-      emailRecipients: '',
-      emailSubjectNew: '',
-      emailBodyNew: '',
-      emailSubjectEdit: '',
-      emailBodyEdit: '',
-      emailSubjectInward: '',
-      emailBodyInward: '',
-      ...(integrationSettings || {}),
-      cloudinaryCloudName,
-      cloudinaryApiKey,
-      cloudinaryUploadPreset,
-      cloudinaryFolderName,
-      cloudinaryEnabled: true
-    };
-
-    for (let i = 0; i < eligibleTxns.length; i++) {
-      const txn = eligibleTxns[i];
-      const voucherNo = txn.reference || txn.id.substring(0, 6);
-
-      setCloudinaryMigrationProgress({
-        current: i + 1,
-        total: eligibleTxns.length,
-        currentVoucher: `Voucher #${voucherNo} (${txn.receiptName || 'Receipt Document'})`
-      });
-
+    for (let i = 0; i < legacyTxns.length; i++) {
+      const txn = legacyTxns[i];
+      setMigrationStatusMsg(`Pulling & Converting attachment ${i + 1} of ${legacyTxns.length} (Voucher: ${txn.reference || txn.id})...`);
       try {
-        const uploadRes = await uploadReceiptToCloudinary(
-          txn.receiptUrl!,
-          txn.receiptName || `receipt_${voucherNo}.png`,
-          voucherNo,
-          txn.date,
-          currentIntSettings
-        );
-
-        if (uploadRes.success && uploadRes.url) {
-          successCount++;
-          const updatedTxn: Transaction = {
-            ...txn,
-            receiptUrl: uploadRes.url
-          };
-
+        const dataUrl = await convertExternalUrlToDataUrl(txn.receiptUrl!);
+        if (dataUrl) {
+          await updateDoc(doc(db, 'transactions', txn.id), { receiptUrl: dataUrl });
           if (onUpdateTransaction) {
-            await onUpdateTransaction(updatedTxn);
+            onUpdateTransaction({ ...txn, receiptUrl: dataUrl });
           }
-
-          detailsList.push({
-            voucherNo,
-            name: txn.receiptName || 'Attachment',
-            oldUrl: 'Firestore Data Blob',
-            newUrl: uploadRes.url
-          });
-        } else {
-          failCount++;
-          detailsList.push({
-            voucherNo,
-            name: txn.receiptName || 'Attachment',
-            oldUrl: 'Firestore Data Blob',
-            error: uploadRes.message || 'Upload failed'
-          });
+          successCount++;
         }
-      } catch (err: any) {
-        failCount++;
-        detailsList.push({
-          voucherNo,
-          name: txn.receiptName || 'Attachment',
-          oldUrl: 'Firestore Data Blob',
-          error: err?.message || 'Error uploading file'
-        });
+      } catch (e) {
+        console.warn('Batch migration failed for transaction:', txn.id, e);
       }
     }
 
-    setIsMigratingCloudinary(false);
-    setCloudinaryMigrationProgress(null);
-    setCloudinaryMigrationSummary({
-      migratedCount: successCount,
-      failedCount: failCount,
-      details: detailsList
-    });
+    setIsMigratingAttachments(false);
+    setMigrationStatusMsg(`Migration Complete! Successfully pulled & migrated ${successCount} of ${legacyTxns.length} legacy attachments directly into Firestore.`);
   };
 
+
+  // --- 5. Integration Settings State (Email Alerts) ---
+
   const [openEmailAccordions, setOpenEmailAccordions] = useState<Record<string, boolean>>({
+
     config: true,
     new: false,
     edit: false,
@@ -426,13 +329,6 @@ export default function AdminSettingsView({
 
   useEffect(() => {
     if (integrationSettings) {
-      setCloudinaryEnabled(integrationSettings.cloudinaryEnabled ?? true);
-      setCloudinaryCloudName(integrationSettings.cloudinaryCloudName || 'ommaxelectric');
-      setCloudinaryUploadPreset(integrationSettings.cloudinaryUploadPreset || 'petty_cash_receipts');
-      setCloudinaryApiKey(integrationSettings.cloudinaryApiKey || '');
-      setCloudinaryFolderName(integrationSettings.cloudinaryFolderName || 'PettyCashRegister');
-      setCloudinaryStorageMode(integrationSettings.cloudinaryStorageMode || 'HYBRID_FIRESTORE');
-
       setEmailEnabled(integrationSettings.emailEnabled);
       setMsTenantId(integrationSettings.msTenantId || 'a63883ba-4173-48a2-a29d-247ca0c8e59a');
       setMsClientId(integrationSettings.msClientId || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6');
@@ -464,75 +360,14 @@ export default function AdminSettingsView({
   const [integrationSuccess, setIntegrationSuccess] = useState<string>('');
   const [testNotificationModal, setTestNotificationModal] = useState<{ title: string; content: string; type: 'SMS' | 'EMAIL' } | null>(null);
 
-  const handleSaveCloudinarySettings = (e: React.FormEvent) => {
-    e.preventDefault();
-    const updated: IntegrationSettings = {
-      ...integrationSettings,
-      smsEnabled: false,
-      cloudinaryEnabled,
-      cloudinaryCloudName,
-      cloudinaryUploadPreset,
-      cloudinaryApiKey,
-      cloudinaryFolderName,
-      cloudinaryStorageMode,
-      googleDriveEnabled: false,
-      emailEnabled,
-      msTenantId,
-      msClientId,
-      msClientSecret,
-      msSenderEmail,
-      msSenderName,
-      emailRecipients,
-      emailSubjectNew,
-      emailBodyNew,
-      emailSubjectEdit,
-      emailBodyEdit,
-      emailSubjectInward,
-      emailBodyInward,
-      emailSubjectInwardEdit,
-      emailBodyInwardEdit,
-      emailSubjectRequestSubmitted: emailSubjectReqSubmitted,
-      emailBodyRequestSubmitted: emailBodyReqSubmitted,
-      emailSubjectRequestApproved: emailSubjectReqApproved,
-      emailBodyRequestApproved: emailBodyReqApproved,
-      emailSubjectRequestPaid: emailSubjectReqPaid,
-      emailBodyRequestPaid: emailBodyReqPaid,
-      emailSubjectRequestRejected: emailSubjectReqRejected,
-      emailBodyRequestRejected: emailBodyReqRejected
-    };
 
-    if (onUpdateIntegrationSettings) {
-      onUpdateIntegrationSettings(updated);
-    } else {
-      localStorage.setItem('petty_cash_cloudinary_enabled', String(cloudinaryEnabled));
-      localStorage.setItem('petty_cash_cloudinary_cloud_name', cloudinaryCloudName);
-      localStorage.setItem('petty_cash_cloudinary_upload_preset', cloudinaryUploadPreset);
-      localStorage.setItem('petty_cash_cloudinary_api_key', cloudinaryApiKey);
-      localStorage.setItem('petty_cash_cloudinary_folder_name', cloudinaryFolderName);
-    }
-    setIntegrationSuccess('Cloudinary Storage configuration saved successfully to Firestore!');
-    setTimeout(() => setIntegrationSuccess(''), 3500);
-  };
-
-  const handleTestCloudinary = async () => {
-    setIsTestingCloudinary(true);
-    setCloudinaryTestMsg(null);
-    const res = await testCloudinaryConnection(cloudinaryCloudName, cloudinaryUploadPreset);
-    setIsTestingCloudinary(false);
-    setCloudinaryTestMsg(res);
-  };
 
   const handleSaveEmailSettings = (e: React.FormEvent) => {
     e.preventDefault();
     const updated: IntegrationSettings = {
       ...integrationSettings,
       smsEnabled: false,
-      cloudinaryEnabled,
-      cloudinaryCloudName,
-      cloudinaryUploadPreset,
-      cloudinaryApiKey,
-      cloudinaryFolderName,
-      cloudinaryStorageMode,
+      cloudinaryEnabled: false,
       googleDriveEnabled: false,
       emailEnabled,
       msTenantId,
@@ -642,12 +477,7 @@ export default function AdminSettingsView({
     const currentIntegrationSettings: IntegrationSettings = {
       ...integrationSettings,
       smsEnabled: false,
-      cloudinaryEnabled,
-      cloudinaryCloudName,
-      cloudinaryUploadPreset,
-      cloudinaryApiKey,
-      cloudinaryFolderName,
-      cloudinaryStorageMode,
+      cloudinaryEnabled: false,
       googleDriveEnabled: false,
       emailEnabled: true,
       msTenantId,
@@ -1697,46 +1527,17 @@ export default function AdminSettingsView({
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
-            {/* Header & Sub-tab navigation */}
+            {/* Header */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
-                    <Share2 className="w-5 h-5 text-[#f7b944]" />
-                    Voucher Alert & Notification Integrations
+                    <Mail className="w-5 h-5 text-indigo-600" />
+                    Microsoft Graph API Email Gateway (Office 365)
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Configure automated document attachment syncing via Cloudinary Cloud Storage and email alert dispatches via Microsoft Graph API Email Integration (Office 365).
+                    Configure corporate Office 365 / Shared Mailbox email alerts dispatched automatically upon voucher submission, approvals, or updates.
                   </p>
-                </div>
-
-                {/* Integration Sub-tabs (Cloudinary vs Email) */}
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0 flex-wrap sm:flex-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => setIntegrationSubTab('CLOUDINARY')}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                      integrationSubTab === 'CLOUDINARY'
-                        ? 'bg-white text-slate-900 shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Cloud className="w-3.5 h-3.5 text-sky-500" />
-                    Cloudinary Cloud Storage
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIntegrationSubTab('EMAIL')}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                      integrationSubTab === 'EMAIL'
-                        ? 'bg-white text-slate-900 shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Mail className="w-3.5 h-3.5 text-indigo-600" />
-                    Microsoft Email
-                  </button>
                 </div>
               </div>
 
@@ -1748,274 +1549,9 @@ export default function AdminSettingsView({
               )}
             </div>
 
-            {/* ======================================================== */}
-            {/* SUB-SECTION 0: CLOUDINARY ATTACHMENT STORAGE INTEGRATION */}
-            {/* ======================================================== */}
-            {integrationSubTab === 'CLOUDINARY' && (
-              <form onSubmit={handleSaveCloudinarySettings} className="space-y-4">
-                {/* Status Toggle Card */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
-                      cloudinaryEnabled ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-400'
-                    }`}>
-                      <Cloud className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-800">Cloudinary Receipt & Document Cloud Storage</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {cloudinaryEnabled ? 'Active — Unsigned direct upload for receipt images and PDF documents' : 'Disabled — Using local/Firestore storage'}
-                      </p>
-                    </div>
-                  </div>
+            {/* Microsoft Graph API Email Integration Form */}
+            <form onSubmit={handleSaveEmailSettings} className="space-y-4">
 
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={cloudinaryEnabled}
-                      onChange={(e) => setCloudinaryEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#f7b944]"></div>
-                  </label>
-                </div>
-
-                {/* Cloudinary Config Card */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-5">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                        <Folder className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">Cloudinary Credentials & Preset Settings</h4>
-                        <p className="text-xs text-slate-400">Configure Cloud Name, Unsigned Upload Preset & Target Folder</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Cloudinary Cloud Name <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={cloudinaryCloudName}
-                        onChange={(e) => setCloudinaryCloudName(e.target.value)}
-                        placeholder="ommaxelectric"
-                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                        required
-                      />
-                      <span className="text-[10px] text-slate-400">Your Cloud Name from Cloudinary Dashboard</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Unsigned Upload Preset <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={cloudinaryUploadPreset}
-                        onChange={(e) => setCloudinaryUploadPreset(e.target.value)}
-                        placeholder="petty_cash_receipts"
-                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                        required
-                      />
-                      <span className="text-[10px] text-slate-400">Unsigned preset created in Cloudinary Settings -&gt; Upload</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Cloudinary Target Folder
-                      </label>
-                      <input
-                        type="text"
-                        value={cloudinaryFolderName}
-                        onChange={(e) => setCloudinaryFolderName(e.target.value)}
-                        placeholder="PettyCashRegister"
-                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                      />
-                      <span className="text-[10px] text-slate-400">Folder inside Cloudinary Media Library for storing voucher receipts</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700">
-                        Storage Sync Mode
-                      </label>
-                      <select
-                        value={cloudinaryStorageMode}
-                        onChange={(e) => setCloudinaryStorageMode(e.target.value as any)}
-                        className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                      >
-                        <option value="HYBRID_FIRESTORE">Hybrid Mode (Cloudinary CDN URL + Firestore Ledger Sync)</option>
-                        <option value="DIRECT_CLOUDINARY">Direct Cloudinary (CDN Links Only)</option>
-                      </select>
-                      <span className="text-[10px] text-slate-400">Hybrid mode stores high-speed Cloudinary CDN URLs in Firestore</span>
-                    </div>
-                  </div>
-
-                  {/* Setup Guidance Box */}
-                  <div className="bg-sky-50/60 rounded-xl p-4 border border-sky-100 space-y-3 text-xs">
-                    <h5 className="font-bold text-sky-900 flex items-center gap-1.5 text-sm">
-                      <Info className="w-4 h-4 text-sky-600" />
-                      Cloudinary Upload Preset & Storage Structure Guide
-                    </h5>
-
-                    <div className="p-3 bg-white/80 rounded-lg border border-sky-200/80 text-[11px] space-y-1.5 text-slate-700">
-                      <p className="font-bold text-sky-950 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Preset Review Confirmation: Your Upload Preset (<code className="font-mono bg-sky-100 px-1 py-0.5 rounded text-sky-900 font-bold">petty_cash_receipts</code>) is perfectly configured!
-                      </p>
-                      <p className="text-slate-600">
-                        In Cloudinary, setting <strong>Signing Mode</strong> to <strong>Unsigned</strong> and <strong>Asset Folder</strong> to <code className="font-mono bg-slate-100 px-1 text-slate-800 font-bold">Petty Cash Register</code> matches your exact requirements.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
-                      <div className="p-2.5 bg-white/80 rounded-lg border border-sky-150 space-y-1">
-                        <span className="font-extrabold text-sky-900 block">📁 Automatic Folder Hierarchy:</span>
-                        <code className="block bg-slate-100 p-1.5 rounded font-mono text-[10px] text-slate-800">
-                          /Petty Cash Register / {"{Year}"} / {"{Month}"} /
-                        </code>
-                        <span className="text-slate-500 text-[10px] block">Example: <span className="font-mono text-slate-700">/Petty Cash Register/2026/August/</span></span>
-                      </div>
-
-                      <div className="p-2.5 bg-white/80 rounded-lg border border-sky-150 space-y-1">
-                        <span className="font-extrabold text-sky-900 block">📄 File Naming & Format:</span>
-                        <code className="block bg-slate-100 p-1.5 rounded font-mono text-[10px] text-slate-800">
-                          {"{VoucherNo}"}_{"{OriginalFileName}"}
-                        </code>
-                        <span className="text-slate-500 text-[10px] block">Example: <span className="font-mono text-slate-700">26_bill_receipt.png</span> | Allowed: PNG, JPG, JPEG, PDF</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Test Connection Result Notice */}
-                  {cloudinaryTestMsg && (
-                    <div className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
-                      cloudinaryTestMsg.success
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : 'bg-amber-50 border-amber-200 text-amber-800'
-                    }`}>
-                      {cloudinaryTestMsg.success ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-                      )}
-                      <span>{cloudinaryTestMsg.message}</span>
-                    </div>
-                  )}
-
-                  {/* Save & Test Buttons */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleTestCloudinary}
-                      disabled={isTestingCloudinary}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      {isTestingCloudinary ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5 text-sky-600" />}
-                      {isTestingCloudinary ? 'Testing Connection...' : 'Test Cloudinary Connection'}
-                    </button>
-
-                    <button
-                      type="submit"
-                      className="px-6 py-2.5 bg-[#f7b944] hover:bg-[#e0a434] text-[#112231] font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-sm"
-                    >
-                      <Save className="w-4 h-4" />
-                      Save Cloudinary Configuration
-                    </button>
-                  </div>
-
-                  {/* Automated Firestore Attachment Migration Engine */}
-                  <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-3 mt-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold shrink-0">
-                          <Upload className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h5 className="text-xs font-bold text-amber-950">
-                            Migrate Existing Firestore Attachments to Cloudinary
-                          </h5>
-                          <p className="text-[11px] text-amber-800 font-medium">
-                            Automatically transfer all older voucher receipt attachments stored in Firestore onto Cloudinary CDN.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0">
-                        <span className="inline-block px-2.5 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-extrabold font-mono">
-                          {transactions.filter(t => t.receiptUrl && t.receiptUrl.trim() !== '' && !t.receiptUrl.includes('res.cloudinary.com')).length} Un-migrated Attachment(s)
-                        </span>
-                      </div>
-                    </div>
-
-                    {cloudinaryMigrationProgress && (
-                      <div className="p-3 bg-white rounded-xl border border-amber-200 space-y-2">
-                        <div className="flex justify-between items-center text-xs text-amber-900 font-bold">
-                          <span>Migrating: {cloudinaryMigrationProgress.currentVoucher}</span>
-                          <span className="font-mono">{cloudinaryMigrationProgress.current} / {cloudinaryMigrationProgress.total}</span>
-                        </div>
-                        <div className="w-full h-2 bg-amber-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-amber-500 transition-all duration-300"
-                            style={{ width: `${(cloudinaryMigrationProgress.current / cloudinaryMigrationProgress.total) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {cloudinaryMigrationSummary && (
-                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2 text-xs text-emerald-900 font-medium">
-                        <div className="flex items-center gap-1.5 font-bold text-emerald-950">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          Migration Complete! Successfully migrated {cloudinaryMigrationSummary.migratedCount} attachment(s) to Cloudinary.
-                        </div>
-                        {cloudinaryMigrationSummary.failedCount > 0 && (
-                          <div className="text-amber-800">
-                            ⚠️ {cloudinaryMigrationSummary.failedCount} attachment(s) failed during migration. You can re-run migration anytime.
-                          </div>
-                        )}
-                        <div className="max-h-36 overflow-y-auto space-y-1 bg-white p-2 rounded border border-emerald-100 font-mono text-[10px]">
-                          {cloudinaryMigrationSummary.details.map((item, idx) => (
-                            <div key={idx} className="flex items-center justify-between border-b border-slate-50 pb-1 gap-2">
-                              <span>Voucher #{item.voucherNo} ({item.name})</span>
-                              {item.newUrl ? (
-                                <a href={item.newUrl} target="_blank" rel="noreferrer" className="text-sky-600 underline truncate max-w-[220px]">
-                                  View on Cloudinary
-                                </a>
-                              ) : (
-                                <span className="text-rose-600">{item.error}</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={handleMigrateFirestoreAttachmentsToCloudinary}
-                        disabled={isMigratingCloudinary || !cloudinaryCloudName || !cloudinaryUploadPreset}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                      >
-                        {isMigratingCloudinary ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                        {isMigratingCloudinary ? 'Migrating Attachments...' : 'Migrate All Firestore Attachments to Cloudinary'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            )}
-
-            {/* ======================================================== */}
-            {/* SUB-SECTION 1: MICROSOFT GRAPH API EMAIL INTEGRATION     */}
-            {/* ======================================================== */}
-            {integrationSubTab === 'EMAIL' && (
-              <form onSubmit={handleSaveEmailSettings} className="space-y-4">
                 {/* Toggle Email Alerts */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -3395,12 +2931,11 @@ export default function AdminSettingsView({
                   </button>
                 </div>
               </form>
-            )}
           </motion.div>
         )}
 
         {/* ======================================================== */}
-        {/* TAB 5: SYSTEM OPERATIONS (BACKUP, RESTORE, WIPE)        */}
+        {/* TAB 5: SYSTEM OPERATIONS (BACKUP, RESTORE, ATTACHMENT MIGRATION, WIPE) */}
         {/* ======================================================== */}
         {activeTab === 'SYSTEM_OPERATIONS' && (
           <motion.div
@@ -3411,6 +2946,7 @@ export default function AdminSettingsView({
             className="space-y-6"
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
               
               {/* 1. Backup Card */}
               <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 flex flex-col justify-between space-y-4">
@@ -3910,6 +3446,8 @@ export default function AdminSettingsView({
           </motion.div>
         </div>
       )}
+
+
 
     </div>
   );

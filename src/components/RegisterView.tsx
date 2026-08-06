@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink } from 'lucide-react';
+import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
-import { openAttachmentInNewTab } from '../utils';
+import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
+import { uploadReceiptToGoogleDrive } from '../services/googleDriveService';
+import { convertExternalUrlToDataUrl } from '../services/fileAttachmentService';
+import { db, doc, updateDoc } from '../firebase';
 
 interface RegisterViewProps {
   transactions: Transaction[];
@@ -246,33 +249,85 @@ export default function RegisterView({
   }, [formMerchant, transactions]);
 
   React.useEffect(() => {
-    if (viewingAttachment?.receiptUrl && viewingAttachment.receiptUrl.startsWith('data:')) {
-      try {
-        const dataUrl = viewingAttachment.receiptUrl;
-        const parts = dataUrl.split(',');
-        if (parts.length >= 2) {
-          const mimeMatch = parts[0].match(/:(.*?);/);
-          const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-          const binary = atob(parts[1]);
-          const array = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) {
-            array[i] = binary.charCodeAt(i);
+    let active = true;
+
+    if (viewingAttachment?.receiptUrl) {
+      const url = viewingAttachment.receiptUrl;
+
+      if (url.startsWith('data:')) {
+        try {
+          const parts = url.split(',');
+          if (parts.length >= 2) {
+            const mimeMatch = parts[0].match(/:(.*?);/);
+            const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+            const binary = atob(parts[1]);
+            const array = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              array[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([array], { type: mime });
+            const bUrl = URL.createObjectURL(blob);
+            if (active) setAttachmentBlobUrl(bUrl);
+            return () => {
+              URL.revokeObjectURL(bUrl);
+            };
           }
-          const blob = new Blob([array], { type: mime });
-          const bUrl = URL.createObjectURL(blob);
-          setAttachmentBlobUrl(bUrl);
-          return () => {
-            URL.revokeObjectURL(bUrl);
-          };
+        } catch (err) {
+          console.error('Failed to create Blob URL from Data URL:', err);
+          if (active) setAttachmentBlobUrl(null);
         }
-      } catch (err) {
-        console.error('Failed to create Blob URL:', err);
+      } else if (url.startsWith('http')) {
+        // Auto-pull external attachment (e.g. legacy Cloudinary URL) into native Data URL and update Firestore
+        convertExternalUrlToDataUrl(url).then(async (dataUrl) => {
+          if (!active || !dataUrl) return;
+
+          try {
+            // 1. Create local Blob URL
+            const parts = dataUrl.split(',');
+            if (parts.length >= 2) {
+              const mimeMatch = parts[0].match(/:(.*?);/);
+              const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+              const binary = atob(parts[1]);
+              const array = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                array[i] = binary.charCodeAt(i);
+              }
+              const blob = new Blob([array], { type: mime });
+              const bUrl = URL.createObjectURL(blob);
+              if (active) setAttachmentBlobUrl(bUrl);
+            }
+
+            // 2. Update viewingAttachment state locally
+            const updatedTxn: Transaction = {
+              ...viewingAttachment,
+              receiptUrl: dataUrl
+            };
+            if (active) setViewingAttachment(updatedTxn);
+
+            // 3. Automatically persist to Firestore Database so it is saved natively in Firestore
+            await updateDoc(doc(db, 'transactions', viewingAttachment.id), {
+              receiptUrl: dataUrl
+            });
+
+            if (onUpdateTransaction) {
+              onUpdateTransaction(updatedTxn);
+            }
+          } catch (e) {
+            console.warn('Failed to auto-save converted external attachment to Firestore:', e);
+          }
+        });
+      } else {
         setAttachmentBlobUrl(null);
       }
     } else {
       setAttachmentBlobUrl(null);
     }
-  }, [viewingAttachment]);
+
+    return () => {
+      active = false;
+    };
+  }, [viewingAttachment?.id, viewingAttachment?.receiptUrl]);
+
 
   const [formError, setFormError] = useState('');
 
@@ -290,43 +345,45 @@ export default function RegisterView({
   }, [categories]);
 
   // Apply filters
-  const filteredTransactions = transactions.filter(txn => {
-    const matchesType = forceType ? txn.type === forceType : (filterType === 'ALL' || txn.type === filterType);
-    
-    const txnDateStr = txn.date;
-    const matchesDate = isAllTime ? true : ((!fromDate || txnDateStr >= fromDate) && (!toDate || txnDateStr <= toDate));
+  const filteredTransactions = sortTransactionsByIdDesc(
+    transactions.filter(txn => {
+      const matchesType = forceType ? txn.type === forceType : (filterType === 'ALL' || txn.type === filterType);
+      
+      const txnDateStr = txn.date;
+      const matchesDate = isAllTime ? true : ((!fromDate || txnDateStr >= fromDate) && (!toDate || txnDateStr <= toDate));
 
-    if (forceType === 'IN') {
-      return matchesType && matchesDate;
-    } else if (forceType === 'OUT') {
-      const matchesPayee = filterPayee === 'ALL' || txn.merchant.trim() === filterPayee;
-      const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
-      const matchesStatus = filterStatus === 'ALL' || (txn.status || 'PAID') === filterStatus;
+      if (forceType === 'IN') {
+        return matchesType && matchesDate;
+      } else if (forceType === 'OUT') {
+        const matchesPayee = filterPayee === 'ALL' || txn.merchant.trim() === filterPayee;
+        const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
+        const matchesStatus = filterStatus === 'ALL' || (txn.status || 'PAID') === filterStatus;
 
-      let matchesUser = true;
-      if (currentUser.role === 'USER') {
-        const uName = (currentUser.fullName || '').toLowerCase();
-        const uId = (currentUser.username || '').toLowerCase();
-        const recBy = (txn.recordedBy || '').toLowerCase();
-        const reqBy = (txn.requestedBy || '').toLowerCase();
-        const merch = (txn.merchant || '').toLowerCase();
+        let matchesUser = true;
+        if (currentUser.role === 'USER') {
+          const uName = (currentUser.fullName || '').toLowerCase();
+          const uId = (currentUser.username || '').toLowerCase();
+          const recBy = (txn.recordedBy || '').toLowerCase();
+          const reqBy = (txn.requestedBy || '').toLowerCase();
+          const merch = (txn.merchant || '').toLowerCase();
 
-        matchesUser = recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
+          matchesUser = recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
+        }
+
+        return matchesType && matchesDate && matchesPayee && matchesCategory && matchesStatus && matchesUser;
+      } else {
+        const matchesSearch = 
+          txn.merchant.toLowerCase().includes(search.toLowerCase()) ||
+          txn.reference.toLowerCase().includes(search.toLowerCase()) ||
+          txn.description.toLowerCase().includes(search.toLowerCase());
+
+        const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
+        const matchesStatus = filterStatus === 'ALL' || txn.status === filterStatus;
+
+        return matchesSearch && matchesCategory && matchesType && matchesStatus && matchesDate;
       }
-
-      return matchesType && matchesDate && matchesPayee && matchesCategory && matchesStatus && matchesUser;
-    } else {
-      const matchesSearch = 
-        txn.merchant.toLowerCase().includes(search.toLowerCase()) ||
-        txn.reference.toLowerCase().includes(search.toLowerCase()) ||
-        txn.description.toLowerCase().includes(search.toLowerCase());
-
-      const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
-      const matchesStatus = filterStatus === 'ALL' || txn.status === filterStatus;
-
-      return matchesSearch && matchesCategory && matchesType && matchesStatus && matchesDate;
-    }
-  });
+    })
+  );
 
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage) || 1;
   const paginatedTransactions = filteredTransactions.slice(
@@ -358,30 +415,37 @@ export default function RegisterView({
     try {
       const processed = await compressAndProcessFile(file);
       
+      const isGoogleDriveActive = Boolean(integrationSettings?.googleDriveEnabled);
       const isCloudinaryActive = Boolean(integrationSettings?.cloudinaryEnabled);
+      const isAutoUploadActive = isGoogleDriveActive || isCloudinaryActive;
+
       setReceiptFile({
         name: processed.name,
         size: processed.size,
         dataUrl: processed.dataUrl,
         cloudinaryUrl: null,
-        isUploading: isCloudinaryActive,
+        isUploading: isAutoUploadActive,
         uploadError: null
       });
 
-      if (isCloudinaryActive) {
-        // Instant Auto Upload to Cloudinary upon selection!
-        const voucherNo = formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '26';
-        uploadReceiptToCloudinary(
+      if (isAutoUploadActive) {
+        // Instant Auto Upload to Google Drive / Cloud Storage upon selection!
+        const voucherNo = String(formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '26');
+        
+        const uploadFn = isGoogleDriveActive ? uploadReceiptToGoogleDrive : uploadReceiptToCloudinary;
+
+        uploadFn(
           processed.dataUrl,
           processed.name,
           voucherNo,
           formDate || new Date().toISOString().split('T')[0],
           integrationSettings
-        ).then((cRes) => {
-          if (cRes.success && cRes.url) {
+        ).then((cRes: any) => {
+          const uploadedUrl = cRes.driveUrl || cRes.url;
+          if (cRes.success && uploadedUrl) {
             setReceiptFile(prev => prev ? {
               ...prev,
-              cloudinaryUrl: cRes.url,
+              cloudinaryUrl: uploadedUrl,
               isUploading: false
             } : null);
           } else {
@@ -601,23 +665,43 @@ export default function RegisterView({
       return;
     }
 
-    // Process Cloudinary Attachment Upload if enabled
-    let finalReceiptUrl = receiptFile ? (receiptFile.cloudinaryUrl || receiptFile.dataUrl || null) : null;
+    // Process Google Drive / Cloud Attachment Upload if explicitly enabled
+    let finalReceiptUrl = receiptFile ? (receiptFile.dataUrl || receiptFile.cloudinaryUrl || null) : (editingTransaction?.receiptUrl || null);
 
-    if (receiptFile?.dataUrl && !receiptFile.cloudinaryUrl && receiptFile.dataUrl.startsWith('data:') && integrationSettings?.cloudinaryEnabled) {
-      try {
-        const cRes = await uploadReceiptToCloudinary(
-          receiptFile.dataUrl,
-          receiptFile.name,
-          refVal,
-          formDate,
-          integrationSettings
-        );
-        if (cRes.success && cRes.url) {
-          finalReceiptUrl = cRes.url;
+    if (receiptFile?.dataUrl && !receiptFile.cloudinaryUrl && receiptFile.dataUrl.startsWith('data:')) {
+      const isGoogleDriveActive = Boolean(integrationSettings?.googleDriveEnabled);
+      const isCloudinaryActive = Boolean(integrationSettings?.cloudinaryEnabled);
+
+      if (isGoogleDriveActive) {
+        try {
+          const dRes = await uploadReceiptToGoogleDrive(
+            receiptFile.dataUrl,
+            receiptFile.name,
+            refVal,
+            formDate,
+            integrationSettings
+          );
+          if (dRes.success && dRes.driveUrl) {
+            finalReceiptUrl = dRes.driveUrl;
+          }
+        } catch (err) {
+          console.warn('Google Drive upload warning:', err);
         }
-      } catch (err) {
-        console.warn('Cloudinary upload warning:', err);
+      } else if (isCloudinaryActive) {
+        try {
+          const cRes = await uploadReceiptToCloudinary(
+            receiptFile.dataUrl,
+            receiptFile.name,
+            refVal,
+            formDate,
+            integrationSettings
+          );
+          if (cRes.success && cRes.url) {
+            finalReceiptUrl = cRes.url;
+          }
+        } catch (err) {
+          console.warn('Cloudinary upload warning:', err);
+        }
       }
     }
 
@@ -632,8 +716,8 @@ export default function RegisterView({
           merchant: merchVal,
           reference: refVal,
           description: formDescription,
-          receiptName: receiptFile ? receiptFile.name : null,
-          receiptSize: receiptFile ? receiptFile.size : null,
+          receiptName: receiptFile ? receiptFile.name : (editingTransaction.receiptName || null),
+          receiptSize: receiptFile ? receiptFile.size : (editingTransaction.receiptSize || null),
           receiptUrl: finalReceiptUrl,
           remarks: formRemarks,
           paymentType: formPaymentType
@@ -2250,34 +2334,25 @@ export default function RegisterView({
                       </div>
                     ) : isPdf ? (
                       /* Actual PDF Attachment */
-                      <div className="flex flex-col items-center justify-center space-y-3">
+                      <div className="flex flex-col items-center justify-center space-y-3 w-full">
                         <object 
                           data={attachmentBlobUrl || url} 
                           type="application/pdf"
-                          className="w-full h-[52vh] sm:h-[58vh] rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden"
+                          className="w-full h-[52vh] sm:h-[58vh] rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden"
                         >
-                          <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-3 bg-white rounded-2xl">
-                            <FileText className="w-12 h-12 text-[#f7b944] mx-auto" />
+                          <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
+                            <FileText className="w-12 h-12 text-rose-500 mx-auto" />
                             <div>
-                              <p className="font-extrabold text-slate-900 text-sm">{name}</p>
-                              <p className="text-xs text-slate-500 mt-1">PDF Document Attached ({size})</p>
+                              <p className="text-xs font-bold text-slate-800">{name}</p>
+                              <p className="text-[11px] text-slate-500 mt-1 font-mono">{size}</p>
                             </div>
                             <button
                               type="button"
-                              onClick={() => {
-                                if (attachmentBlobUrl) {
-                                  window.open(attachmentBlobUrl, '_blank');
-                                } else if (url) {
-                                  const win = window.open();
-                                  if (win) {
-                                    win.document.write(`<iframe src="${url}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
-                                  }
-                                }
-                              }}
-                              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer mx-auto"
+                              onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
+                              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all shadow-xs"
                             >
                               <ExternalLink className="w-4 h-4" />
-                              Open PDF in New Browser Tab
+                              View / Open PDF Document
                             </button>
                           </div>
                         </object>
@@ -2385,7 +2460,7 @@ export default function RegisterView({
                       <>
                         <button
                           type="button"
-                          onClick={() => openAttachmentInNewTab(url, name)}
+                          onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
                           className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -3887,15 +3962,22 @@ export default function RegisterView({
                             {receiptFile.isUploading && (
                               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-medium border border-sky-200 animate-pulse">
                                 <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping"></span>
-                                Auto-Uploading to Cloudinary...
+                                {integrationSettings?.googleDriveEnabled ? "Auto-Uploading to Google Drive..." : integrationSettings?.cloudinaryEnabled ? "Auto-Uploading to Cloudinary..." : "Processing Attachment..."}
                               </div>
                             )}
 
-                            {receiptFile.cloudinaryUrl && (
+                            {receiptFile.cloudinaryUrl ? (
                               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
                                 <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                Auto-Uploaded to Cloudinary
+                                {integrationSettings?.googleDriveEnabled ? "Auto-Uploaded to Google Drive" : integrationSettings?.cloudinaryEnabled ? "Auto-Uploaded to Cloudinary" : "Uploaded"}
                               </div>
+                            ) : (
+                              !receiptFile.isUploading && receiptFile.dataUrl && (
+                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
+                                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                  Attachment Ready (Firestore Storage)
+                                </div>
+                              )
                             )}
 
                             {receiptFile.uploadError && (

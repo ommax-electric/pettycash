@@ -26,7 +26,7 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   googleDriveFolderId: '1A2b3C4d5E6f7G8h9I0j-PettyCashRoot',
   googleDriveStorageMode: 'HYBRID_FIRESTORE',
   googleDriveConnectedAccount: 'mail@ommaxelectric.com',
-  cloudinaryEnabled: true,
+  cloudinaryEnabled: false,
   cloudinaryCloudName: 'ommaxelectric',
   cloudinaryUploadPreset: 'petty_cash_receipts',
   cloudinaryApiKey: '',

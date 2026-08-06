@@ -19,6 +19,9 @@ import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserR
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
+import { convertExternalUrlToDataUrl } from './services/fileAttachmentService';
+import { sortTransactionsByIdDesc } from './utils';
+
 
 // Subcomponents
 import LoginScreen from './components/LoginScreen';
@@ -133,8 +136,7 @@ export default function App() {
           } else {
             const list: Transaction[] = [];
             snapshot.forEach((d) => list.push(d.data() as Transaction));
-            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-            setTransactions(list);
+            setTransactions(sortTransactionsByIdDesc(list));
           }
         }, (err) => console.warn('Firestore transactions sync notice:', err));
 
@@ -242,6 +244,38 @@ export default function App() {
       unsubs.forEach(unsub => unsub && unsub());
     };
   }, []);
+
+  // Auto-migrate legacy Cloudinary/external attachment URLs to native Firestore Data URLs in the background
+  useEffect(() => {
+    if (transactions.length === 0) return;
+    const legacyTxns = transactions.filter(t => t.receiptUrl && t.receiptUrl.startsWith('http'));
+    if (legacyTxns.length === 0) return;
+
+    let cancelled = false;
+    const runAutoMigration = async () => {
+      for (const txn of legacyTxns) {
+        if (cancelled) break;
+        try {
+          const dataUrl = await convertExternalUrlToDataUrl(txn.receiptUrl!);
+          if (dataUrl && !cancelled) {
+            await updateDoc(doc(db, 'transactions', txn.id), { receiptUrl: dataUrl });
+          }
+        } catch (e) {
+          console.warn('Background attachment migration notice:', e);
+        }
+      }
+    };
+
+    const timer = setTimeout(() => {
+      runAutoMigration();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [transactions.length]);
+
 
   // Fetch user public IP address for accurate audit log tracking
   const [userIpAddress, setUserIpAddress] = useState<string>(() => {

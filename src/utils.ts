@@ -146,3 +146,29 @@ export const openAttachmentInNewTab = (url?: string | null, fileName?: string): 
   }
 };
 
+/**
+ * Extracts numeric ID from transaction reference or id (e.g. "OW-029" -> 29, "28" -> 28).
+ */
+export const getTxnNumericId = (txn: { reference?: string; id?: string }): number => {
+  const ref = txn.reference || txn.id || '';
+  const match = ref.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+};
+
+/**
+ * Sorts transactions by numeric ID descending (latest / newest ID first).
+ * If IDs are equal, falls back to date descending.
+ */
+export const sortTransactionsByIdDesc = <T extends { reference?: string; id?: string; date?: string }>(txns: T[]): T[] => {
+  return [...txns].sort((a, b) => {
+    const numA = getTxnNumericId(a);
+    const numB = getTxnNumericId(b);
+    if (numA !== numB) {
+      return numB - numA; // Higher numeric ID first (29, 28, 27...)
+    }
+    const dateA = a.date ? new Date(a.date).getTime() : 0;
+    const dateB = b.date ? new Date(b.date).getTime() : 0;
+    return dateB - dateA;
+  });
+};
+
