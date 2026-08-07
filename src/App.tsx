@@ -456,7 +456,7 @@ export default function App() {
 
   // Handler: Update transaction (for edits)
   const handleUpdateTransaction = (updatedTxn: Transaction) => {
-    if (!currentUser || currentUser.role === 'AUDITOR') return;
+    if (!currentUser || currentUser.role !== 'ADMIN') return;
 
     let finalTxn = updatedTxn;
     const target = transactions.find(t => 
@@ -581,7 +581,7 @@ export default function App() {
 
   // Handler: Delete/Void transaction with reason
   const handleDeleteTransaction = (id: string, reason?: string, permanent: boolean = false) => {
-    if (!currentUser || currentUser.role === 'AUDITOR') return;
+    if (!currentUser || currentUser.role !== 'ADMIN') return;
     
     const normSearchId = id.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10)));
     const targetTxn = transactions.find(t => 

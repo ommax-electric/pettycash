@@ -154,6 +154,7 @@ export default function RegisterView({
   const [deleteError, setDeleteError] = useState('');
 
   const handleOpenDeleteModal = (txn: Transaction) => {
+    if (currentUser.role !== 'ADMIN') return;
     setDeletingTxn(txn);
     setDeleteReasonInput('');
     setDeleteError('');
@@ -652,7 +653,7 @@ export default function RegisterView({
   };
 
   const handleEditClick = (txn: Transaction) => {
-    if (currentUser.role === 'AUDITOR') return;
+    if (currentUser.role !== 'ADMIN') return;
     setEditingTransaction(txn);
     setFormDate(txn.date);
     setFormType(txn.type);
@@ -2955,7 +2956,7 @@ export default function RegisterView({
                               <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                                 Voided
                               </span>
-                            ) : currentUser.role !== 'AUDITOR' && (
+                            ) : currentUser.role === 'ADMIN' && (
                               <>
                                 <button
                                   onClick={() => handleEditClick(txn)}
@@ -3047,7 +3048,7 @@ export default function RegisterView({
                           <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
                             Voided
                           </span>
-                        ) : currentUser.role !== 'AUDITOR' && (
+                        ) : currentUser.role === 'ADMIN' && (
                           <>
                             <button
                               onClick={() => handleEditClick(txn)}
@@ -3574,7 +3575,7 @@ export default function RegisterView({
                             <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                               Voided
                             </span>
-                          ) : currentUser.role !== 'AUDITOR' && (
+                          ) : currentUser.role === 'ADMIN' && (
                             <>
                               <button
                                 onClick={() => handleEditClick(txn)}
@@ -3682,7 +3683,7 @@ export default function RegisterView({
                       <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1.5 rounded-lg">
                         Voided
                       </span>
-                    ) : currentUser.role !== 'AUDITOR' && (
+                    ) : currentUser.role === 'ADMIN' && (
                       <>
                         <button
                           onClick={() => handleEditClick(txn)}
