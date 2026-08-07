@@ -15,7 +15,7 @@ interface RegisterViewProps {
   onAddTransaction: (txn: Omit<Transaction, 'id' | 'recordedBy'>) => void;
   onUpdateStatus: (id: string, status: TransactionStatus) => void;
   onUpdateTransaction?: (txn: Transaction) => void;
-  onDeleteTransaction?: (id: string, reason?: string) => void;
+  onDeleteTransaction?: (id: string, reason?: string, permanent?: boolean) => void;
   forceType?: 'IN' | 'OUT';
   appSettings?: AppSettings;
   integrationSettings?: IntegrationSettings;
@@ -159,13 +159,10 @@ export default function RegisterView({
     setDeleteError('');
   };
 
-  const handleConfirmDeleteWithReason = () => {
-    if (!deleteReasonInput.trim()) {
-      setDeleteError('Please enter a reason for deleting this entry.');
-      return;
-    }
+  const handleConfirmDeleteWithReason = (permanent = false) => {
+    const reasonStr = deleteReasonInput.trim() || (permanent ? 'Permanently deleted by user' : 'Cancelled / voided by user');
     if (deletingTxn && onDeleteTransaction) {
-      onDeleteTransaction(deletingTxn.id, deleteReasonInput.trim());
+      onDeleteTransaction(deletingTxn.id, reasonStr, permanent);
     }
     setDeletingTxn(null);
     setDeleteReasonInput('');
@@ -452,7 +449,7 @@ export default function RegisterView({
 
       if (isAutoUploadActive) {
         // Instant Auto Upload to Google Drive / Cloud Storage upon selection!
-        const voucherNo = String(formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '26');
+        const voucherNo = String(formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '1');
         
         const uploadFn = isGoogleDriveActive ? uploadReceiptToGoogleDrive : uploadReceiptToCloudinary;
 
@@ -541,7 +538,7 @@ export default function RegisterView({
   };
 
   const getNextOutwardVoucherNumber = (txns: Transaction[], excludeId?: string): number => {
-    let maxNum = 26; // Baseline requirement: 1 to 26 exist, so next generated is at least 27
+    let maxNum = 0; // Starts sequentially from 1 (or next after existing highest outward voucher)
     txns.forEach(t => {
       if (excludeId && t.id === excludeId) return;
       if (t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'))) return;
@@ -603,7 +600,7 @@ export default function RegisterView({
   };
 
   const handleEditClick = (txn: Transaction) => {
-    if (currentUser.role !== 'ADMIN') return;
+    if (currentUser.role === 'AUDITOR') return;
     setEditingTransaction(txn);
     setFormDate(txn.date);
     setFormType(txn.type);
@@ -678,7 +675,31 @@ export default function RegisterView({
     const isCurrentIn = forceTypeVal === 'IN' || refVal.toUpperCase().startsWith('IW-');
 
     const duplicateTxn = transactions.find(t => {
-      if (editingTransaction && t.id === editingTransaction.id) return false;
+      // Exclude the record currently being edited
+      if (editingTransaction) {
+        if (t.id === editingTransaction.id) return false;
+        if (editingTransaction.reference && (
+          t.reference === editingTransaction.reference ||
+          t.id === editingTransaction.reference ||
+          t.reference === editingTransaction.id
+        )) {
+          return false;
+        }
+
+        const isTargetIn = t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'));
+        const isEditingIn = editingTransaction.type === 'IN' || (editingTransaction.reference && editingTransaction.reference.toUpperCase().startsWith('IW-'));
+
+        if (isTargetIn === isEditingIn) {
+          const tNum = getNumericPart(t.reference) ?? getNumericPart(t.id);
+          const edNum = getNumericPart(editingTransaction.reference) ?? getNumericPart(editingTransaction.id);
+          if (tNum !== null && edNum !== null && tNum === edNum) return false;
+
+          const tNorm = normalizeVoucherStr(t.reference) || normalizeVoucherStr(t.id);
+          const edNorm = normalizeVoucherStr(editingTransaction.reference) || normalizeVoucherStr(editingTransaction.id);
+          if (tNorm && edNorm && tNorm === edNorm) return false;
+        }
+      }
+
       const isTargetIn = t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'));
 
       // Inward vouchers (IW-xxx) and Outward vouchers operate in separate sequence namespaces!
@@ -2086,6 +2107,110 @@ export default function RegisterView({
     );
   };
 
+  const renderDeleteModal = () => {
+    if (!deletingTxn) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+        <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden">
+          <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-rose-100 text-rose-600 rounded-xl">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">Delete / Void Voucher</h3>
+                <p className="text-[11px] text-rose-700 font-semibold font-mono">
+                  {deletingTxn.reference || deletingTxn.id}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeletingTxn(null)}
+              className="p-1 hover:bg-rose-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Voucher Number:</span>
+                <span className="font-mono font-bold text-slate-800">{deletingTxn.reference || deletingTxn.id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Amount:</span>
+                <span className="font-bold text-slate-900">{currencySymbol}{deletingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">{deletingTxn.type === 'IN' ? 'Deposited By:' : 'Paid To:'}</span>
+                <span className="font-semibold text-slate-700">{deletingTxn.merchant}</span>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="delete-reason-input" className="block text-xs font-bold text-slate-700 mb-1">
+                Reason for Deletion <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <textarea
+                id="delete-reason-input"
+                value={deleteReasonInput}
+                onChange={(e) => {
+                  setDeleteReasonInput(e.target.value);
+                  if (deleteError) setDeleteError('');
+                }}
+                placeholder="e.g. Duplicate entry, Wrong amount, Cancelled expense..."
+                rows={2}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-rose-500 focus:outline-hidden transition-all"
+              />
+              {deleteError && (
+                <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {deleteError}
+                </p>
+              )}
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+              <p className="font-bold">Deletion Options:</p>
+              <ul className="list-disc pl-4 space-y-0.5 font-medium text-amber-800">
+                <li><strong className="text-rose-700">Void Voucher:</strong> Keeps record with strikeout line for audit trace.</li>
+                <li><strong className="text-rose-700">Permanently Remove:</strong> Completely purges entry from database.</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeletingTxn(null)}
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDeleteWithReason(true)}
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                title="Completely remove record from database"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                Permanently Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDeleteWithReason(false)}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-900/10 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                Void Voucher
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderDetailModals = () => (
     <>
       {/* Unified Transaction Details & Edit History Modal */}
@@ -2776,7 +2901,7 @@ export default function RegisterView({
                               <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                                 Voided
                               </span>
-                            ) : currentUser.role === 'ADMIN' && (
+                            ) : currentUser.role !== 'AUDITOR' && (
                               <>
                                 <button
                                   onClick={() => handleEditClick(txn)}
@@ -2868,7 +2993,7 @@ export default function RegisterView({
                           <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
                             Voided
                           </span>
-                        ) : currentUser.role === 'ADMIN' && (
+                        ) : currentUser.role !== 'AUDITOR' && (
                           <>
                             <button
                               onClick={() => handleEditClick(txn)}
@@ -3015,6 +3140,7 @@ export default function RegisterView({
           )}
         </AnimatePresence>
         {renderDetailModals()}
+        {renderDeleteModal()}
       </div>
     );
   }
@@ -3394,7 +3520,7 @@ export default function RegisterView({
                             <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                               Voided
                             </span>
-                          ) : currentUser.role === 'ADMIN' && (
+                          ) : currentUser.role !== 'AUDITOR' && (
                             <>
                               <button
                                 onClick={() => handleEditClick(txn)}
@@ -3502,7 +3628,7 @@ export default function RegisterView({
                       <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1.5 rounded-lg">
                         Voided
                       </span>
-                    ) : currentUser.role === 'ADMIN' && (
+                    ) : currentUser.role !== 'AUDITOR' && (
                       <>
                         <button
                           onClick={() => handleEditClick(txn)}
@@ -3803,13 +3929,13 @@ export default function RegisterView({
                           type="text" 
                           value={formReference}
                           onChange={(e) => {
-                            if (currentUser.role === 'ADMIN') setFormReference(e.target.value);
+                            if (currentUser.role !== 'AUDITOR') setFormReference(e.target.value);
                           }}
-                          readOnly={currentUser.role !== 'ADMIN'}
+                          readOnly={currentUser.role === 'AUDITOR'}
                           placeholder="e.g. 27"
                           required
                           className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-mono font-bold ${
-                            currentUser.role !== 'ADMIN'
+                            currentUser.role === 'AUDITOR'
                               ? 'bg-slate-100/80 border-slate-200 text-slate-600 cursor-not-allowed'
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-900'
                           }`}
@@ -3831,9 +3957,9 @@ export default function RegisterView({
                       </div>
                     </div>
 
-                    {/* Row 2: Amount ({currencySymbol}) & Payment Type (Admin only) */}
+                    {/* Row 2: Amount ({currencySymbol}) & Payment Type */}
                     <div className="grid grid-cols-2 gap-4">
-                      <div className={currentUser.role !== 'ADMIN' ? 'col-span-2' : ''}>
+                      <div className={currentUser.role === 'AUDITOR' ? 'col-span-2' : ''}>
                         <label htmlFor="form-amount" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
                           Amount ({currencySymbol})
                         </label>
@@ -3851,7 +3977,7 @@ export default function RegisterView({
                           />
                         </div>
                       </div>
-                      {currentUser.role === 'ADMIN' && (
+                      {currentUser.role !== 'AUDITOR' && (
                         <div>
                           <label htmlFor="form-payment-type" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
                             Payment Type
@@ -3897,23 +4023,23 @@ export default function RegisterView({
                           type="text" 
                           value={formMerchant}
                           onChange={(e) => {
-                            if (currentUser.role === 'ADMIN') {
+                            if (currentUser.role !== 'AUDITOR') {
                               setFormMerchant(e.target.value);
                               setShowMerchantSuggestions(true);
                             }
                           }}
                           onFocus={() => {
-                            if (currentUser.role === 'ADMIN') setShowMerchantSuggestions(true);
+                            if (currentUser.role !== 'AUDITOR') setShowMerchantSuggestions(true);
                           }}
                           onBlur={() => {
                             setTimeout(() => setShowMerchantSuggestions(false), 200);
                           }}
-                          readOnly={currentUser.role !== 'ADMIN'}
+                          readOnly={currentUser.role === 'AUDITOR'}
                           placeholder="Name of payee"
                           required
                           autoComplete="off"
                           className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-semibold ${
-                            currentUser.role !== 'ADMIN'
+                            currentUser.role === 'AUDITOR'
                               ? 'bg-slate-100/80 border-slate-200 cursor-not-allowed text-slate-700 font-bold'
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-700'
                           }`}
@@ -4095,103 +4221,7 @@ export default function RegisterView({
 
         {renderBatchPrintModal()}
         {renderDetailModals()}
-
-        {/* Delete / Void Transaction Confirmation Modal */}
-        {deletingTxn && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden">
-              <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-rose-100 text-rose-600 rounded-xl">
-                    <Trash2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Delete / Void Voucher</h3>
-                    <p className="text-[11px] text-rose-700 font-semibold font-mono">
-                      {deletingTxn.reference || deletingTxn.id}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDeletingTxn(null)}
-                  className="p-1 hover:bg-rose-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-4">
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Voucher Number:</span>
-                    <span className="font-mono font-bold text-slate-800">{deletingTxn.reference || deletingTxn.id}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Amount:</span>
-                    <span className="font-bold text-slate-900">{currencySymbol}{deletingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">{deletingTxn.type === 'IN' ? 'Deposited By:' : 'Paid To:'}</span>
-                    <span className="font-semibold text-slate-700">{deletingTxn.merchant}</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="delete-reason-input" className="block text-xs font-bold text-slate-700 mb-1">
-                    Reason for Deletion <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea
-                    id="delete-reason-input"
-                    value={deleteReasonInput}
-                    onChange={(e) => {
-                      setDeleteReasonInput(e.target.value);
-                      if (deleteError) setDeleteError('');
-                    }}
-                    placeholder="e.g. Duplicate entry, Wrong amount, Cancelled expense..."
-                    rows={3}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-rose-500 focus:outline-hidden transition-all"
-                  />
-                  {deleteError && (
-                    <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      {deleteError}
-                    </p>
-                  )}
-                </div>
-
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
-                  <p className="font-bold">What happens when you void this voucher?</p>
-                  <ul className="list-disc pl-4 space-y-0.5 font-medium text-amber-800">
-                    <li>The Voucher ID ({deletingTxn.reference || deletingTxn.id}) will remain occupied to prevent sequence jumps.</li>
-                    <li>The row will remain in the log styled with a strikeout line.</li>
-                    {deletingTxn.type === 'OUT' && (
-                      <li>The expense amount ({currencySymbol}{deletingTxn.amount.toFixed(2)}) will be added back into Cash on Hand balance.</li>
-                    )}
-                  </ul>
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setDeletingTxn(null)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmDeleteWithReason}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-900/10 transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Confirm Void & Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {renderDeleteModal()}
     </div>
   );
 }

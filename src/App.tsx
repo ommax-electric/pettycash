@@ -135,11 +135,29 @@ export default function App() {
             setTransactions([]);
           } else {
             const list: Transaction[] = [];
+            const seenIds = new Set<string>();
+
             snapshot.forEach((d) => {
               const data = d.data() as Transaction;
+              const primaryId = data.id || d.id;
+
+              // Clean up orphan ghost candidate docs created by former candidate setDoc calls
+              if (d.id !== primaryId && primaryId.startsWith('TXN-')) {
+                deleteDoc(doc(db, 'transactions', d.id)).catch(() => {});
+                return;
+              }
+
+              if (seenIds.has(primaryId)) {
+                if (d.id !== primaryId) {
+                  deleteDoc(doc(db, 'transactions', d.id)).catch(() => {});
+                }
+                return;
+              }
+
+              seenIds.add(primaryId);
               list.push({
                 ...data,
-                id: d.id
+                id: primaryId
               });
             });
             setTransactions(sortTransactionsByIdDesc(list));
@@ -283,53 +301,7 @@ export default function App() {
     };
   }, [transactions.length]);
 
-  // Auto-normalize Inward transaction voucher sequences (e.g. fix IW-014 -> IW-005, IW-015 -> IW-006)
-  useEffect(() => {
-    if (transactions.length === 0) return;
 
-    const inwardTxns = transactions.filter(t =>
-      t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'))
-    );
-
-    if (inwardTxns.length === 0) return;
-
-    // Sort inward transactions chronologically ascending
-    const sortedInward = [...inwardTxns].sort((a, b) => {
-      const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
-      if (dateDiff !== 0) return dateDiff;
-
-      const getNum = (ref?: string, id?: string) => {
-        const match = (ref || id || '').match(/\d+/);
-        return match ? parseInt(match[0], 10) : 0;
-      };
-      return getNum(a.reference, a.id) - getNum(b.reference, b.id);
-    });
-
-    let cancelled = false;
-    const fixInwardSequences = async () => {
-      for (let i = 0; i < sortedInward.length; i++) {
-        if (cancelled) break;
-        const txn = sortedInward[i];
-        const expectedRef = `IW-${String(i + 1).padStart(3, '0')}`;
-        if (txn.reference !== expectedRef) {
-          try {
-            await updateDoc(doc(db, 'transactions', txn.id), { reference: expectedRef });
-          } catch (e) {
-            console.warn('Notice updating inward voucher sequence:', e);
-          }
-        }
-      }
-    };
-
-    const timer = setTimeout(() => {
-      fixInwardSequences();
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [transactions]);
 
 
   // Fetch user public IP address for accurate audit log tracking
@@ -484,11 +456,18 @@ export default function App() {
 
   // Handler: Update transaction (for edits)
   const handleUpdateTransaction = (updatedTxn: Transaction) => {
-    if (!currentUser || currentUser.role !== 'ADMIN') return;
+    if (!currentUser || currentUser.role === 'AUDITOR') return;
 
     let finalTxn = updatedTxn;
-    const target = transactions.find(t => t.id === updatedTxn.id);
+    const target = transactions.find(t => 
+      t.id === updatedTxn.id || 
+      (updatedTxn.reference && t.reference === updatedTxn.reference)
+    );
     if (!target) return;
+
+    // Ensure we maintain the primary document ID
+    const primaryId = target.id;
+    finalTxn = { ...updatedTxn, id: primaryId };
 
     const changes: { field: string; oldValue: string; newValue: string }[] = [];
     const fieldsToCompare: (keyof Transaction)[] = [
@@ -580,21 +559,12 @@ export default function App() {
     const updatedTxnsList = transactions.map(t => t.id === updatedTxn.id ? finalTxn : t);
     setTransactions(updatedTxnsList);
     
-    // Save to primary Firestore document ID
+    // Save strictly to primary Firestore document ID (never create duplicate candidate docs)
     setDoc(doc(db, 'transactions', updatedTxn.id), finalTxn).catch(e => console.warn(e));
 
-    // Also sync to reference key or numeric voucher keys if stored under alternate doc IDs in Firestore
-    if (updatedTxn.reference && updatedTxn.reference !== updatedTxn.id) {
-      setDoc(doc(db, 'transactions', updatedTxn.reference), finalTxn).catch(e => console.warn(e));
-    }
-    const numRef = updatedTxn.reference ? updatedTxn.reference.replace(/\D/g, '') : '';
-    if (numRef) {
-      const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
-      candidates.forEach(cand => {
-        if (cand !== updatedTxn.id) {
-          setDoc(doc(db, 'transactions', cand), finalTxn).catch(() => {});
-        }
-      });
+    // Delete orphan candidate docs if reference changed
+    if (target.reference && target.reference !== updatedTxn.id && target.reference !== updatedTxn.reference) {
+      deleteDoc(doc(db, 'transactions', target.reference)).catch(() => {});
     }
 
     addLog('TXN_UPDATE', `Modified transaction reference ${updatedTxn.reference} (${updatedTxn.type === 'IN' ? 'Deposit' : 'Disbursement'})`);
@@ -605,17 +575,42 @@ export default function App() {
       const isDeposit = finalTxn.type === 'IN';
       const notificationType = isDeposit ? 'INWARD_EDIT' : 'EDIT';
       sendSmsNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
-      sendEmailNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
+      sendEmailNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings, users);
     }
   };
 
   // Handler: Delete/Void transaction with reason
-  const handleDeleteTransaction = (id: string, reason?: string) => {
-    if (!currentUser) return;
-    const targetTxn = transactions.find(t => t.id === id);
+  const handleDeleteTransaction = (id: string, reason?: string, permanent: boolean = false) => {
+    if (!currentUser || currentUser.role === 'AUDITOR') return;
+    
+    const normSearchId = id.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10)));
+    const targetTxn = transactions.find(t => 
+      t.id === id || 
+      t.reference === id ||
+      (t.reference && normSearchId && t.reference.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10))) === normSearchId)
+    );
     if (!targetTxn) return;
 
-    const deletionReasonStr = reason?.trim() || 'Transaction cancelled / voided by admin';
+    if (permanent) {
+      setTransactions(prev => prev.filter(t => t.id !== targetTxn.id && t.reference !== targetTxn.reference));
+      deleteDoc(doc(db, 'transactions', targetTxn.id)).catch(e => console.warn(e));
+      if (targetTxn.reference && targetTxn.reference !== targetTxn.id) {
+        deleteDoc(doc(db, 'transactions', targetTxn.reference)).catch(() => {});
+      }
+      const numRef = targetTxn.reference ? targetTxn.reference.replace(/\D/g, '') : '';
+      if (numRef) {
+        const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
+        candidates.forEach(cand => {
+          if (cand !== targetTxn.id) {
+            deleteDoc(doc(db, 'transactions', cand)).catch(() => {});
+          }
+        });
+      }
+      addLog('TXN_DELETE', `Permanently deleted voucher ${targetTxn.reference || targetTxn.id} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)})`);
+      return;
+    }
+
+    const deletionReasonStr = reason?.trim() || 'Transaction cancelled / voided by user';
 
     const updatedTxn: Transaction = {
       ...targetTxn,
@@ -625,8 +620,29 @@ export default function App() {
       deleteReason: deletionReasonStr
     };
 
-    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
-    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+    setTransactions(prev => prev.map(t => (t.id === targetTxn.id || (targetTxn.reference && t.reference === targetTxn.reference)) ? {
+      ...t,
+      status: 'DELETED',
+      deletedBy: currentUser.fullName,
+      deletedAt: updatedTxn.deletedAt,
+      deleteReason: deletionReasonStr
+    } : t));
+
+    setDoc(doc(db, 'transactions', targetTxn.id), updatedTxn).catch(e => console.warn(e));
+
+    // Also clean up any orphan ghost candidate docs if they were ever created in Firestore
+    if (targetTxn.reference && targetTxn.reference !== targetTxn.id) {
+      deleteDoc(doc(db, 'transactions', targetTxn.reference)).catch(() => {});
+    }
+    const numRef = targetTxn.reference ? targetTxn.reference.replace(/\D/g, '') : '';
+    if (numRef) {
+      const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
+      candidates.forEach(cand => {
+        if (cand !== targetTxn.id) {
+          deleteDoc(doc(db, 'transactions', cand)).catch(() => {});
+        }
+      });
+    }
 
     addLog('TXN_DELETE', `Deleted/Voided voucher ${targetTxn.reference || targetTxn.id} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)}). Reason: ${deletionReasonStr}`);
   };
