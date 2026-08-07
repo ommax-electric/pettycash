@@ -3777,16 +3777,6 @@ export default function RegisterView({
                               : 'bg-slate-50/50 border-slate-200 focus:border-emerald-500 focus:bg-white text-slate-900'
                           }`}
                         />
-                        {!isVoucherEditable && (
-                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
-                            🔒 Auto-generated (Manual entry disabled by Admin)
-                          </span>
-                        )}
-                        {isVoucherEditable && (
-                          <span className="text-[10px] text-emerald-600 mt-1 block font-medium">
-                            ✍️ Manual entry enabled
-                          </span>
-                        )}
                         {duplicateTxnWarning && (
                           <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5 mt-2 flex items-start gap-2 shadow-xs">
                             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -4020,16 +4010,6 @@ export default function RegisterView({
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-900'
                           }`}
                         />
-                        {!isVoucherEditable && (
-                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
-                            🔒 Auto-generated (Manual entry disabled by Admin)
-                          </span>
-                        )}
-                        {isVoucherEditable && (
-                          <span className="text-[10px] text-amber-700 mt-1 block font-medium">
-                            ✍️ Manual entry enabled
-                          </span>
-                        )}
                         {duplicateTxnWarning && (
                           <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5 mt-2 flex items-start gap-2 shadow-xs">
                             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -4143,11 +4123,6 @@ export default function RegisterView({
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-700'
                           }`}
                         />
-                        {currentUser.role !== 'ADMIN' && (
-                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
-                            🔒 Locked (Only Admin can change Paid To or request on behalf of others)
-                          </span>
-                        )}
 
                         {/* Recommendations Popup (shown after typing 2+ characters) */}
                         {currentUser.role === 'ADMIN' && showMerchantSuggestions && merchantSuggestions.length > 0 && (
