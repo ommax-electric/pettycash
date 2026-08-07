@@ -4122,30 +4122,35 @@ export default function RegisterView({
                           type="text" 
                           value={formMerchant}
                           onChange={(e) => {
-                            if (currentUser.role !== 'AUDITOR') {
+                            if (currentUser.role === 'ADMIN') {
                               setFormMerchant(e.target.value);
                               setShowMerchantSuggestions(true);
                             }
                           }}
                           onFocus={() => {
-                            if (currentUser.role !== 'AUDITOR') setShowMerchantSuggestions(true);
+                            if (currentUser.role === 'ADMIN') setShowMerchantSuggestions(true);
                           }}
                           onBlur={() => {
                             setTimeout(() => setShowMerchantSuggestions(false), 200);
                           }}
-                          readOnly={currentUser.role === 'AUDITOR'}
+                          readOnly={currentUser.role !== 'ADMIN'}
                           placeholder="Name of payee"
                           required
                           autoComplete="off"
                           className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-semibold ${
-                            currentUser.role === 'AUDITOR'
+                            currentUser.role !== 'ADMIN'
                               ? 'bg-slate-100/80 border-slate-200 cursor-not-allowed text-slate-700 font-bold'
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-700'
                           }`}
                         />
+                        {currentUser.role !== 'ADMIN' && (
+                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
+                            🔒 Locked (Only Admin can change Paid To or request on behalf of others)
+                          </span>
+                        )}
 
                         {/* Recommendations Popup (shown after typing 2+ characters) */}
-                        {showMerchantSuggestions && merchantSuggestions.length > 0 && (
+                        {currentUser.role === 'ADMIN' && showMerchantSuggestions && merchantSuggestions.length > 0 && (
                           <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden text-xs">
                             <div className="px-3 py-1.5 bg-slate-50/90 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                               <span className="flex items-center gap-1.5 text-slate-600 font-extrabold">
