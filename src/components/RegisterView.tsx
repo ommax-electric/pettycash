@@ -160,6 +160,10 @@ export default function RegisterView({
   };
 
   const handleConfirmDeleteWithReason = (permanent = false) => {
+    if (!permanent && !deleteReasonInput.trim()) {
+      setDeleteError('Reason is required when voiding a voucher.');
+      return;
+    }
     const reasonStr = deleteReasonInput.trim() || (permanent ? 'Permanently deleted by user' : 'Cancelled / voided by user');
     if (deletingTxn && onDeleteTransaction) {
       onDeleteTransaction(deletingTxn.id, reasonStr, permanent);
@@ -2151,7 +2155,7 @@ export default function RegisterView({
 
             <div>
               <label htmlFor="delete-reason-input" className="block text-xs font-bold text-slate-700 mb-1">
-                Reason for Deletion <span className="text-slate-400 font-normal">(Optional)</span>
+                Reason for Voiding / Deletion <span className="text-amber-700 font-semibold ml-0.5">(Required for Voiding)</span>
               </label>
               <textarea
                 id="delete-reason-input"
@@ -2162,7 +2166,9 @@ export default function RegisterView({
                 }}
                 placeholder="e.g. Duplicate entry, Wrong amount, Cancelled expense..."
                 rows={2}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-rose-500 focus:outline-hidden transition-all"
+                className={`w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-medium focus:bg-white focus:outline-hidden transition-all ${
+                  deleteError ? 'border-rose-400 focus:border-rose-500 ring-2 ring-rose-100' : 'border-slate-200 focus:border-rose-500'
+                }`}
               />
               {deleteError && (
                 <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
