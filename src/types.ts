@@ -22,6 +22,7 @@ export interface AppSettings {
   companyStampRotate?: number; // rotation in degrees e.g. -180 to 180
   companyStampOpacity?: number; // opacity e.g. 0.1 to 1.0
   companyStampWidth?: number; // stamp image width in px e.g. 50 to 150
+  allowManualVoucherNumbering?: boolean;
 }
 
 export interface IntegrationSettings {

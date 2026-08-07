@@ -8,7 +8,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   companyStampEnabled: true,
   companyStampRotate: -12,
   companyStampOpacity: 0.85,
-  companyStampWidth: 85
+  companyStampWidth: 85,
+  allowManualVoucherNumbering: false
 };
 
 export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
@@ -129,7 +130,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Chandrasekar',
     reference: 'OW-001',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Solar Advertisement Banner Rent for April\' 26 - May\' 26',
     receiptName: 'Parthiban given May month - settled',
     receiptSize: 'Local',
@@ -181,7 +182,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Chandrasekar',
     reference: 'OW-002',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Solar Advertisement Banner Rent for May\'26 - June\' 26',
     receiptName: 'Parthiban given May month - settled',
     receiptSize: 'Local'
@@ -195,7 +196,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Mohan',
     reference: 'OW-003',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Gland purchase by Mohan #',
     receiptName: 'gland_invoice.pdf',
     receiptSize: '245 KB'
@@ -209,7 +210,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Mohan',
     reference: 'OW-004',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Taxi charges by Mohan for Anna Nagar Site visit',
     receiptName: 'OEPL to Anna Nagar site & Anna Nagar to OEPL',
     receiptSize: 'Local'
@@ -223,7 +224,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Mohan',
     reference: 'OW-005',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Solar Labour Charges for unloading Solar equipment',
     receiptName: 'Anna Nagar site (30 panel + inverters)',
     receiptSize: 'Local'
@@ -251,7 +252,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Mohan',
     reference: 'OW-006',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Saint Gobain - Chemical delivery by Mohan #',
     receiptName: 'chemical_invoice.pdf',
     receiptSize: '315 KB'
@@ -265,7 +266,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     merchant: 'Chandrasekar',
     reference: 'OW-007',
     recordedBy: 'Mohan',
-    status: 'APPROVED',
+    status: 'PAID',
     description: 'Solar Ad. banner rent - June\'26 - July\' 26',
     receiptName: 'rent_banner_july.png',
     receiptSize: '124 KB'

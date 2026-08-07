@@ -112,6 +112,7 @@ export default function AdminSettingsView({
   const [stampRotate, setStampRotate] = useState<number>(appSettings.companyStampRotate ?? -12);
   const [stampOpacity, setStampOpacity] = useState<number>(appSettings.companyStampOpacity ?? 0.85);
   const [stampWidth, setStampWidth] = useState<number>(appSettings.companyStampWidth ?? 85);
+  const [allowManualVoucher, setAllowManualVoucher] = useState<boolean>(appSettings.allowManualVoucherNumbering || false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
   useEffect(() => {
@@ -123,6 +124,7 @@ export default function AdminSettingsView({
     setStampRotate(appSettings.companyStampRotate ?? -12);
     setStampOpacity(appSettings.companyStampOpacity ?? 0.85);
     setStampWidth(appSettings.companyStampWidth ?? 85);
+    setAllowManualVoucher(appSettings.allowManualVoucherNumbering || false);
   }, [appSettings]);
 
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -527,7 +529,8 @@ export default function AdminSettingsView({
       companyStampEnabled: stampEnabled,
       companyStampRotate: stampRotate,
       companyStampOpacity: stampOpacity,
-      companyStampWidth: stampWidth
+      companyStampWidth: stampWidth,
+      allowManualVoucherNumbering: allowManualVoucher
     });
     setSettingsSuccess(true);
     setTimeout(() => setSettingsSuccess(false), 3000);
@@ -923,6 +926,38 @@ export default function AdminSettingsView({
                     <option value="Asia/Dubai (GST, UTC+04:00)">Asia/Dubai (GST, UTC+04:00)</option>
                     <option value="Asia/Singapore (SGT, UTC+08:00)">Asia/Singapore (SGT, UTC+08:00)</option>
                   </select>
+                </div>
+
+                {/* Manual Voucher Numbering Control */}
+                <div className="md:col-span-3 border-t border-slate-100 pt-4 mt-2">
+                  <div className="flex items-center justify-between p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl hover:border-amber-300 transition-all">
+                    <div className="space-y-1 pr-4">
+                      <label htmlFor="manual-voucher-toggle" className="font-bold text-xs text-slate-800 flex items-center gap-2 cursor-pointer">
+                        <Pencil className="w-4 h-4 text-amber-600" />
+                        Allow Manual Voucher Numbering for Users
+                      </label>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        When <strong>Enabled</strong>, users can enter custom Voucher / Reference numbers manually when logging expenses.
+                        When <strong>Disabled</strong>, Voucher numbers are strictly auto-generated in sequence. Duplicate numbers are automatically flagged and blocked in real-time.
+                      </p>
+                    </div>
+                    <button
+                      id="manual-voucher-toggle"
+                      type="button"
+                      role="switch"
+                      aria-checked={allowManualVoucher}
+                      onClick={() => setAllowManualVoucher(!allowManualVoucher)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                        allowManualVoucher ? 'bg-amber-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          allowManualVoucher ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="md:col-span-3 flex justify-end pt-2">

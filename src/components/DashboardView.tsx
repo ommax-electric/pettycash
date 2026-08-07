@@ -78,26 +78,29 @@ export default function DashboardView({ transactions, categories, currentUser, o
   // Fallback to actualCurrentYear if selectedYear is not present
   const effectiveYear = availableYears.includes(selectedYear) ? selectedYear : actualCurrentYear;
 
-  // Helper function to check if a transaction is completed (APPROVED or PAID)
-  const isCompleted = (status?: string) => status === 'APPROVED' || status === 'PAID';
+  // Helper functions to evaluate transactions:
+  // For Inward deposits (IN): APPROVED or PAID entries count as completed inflow
+  const isCompletedInflow = (status?: string) => !status || status === 'APPROVED' || status === 'PAID';
+  // For Outward expenses (OUT): ONLY PAID entries count (when admin/custodian has actually issued cash)
+  const isPaidOutflow = (status?: string) => status === 'PAID';
 
   // 2. Calculations based on transactions
   // Overall Deposit (for selected year) - Admin/Custodian only
   const overallDepositSelectedYear = visibleTransactions
-    .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date.startsWith(effectiveYear))
+    .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Overall Expenses / User Total Paid Expenses (for selected year)
+  // Overall Expenses / User Total Paid Expenses (for selected year) - ONLY PAID expenses
   const overallExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear))
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
   const cashExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const onlineExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
   // User pending requests (for standard users)
@@ -115,18 +118,18 @@ export default function DashboardView({ transactions, categories, currentUser, o
 
   // Cash on hand accumulated up to the end of selected year
   const approvedInflowUpToSelectedYear = visibleTransactions
-    .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date && t.date <= `${effectiveYear}-12-31`)
+    .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date && t.date <= `${effectiveYear}-12-31`)
     .reduce((sum, t) => sum + t.amount, 0);
 
   const approvedOutflowCashUpToSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
     .reduce((sum, t) => sum + t.amount, 0);
 
   const cashOnHandSelectedYear = approvedInflowUpToSelectedYear - approvedOutflowCashUpToSelectedYear;
 
-  // Avg. Expenses for the selected year
+  // Avg. Expenses for the selected year (ONLY PAID expenses)
   const selectedYearExpenses = visibleTransactions
-    .filter(t => t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear));
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear));
   const avgExpensesSelectedYear = selectedYearExpenses.length > 0
     ? selectedYearExpenses.reduce((sum, t) => sum + t.amount, 0) / selectedYearExpenses.length
     : 0;
@@ -138,22 +141,22 @@ export default function DashboardView({ transactions, categories, currentUser, o
       const monthStr = String(idx + 1).padStart(2, '0');
       const prefix = `${effectiveYear}-${monthStr}`;
       const inflow = visibleTransactions
-        .filter(t => t.type === 'IN' && isCompleted(t.status) && t.date && t.date.startsWith(prefix))
+        .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
       const outflow = visibleTransactions
-        .filter(t => t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date && t.date.startsWith(prefix))
+        .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
       return { month: m, inflow, outflow };
     });
   }, [visibleTransactions, effectiveYear]);
 
-  // Format Category Spent data for Pie Chart
+  // Format Category Spent data for Pie Chart (ONLY PAID expenses)
   const categoryChartData = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => ({
       name: cat.name,
       value: visibleTransactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear))
+        .filter(t => t.category === cat.name && t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0),
       color: cat.color
     })).filter(data => data.value > 0);
@@ -163,12 +166,12 @@ export default function DashboardView({ transactions, categories, currentUser, o
     { name: 'No Expenses', value: 1, color: '#cbd5e1' }
   ];
 
-  // Dynamic calculations for progress bars
+  // Dynamic calculations for progress bars (ONLY PAID expenses)
   const computedCategories = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => {
       const currentSpent = visibleTransactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && (isCompleted(t.status) || t.status === 'PENDING') && t.date.startsWith(effectiveYear))
+        .filter(t => t.category === cat.name && t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0);
       return {
         ...cat,

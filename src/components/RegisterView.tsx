@@ -211,6 +211,54 @@ export default function RegisterView({
   const [formRemarks, setFormRemarks] = useState('');
   const [formPaymentType, setFormPaymentType] = useState<'CASH' | 'ONLINE'>('CASH');
 
+  // Manual Voucher Entry & Duplicate Check logic
+  const isVoucherEditable = currentUser.role !== 'AUDITOR' && (
+    Boolean(appSettings?.allowManualVoucherNumbering) || currentUser.role === 'ADMIN'
+  );
+
+  const liveRefVal = formReference.trim();
+  const getNumericPart = (str: string): number | null => {
+    if (!str) return null;
+    const match = str.trim().match(/\d+/);
+    return match ? parseInt(match[0], 10) : null;
+  };
+
+  const normalizeVoucherStr = (str: string): string => {
+    if (!str) return '';
+    return str.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10)));
+  };
+
+  const liveRefNum = getNumericPart(liveRefVal);
+  const liveRefNorm = normalizeVoucherStr(liveRefVal);
+  const liveIsCurrentIn = forceTypeVal === 'IN' || (liveRefVal ? liveRefVal.toUpperCase().startsWith('IW-') : false);
+
+  const duplicateTxnWarning = liveRefVal ? transactions.find(t => {
+    if (t.status === 'DELETED') return false;
+    if (editingTransaction) {
+      if (t.id === editingTransaction.id) return false;
+      if (editingTransaction.reference && (
+        t.reference === editingTransaction.reference ||
+        t.id === editingTransaction.reference ||
+        t.reference === editingTransaction.id
+      )) {
+        return false;
+      }
+    }
+    const isTargetIn = t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'));
+    if (liveIsCurrentIn !== isTargetIn) return false;
+
+    const existingNum = getNumericPart(t.reference);
+    const existingNorm = normalizeVoucherStr(t.reference);
+
+    if (liveRefNum !== null && existingNum !== null && liveRefNum === existingNum) {
+      return true;
+    }
+    if (liveRefNorm && existingNorm && liveRefNorm === existingNorm) {
+      return true;
+    }
+    return false;
+  }) : undefined;
+
   React.useEffect(() => {
     if (forceType) {
       setFormType(forceType);
@@ -3712,16 +3760,42 @@ export default function RegisterView({
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor="inward-ref" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
-                          ID (Optional)
+                          Inward Voucher / Receipt ID
                         </label>
                         <input 
                           id="inward-ref"
                           type="text" 
                           value={formReference}
-                          onChange={(e) => setFormReference(e.target.value)}
+                          onChange={(e) => {
+                            if (isVoucherEditable) setFormReference(e.target.value);
+                          }}
+                          readOnly={!isVoucherEditable}
                           placeholder="e.g. IW-001"
-                          className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-emerald-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all font-mono font-semibold"
+                          className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-mono font-bold ${
+                            !isVoucherEditable
+                              ? 'bg-slate-100/80 border-slate-200 text-slate-600 cursor-not-allowed'
+                              : 'bg-slate-50/50 border-slate-200 focus:border-emerald-500 focus:bg-white text-slate-900'
+                          }`}
                         />
+                        {!isVoucherEditable && (
+                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
+                            🔒 Auto-generated (Manual entry disabled by Admin)
+                          </span>
+                        )}
+                        {isVoucherEditable && (
+                          <span className="text-[10px] text-emerald-600 mt-1 block font-medium">
+                            ✍️ Manual entry enabled
+                          </span>
+                        )}
+                        {duplicateTxnWarning && (
+                          <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5 mt-2 flex items-start gap-2 shadow-xs">
+                            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span>Voucher No. "{formReference.trim()}" is ALREADY USED by deposit #{duplicateTxnWarning.reference}!</span>
+                              <div className="text-[10px] font-medium text-rose-500 mt-0.5">Please enter a unique number to avoid duplicates.</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label htmlFor="inward-date" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
@@ -3935,17 +4009,36 @@ export default function RegisterView({
                           type="text" 
                           value={formReference}
                           onChange={(e) => {
-                            if (currentUser.role !== 'AUDITOR') setFormReference(e.target.value);
+                            if (isVoucherEditable) setFormReference(e.target.value);
                           }}
-                          readOnly={currentUser.role === 'AUDITOR'}
+                          readOnly={!isVoucherEditable}
                           placeholder="e.g. 27"
                           required
                           className={`w-full py-2.5 px-3.5 border rounded-xl text-xs transition-all font-mono font-bold ${
-                            currentUser.role === 'AUDITOR'
+                            !isVoucherEditable
                               ? 'bg-slate-100/80 border-slate-200 text-slate-600 cursor-not-allowed'
                               : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white text-slate-900'
                           }`}
                         />
+                        {!isVoucherEditable && (
+                          <span className="text-[10px] text-slate-400 mt-1 block font-medium">
+                            🔒 Auto-generated (Manual entry disabled by Admin)
+                          </span>
+                        )}
+                        {isVoucherEditable && (
+                          <span className="text-[10px] text-amber-700 mt-1 block font-medium">
+                            ✍️ Manual entry enabled
+                          </span>
+                        )}
+                        {duplicateTxnWarning && (
+                          <div className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5 mt-2 flex items-start gap-2 shadow-xs">
+                            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span>Voucher No. "{formReference.trim()}" is ALREADY USED by voucher #{duplicateTxnWarning.reference}!</span>
+                              <div className="text-[10px] font-medium text-rose-500 mt-0.5">Please enter a unique number to avoid duplicates.</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label htmlFor="form-date" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">

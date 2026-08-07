@@ -37,14 +37,15 @@ export function formatPhoneNumber(numStr: string): string {
  * Calculates current Cash Balance (Cash on Hand) from transactions array
  */
 export function calculateCashBalance(transactions: Transaction[], currencySymbol: string = '₹'): string {
-  const isCompleted = (status?: string) => !status || status === 'APPROVED' || status === 'PAID';
+  const isCompletedInflow = (status?: string) => !status || status === 'APPROVED' || status === 'PAID';
+  const isPaidOutflow = (status?: string) => status === 'PAID' || !status;
 
   const approvedInflow = transactions
-    .filter(t => t.type === 'IN' && isCompleted(t.status))
+    .filter(t => t.type === 'IN' && isCompletedInflow(t.status))
     .reduce((sum, t) => sum + t.amount, 0);
 
   const approvedOutflowCash = transactions
-    .filter(t => t.type === 'OUT' && isCompleted(t.status) && t.paymentType !== 'ONLINE')
+    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.paymentType !== 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const balance = approvedInflow - approvedOutflowCash;
