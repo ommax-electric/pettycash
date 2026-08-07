@@ -2543,9 +2543,9 @@ export default function AdminSettingsView({
                       {/* Live Card Preview */}
                       {(() => {
                         const previewSubject = substituteSampleTags(emailSubjectReqApproved, appSettings.currencySymbol, false)
-                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{approved_by\}/g, 'Mohan (Manager)');
                         const previewBodyRaw = substituteSampleTags(emailBodyReqApproved, appSettings.currencySymbol, false)
-                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{approved_by\}/g, 'Mohan (Manager)');
                         const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
                         return (
@@ -2689,10 +2689,10 @@ export default function AdminSettingsView({
                       {(() => {
                         const previewSubject = substituteSampleTags(emailSubjectReqPaid, appSettings.currencySymbol, false)
                           .replace(/\{paid_by\}/g, 'Anita (Admin)')
-                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{approved_by\}/g, 'Mohan (Manager)');
                         const previewBodyRaw = substituteSampleTags(emailBodyReqPaid, appSettings.currencySymbol, false)
                           .replace(/\{paid_by\}/g, 'Anita (Admin)')
-                          .replace(/\{approved_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{approved_by\}/g, 'Mohan (Manager)');
                         const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
                         return (
@@ -2835,9 +2835,9 @@ export default function AdminSettingsView({
                       {/* Live Card Preview */}
                       {(() => {
                         const previewSubject = substituteSampleTags(emailSubjectReqRejected, appSettings.currencySymbol, false)
-                          .replace(/\{rejected_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{rejected_by\}/g, 'Mohan (Manager)');
                         const previewBodyRaw = substituteSampleTags(emailBodyReqRejected, appSettings.currencySymbol, false)
-                          .replace(/\{rejected_by\}/g, 'Parthiban (Manager)');
+                          .replace(/\{rejected_by\}/g, 'Mohan (Manager)');
                         const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
                         return (

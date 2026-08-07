@@ -15,7 +15,7 @@ interface RegisterViewProps {
   onAddTransaction: (txn: Omit<Transaction, 'id' | 'recordedBy'>) => void;
   onUpdateStatus: (id: string, status: TransactionStatus) => void;
   onUpdateTransaction?: (txn: Transaction) => void;
-  onDeleteTransaction?: (id: string) => void;
+  onDeleteTransaction?: (id: string, reason?: string) => void;
   forceType?: 'IN' | 'OUT';
   appSettings?: AppSettings;
   integrationSettings?: IntegrationSettings;
@@ -149,6 +149,28 @@ export default function RegisterView({
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingTxn, setDeletingTxn] = useState<Transaction | null>(null);
+  const [deleteReasonInput, setDeleteReasonInput] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleOpenDeleteModal = (txn: Transaction) => {
+    setDeletingTxn(txn);
+    setDeleteReasonInput('');
+    setDeleteError('');
+  };
+
+  const handleConfirmDeleteWithReason = () => {
+    if (!deleteReasonInput.trim()) {
+      setDeleteError('Please enter a reason for deleting this entry.');
+      return;
+    }
+    if (deletingTxn && onDeleteTransaction) {
+      onDeleteTransaction(deletingTxn.id, deleteReasonInput.trim());
+    }
+    setDeletingTxn(null);
+    setDeleteReasonInput('');
+    setDeleteError('');
+  };
 
   // Batch Print States
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -499,10 +521,30 @@ export default function RegisterView({
     }
   };
 
+  const getNextInwardVoucherNumber = (txns: Transaction[], excludeId?: string): string => {
+    const existingNums = new Set<number>();
+    txns.forEach(t => {
+      if (excludeId && t.id === excludeId) return;
+      const isTxnIn = t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'));
+      if (isTxnIn) {
+        const match = (t.reference || '').match(/\d+/);
+        if (match) {
+          existingNums.add(parseInt(match[0], 10));
+        }
+      }
+    });
+    let nextNum = 1;
+    while (existingNums.has(nextNum)) {
+      nextNum++;
+    }
+    return `IW-${String(nextNum).padStart(3, '0')}`;
+  };
+
   const getNextOutwardVoucherNumber = (txns: Transaction[], excludeId?: string): number => {
     let maxNum = 26; // Baseline requirement: 1 to 26 exist, so next generated is at least 27
     txns.forEach(t => {
       if (excludeId && t.id === excludeId) return;
+      if (t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'))) return;
       const refStr = (t.reference || '').trim();
       if (refStr) {
         const matches = refStr.match(/\d+/g);
@@ -543,7 +585,8 @@ export default function RegisterView({
       const nextNum = getNextOutwardVoucherNumber(transactions);
       setFormReference(String(nextNum));
     } else {
-      setFormReference('');
+      const nextInRef = getNextInwardVoucherNumber(transactions);
+      setFormReference(nextInRef);
     }
     if (expenseCategories.length > 0) {
       setFormCategory(expenseCategories[0].name);
@@ -612,15 +655,7 @@ export default function RegisterView({
 
     if (forceTypeVal === 'IN') {
       if (!refVal) {
-        const existingNums = new Set<number>();
-        transactions.forEach(t => {
-          if (editingTransaction && t.id === editingTransaction.id) return;
-          const num = getNumericPart(t.reference);
-          if (num !== null) existingNums.add(num);
-        });
-        let nextNum = 1;
-        while (existingNums.has(nextNum)) { nextNum++; }
-        refVal = `IW-${String(nextNum).padStart(3, '0')}`;
+        refVal = getNextInwardVoucherNumber(transactions, editingTransaction?.id);
       }
       if (!merchVal) {
         merchVal = 'Corporate Treasury';
@@ -637,12 +672,20 @@ export default function RegisterView({
       }
     }
 
-    // Enforce Unique Voucher ID Validation
+    // Enforce Unique Voucher ID Validation within the same transaction type namespace (IN vs OUT)
     const refValNum = getNumericPart(refVal);
     const refValNorm = normalizeVoucherStr(refVal);
+    const isCurrentIn = forceTypeVal === 'IN' || refVal.toUpperCase().startsWith('IW-');
 
     const duplicateTxn = transactions.find(t => {
       if (editingTransaction && t.id === editingTransaction.id) return false;
+      const isTargetIn = t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'));
+
+      // Inward vouchers (IW-xxx) and Outward vouchers operate in separate sequence namespaces!
+      if (isCurrentIn !== isTargetIn) {
+        return false;
+      }
+
       const existingNum = getNumericPart(t.reference);
       const existingNorm = normalizeVoucherStr(t.reference);
 
@@ -666,7 +709,7 @@ export default function RegisterView({
     }
 
     // Process Google Drive / Cloud Attachment Upload if explicitly enabled
-    let finalReceiptUrl = receiptFile ? (receiptFile.dataUrl || receiptFile.cloudinaryUrl || null) : (editingTransaction?.receiptUrl || null);
+    let finalReceiptUrl = receiptFile ? (receiptFile.cloudinaryUrl || receiptFile.dataUrl || null) : null;
 
     if (receiptFile?.dataUrl && !receiptFile.cloudinaryUrl && receiptFile.dataUrl.startsWith('data:')) {
       const isGoogleDriveActive = Boolean(integrationSettings?.googleDriveEnabled);
@@ -716,15 +759,23 @@ export default function RegisterView({
           merchant: merchVal,
           reference: refVal,
           description: formDescription,
-          receiptName: receiptFile ? receiptFile.name : (editingTransaction.receiptName || null),
-          receiptSize: receiptFile ? receiptFile.size : (editingTransaction.receiptSize || null),
-          receiptUrl: finalReceiptUrl,
+          receiptName: receiptFile ? receiptFile.name : null,
+          receiptSize: receiptFile ? receiptFile.size : null,
+          receiptUrl: receiptFile ? finalReceiptUrl : null,
           remarks: formRemarks,
           paymentType: formPaymentType
         });
       }
     } else {
-      const isNonAdmin = currentUser.role !== 'ADMIN';
+      const repTo = (currentUser.reportingTo || '').trim();
+      const hasReportingManager = repTo.length > 0;
+      const isTopAdminOrCustodian = (currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN') && !hasReportingManager;
+
+      const initialStatus = formType === 'IN'
+        ? 'APPROVED'
+        : (isTopAdminOrCustodian ? 'PAID' : 'PENDING');
+
+      const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? currentUser.fullName : 'admin');
 
       onAddTransaction({
         date: formDate,
@@ -733,9 +784,9 @@ export default function RegisterView({
         category: formType === 'IN' ? 'Cash Source' : formCategory,
         merchant: merchVal,
         reference: refVal,
-        status: formType === 'IN' ? 'APPROVED' : (isNonAdmin ? 'PENDING' : 'PAID'),
+        status: initialStatus,
         requestedBy: currentUser.fullName,
-        approverName: currentUser.reportingTo || 'admin',
+        approverName: targetApprover,
         description: formDescription,
         receiptName: receiptFile ? receiptFile.name : null,
         receiptSize: receiptFile ? receiptFile.size : null,
@@ -2079,6 +2130,22 @@ export default function RegisterView({
 
               {/* Body Content - Scrollable */}
               <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-700 text-xs sm:text-sm">
+                {selectedDetailTransaction.status === 'DELETED' && (
+                  <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl flex items-start gap-2.5 text-rose-800 animate-in fade-in duration-200">
+                    <AlertCircle className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-bold text-xs uppercase tracking-wider text-rose-900">Transaction Voided / Deleted</p>
+                      <p className="text-xs font-medium mt-0.5 text-rose-700">
+                        Deleted by <span className="font-bold">{selectedDetailTransaction.deletedBy || 'Admin'}</span> {selectedDetailTransaction.deletedAt ? `on ${selectedDetailTransaction.deletedAt}` : ''}
+                      </p>
+                      {selectedDetailTransaction.deleteReason && (
+                        <p className="text-xs font-semibold text-rose-900 mt-1.5 bg-white/80 p-2 rounded-xl border border-rose-200">
+                          Reason: {selectedDetailTransaction.deleteReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {/* Main Amount Card */}
                 <div className={`p-5 rounded-2xl flex items-center justify-between border ${
                   selectedDetailTransaction.type === 'IN' 
@@ -2653,31 +2720,47 @@ export default function RegisterView({
                     </tr>
                   ) : (
                     paginatedTransactions.map((txn, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                      <tr key={idx} className={txn.status === 'DELETED' ? "bg-rose-50/20 text-slate-400 opacity-75 transition-colors" : "hover:bg-slate-50/50 transition-colors"}>
                         {/* Date */}
-                        <td className="py-4 px-6 text-slate-400 font-mono text-[10px] whitespace-nowrap">{formatDate(txn.date)}</td>
+                        <td className={`py-4 px-6 font-mono text-[10px] whitespace-nowrap ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-slate-400'}`}>
+                          {formatDate(txn.date)}
+                        </td>
 
                         {/* ID */}
-                        <td className="py-4 px-6 font-mono font-bold text-slate-950 text-[11px] whitespace-nowrap">
+                        <td className={`py-4 px-6 font-mono font-bold text-[11px] whitespace-nowrap ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-slate-950'}`}>
                           <button
                             type="button"
                             onClick={() => setSelectedDetailTransaction(txn)}
-                            className="text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer focus:outline-hidden font-bold text-left"
+                            className={`cursor-pointer focus:outline-hidden font-bold text-left ${txn.status === 'DELETED' ? 'text-slate-400 line-through decoration-rose-500/80' : 'text-indigo-600 hover:text-indigo-800 hover:underline'}`}
                           >
                             {txn.reference || txn.id}
                             {txn.receiptName && (
                               <span className="ml-1 text-rose-600 font-extrabold font-mono" title="Has attachment">#</span>
                             )}
                           </button>
+                          {txn.status === 'DELETED' && (
+                            <span className="ml-2 inline-block px-1.5 py-0.5 text-[9px] font-extrabold text-rose-700 bg-rose-100 border border-rose-200 rounded-md uppercase no-underline shadow-2xs" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || 'No reason provided'}`}>
+                              DELETED
+                            </span>
+                          )}
                         </td>
                         
                         {/* Credit Amount */}
-                        <td className="py-4 px-6 font-bold text-emerald-600 text-sm">
+                        <td className={`py-4 px-6 font-bold text-sm ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-emerald-600'}`}>
                           {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
 
                         {/* Remarks */}
-                        <td className="py-4 px-6 text-slate-500 max-w-md break-words">{txn.description}</td>
+                        <td className="py-4 px-6 max-w-md break-words text-slate-500">
+                          <span className={txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : ''}>
+                            {txn.description}
+                          </span>
+                          {txn.status === 'DELETED' && txn.deleteReason && (
+                            <div className="text-[10px] text-rose-600 font-semibold italic mt-0.5">
+                              Reason: {txn.deleteReason}
+                            </div>
+                          )}
+                        </td>
                         
                         {/* Action */}
                         <td className="py-4 px-6 text-center">
@@ -2689,7 +2772,11 @@ export default function RegisterView({
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            {currentUser.role === 'ADMIN' && (
+                            {txn.status === 'DELETED' ? (
+                              <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
+                                Voided
+                              </span>
+                            ) : currentUser.role === 'ADMIN' && (
                               <>
                                 <button
                                   onClick={() => handleEditClick(txn)}
@@ -2699,33 +2786,13 @@ export default function RegisterView({
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
                                 
-                                {deleteConfirmId === txn.id ? (
-                                  <div className="flex items-center gap-1 bg-red-50 border border-red-100 p-0.5 rounded-lg animate-in fade-in duration-200">
-                                    <button
-                                      onClick={() => {
-                                        if (onDeleteTransaction) onDeleteTransaction(txn.id);
-                                        setDeleteConfirmId(null);
-                                      }}
-                                      className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold rounded-md shadow-xs cursor-pointer"
-                                    >
-                                      Confirm
-                                    </button>
-                                    <button
-                                      onClick={() => setDeleteConfirmId(null)}
-                                      className="p-0.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    onClick={() => setDeleteConfirmId(txn.id)}
-                                    className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
-                                    title="Delete Entry"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => handleOpenDeleteModal(txn)}
+                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
+                                  title="Delete Entry"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </>
                             )}
                           </div>
@@ -2746,28 +2813,38 @@ export default function RegisterView({
                 </div>
               ) : (
                 paginatedTransactions.map((txn, idx) => (
-                  <div key={idx} className="py-4 space-y-3">
+                  <div key={idx} className={`py-4 space-y-3 ${txn.status === 'DELETED' ? 'opacity-75 bg-rose-50/10 p-3 rounded-xl border border-rose-100' : ''}`}>
                     {/* Top row: Date & ID */}
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-mono text-slate-400 whitespace-nowrap">{formatDate(txn.date)}</span>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDetailTransaction(txn)}
-                        className="font-mono font-bold text-indigo-600 hover:text-indigo-800 hover:underline bg-indigo-50/50 hover:bg-indigo-50 px-2 py-0.5 rounded-md whitespace-nowrap cursor-pointer focus:outline-hidden"
-                      >
-                        {txn.reference || txn.id}
-                        {txn.receiptName && <span className="ml-1 text-rose-600 font-extrabold">#</span>}
-                      </button>
+                      <span className={`font-mono ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-slate-400'}`}>{formatDate(txn.date)}</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDetailTransaction(txn)}
+                          className={`font-mono font-bold px-2 py-0.5 rounded-md whitespace-nowrap cursor-pointer focus:outline-hidden ${txn.status === 'DELETED' ? 'text-slate-400 line-through bg-slate-100' : 'text-indigo-600 hover:text-indigo-800 hover:underline bg-indigo-50/50 hover:bg-indigo-50'}`}
+                        >
+                          {txn.reference || txn.id}
+                          {txn.receiptName && <span className="ml-1 text-rose-600 font-extrabold">#</span>}
+                        </button>
+                        {txn.status === 'DELETED' && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-extrabold text-rose-700 bg-rose-100 border border-rose-200 rounded-md uppercase">
+                            DELETED
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Middle row: Particulars & Amount */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
-                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Deposit Inflow</h4>
-                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">{txn.description}</p>
+                        <h4 className={`font-bold text-xs sm:text-sm ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-500' : 'text-slate-900'}`}>Deposit Inflow</h4>
+                        <p className={`text-xs mt-1 leading-relaxed ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-slate-500'}`}>{txn.description}</p>
+                        {txn.status === 'DELETED' && txn.deleteReason && (
+                          <p className="text-[10px] text-rose-600 font-semibold italic mt-1">Reason: {txn.deleteReason}</p>
+                        )}
                       </div>
                       <div className="text-right whitespace-nowrap">
-                        <span className="font-bold text-emerald-600 text-base">
+                        <span className={`font-bold text-base ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-emerald-600'}`}>
                           {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
@@ -2787,7 +2864,11 @@ export default function RegisterView({
                           <Eye className="w-3 h-3" />
                           Details
                         </button>
-                        {currentUser.role === 'ADMIN' && (
+                        {txn.status === 'DELETED' ? (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
+                            Voided
+                          </span>
+                        ) : currentUser.role === 'ADMIN' && (
                           <>
                             <button
                               onClick={() => handleEditClick(txn)}
@@ -2797,33 +2878,13 @@ export default function RegisterView({
                               Edit
                             </button>
                             
-                            {deleteConfirmId === txn.id ? (
-                              <div className="flex items-center gap-1 bg-red-50 border border-red-200 p-0.5 rounded-lg animate-in fade-in duration-200 h-7">
-                                <button
-                                  onClick={() => {
-                                    if (onDeleteTransaction) onDeleteTransaction(txn.id);
-                                    setDeleteConfirmId(null);
-                                  }}
-                                  className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold rounded-md shadow-xs cursor-pointer h-full flex items-center"
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  onClick={() => setDeleteConfirmId(null)}
-                                  className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setDeleteConfirmId(txn.id)}
-                                className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                Delete
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleOpenDeleteModal(txn)}
+                              className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Delete
+                            </button>
                           </>
                         )}
                       </div>
@@ -3160,6 +3221,7 @@ export default function RegisterView({
                   <option value="APPROVED">Approved</option>
                   <option value="PAID">Paid</option>
                   <option value="REJECTED">Rejected</option>
+                  <option value="DELETED">Deleted / Voided</option>
                 </select>
               </div>
             </div>
@@ -3193,16 +3255,16 @@ export default function RegisterView({
                   </tr>
                 ) : (
                   paginatedTransactions.map((txn, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                    <tr key={idx} className={txn.status === 'DELETED' ? "bg-rose-50/20 text-slate-400 opacity-75 transition-colors" : "hover:bg-slate-50/50 transition-colors"}>
                       {/* Date */}
-                      <td className="py-4 px-6 text-slate-400 font-mono text-[10px] whitespace-nowrap">{formatDate(txn.date)}</td>
+                      <td className={`py-4 px-6 font-mono text-[10px] whitespace-nowrap ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-slate-400'}`}>{formatDate(txn.date)}</td>
                       
                       {/* ID */}
-                      <td className="py-4 px-6 font-mono font-bold text-slate-950 text-[11px] whitespace-nowrap">
+                      <td className={`py-4 px-6 font-mono font-bold text-[11px] whitespace-nowrap ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-slate-950'}`}>
                         <button
                           type="button"
                           onClick={() => setSelectedDetailTransaction(txn)}
-                          className="text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer focus:outline-hidden font-bold text-left"
+                          className={`cursor-pointer focus:outline-hidden font-bold text-left ${txn.status === 'DELETED' ? 'text-slate-400 line-through' : 'text-indigo-600 hover:text-indigo-800 hover:underline'}`}
                         >
                           {txn.reference || txn.id}
                           {txn.receiptName && (
@@ -3212,14 +3274,23 @@ export default function RegisterView({
                       </td>
                       
                       {/* Paid To */}
-                      <td className="py-4 px-6 font-bold text-slate-900">{txn.merchant}</td>
+                      <td className={`py-4 px-6 font-bold ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : 'text-slate-900'}`}>{txn.merchant}</td>
                       
                       {/* Particulars */}
-                      <td className="py-4 px-6 text-slate-500 max-w-xs break-words">{txn.description}</td>
+                      <td className="py-4 px-6 max-w-xs break-words text-slate-500">
+                        <span className={txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : ''}>
+                          {txn.description}
+                        </span>
+                        {txn.status === 'DELETED' && txn.deleteReason && (
+                          <div className="text-[10px] text-rose-600 font-semibold italic mt-0.5">
+                            Reason: {txn.deleteReason}
+                          </div>
+                        )}
+                      </td>
                       
                       {/* Debit Amount */}
-                      <td className="py-4 px-6 whitespace-nowrap">
-                        <div className="font-bold text-rose-600 text-sm">
+                      <td className={`py-4 px-6 whitespace-nowrap ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 decoration-2 text-slate-400' : ''}`}>
+                        <div className={`font-bold text-sm ${txn.status === 'DELETED' ? 'text-slate-400' : 'text-rose-600'}`}>
                           {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         {txn.paymentType && (
@@ -3236,7 +3307,7 @@ export default function RegisterView({
                       </td>
 
                       {/* Category Badge */}
-                      <td className="py-4 px-6">
+                      <td className={`py-4 px-6 ${txn.status === 'DELETED' ? 'opacity-60 line-through' : ''}`}>
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-50 border border-slate-200 text-slate-600 whitespace-nowrap">
                           <span 
                             className="w-1.5 h-1.5 rounded-full" 
@@ -3250,6 +3321,14 @@ export default function RegisterView({
                       <td className="py-4 px-6 whitespace-nowrap">
                         {(() => {
                           const st = txn.status || 'PAID';
+                          if (st === 'DELETED') {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs cursor-help" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || 'No reason provided'}`}>
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
+                                DELETED
+                              </span>
+                            );
+                          }
                           if (st === 'PENDING') {
                             return (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
@@ -3311,7 +3390,11 @@ export default function RegisterView({
                             <Printer className="w-3.5 h-3.5" />
                           </button>
 
-                          {currentUser.role === 'ADMIN' && (
+                          {txn.status === 'DELETED' ? (
+                            <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
+                              Voided
+                            </span>
+                          ) : currentUser.role === 'ADMIN' && (
                             <>
                               <button
                                 onClick={() => handleEditClick(txn)}
@@ -3321,33 +3404,13 @@ export default function RegisterView({
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               
-                              {deleteConfirmId === txn.id ? (
-                                <div className="flex items-center gap-1 bg-red-50 border border-red-100 p-0.5 rounded-lg animate-in fade-in duration-200">
-                                  <button
-                                    onClick={() => {
-                                      if (onDeleteTransaction) onDeleteTransaction(txn.id);
-                                      setDeleteConfirmId(null);
-                                    }}
-                                    className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold rounded-md shadow-xs cursor-pointer"
-                                  >
-                                    Confirm
-                                  </button>
-                                  <button
-                                    onClick={() => setDeleteConfirmId(null)}
-                                    className="p-0.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setDeleteConfirmId(txn.id)}
-                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
-                                  title="Delete Entry"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
+                              <button
+                                onClick={() => handleOpenDeleteModal(txn)}
+                                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
+                                title="Delete Entry"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </>
                           )}
                         </div>
@@ -3368,28 +3431,38 @@ export default function RegisterView({
               </div>
             ) : (
               paginatedTransactions.map((txn, idx) => (
-                <div key={idx} className="py-4 space-y-3">
+                <div key={idx} className={`py-4 space-y-3 ${txn.status === 'DELETED' ? 'opacity-75 bg-rose-50/10 p-3 rounded-xl border border-rose-100' : ''}`}>
                   {/* Top row: Date & ID */}
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-mono text-slate-400 whitespace-nowrap">{formatDate(txn.date)}</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDetailTransaction(txn)}
-                      className="font-mono font-bold text-indigo-600 hover:text-indigo-800 hover:underline bg-indigo-50/50 hover:bg-indigo-50 px-2 py-0.5 rounded-md whitespace-nowrap cursor-pointer focus:outline-hidden"
-                    >
-                      {txn.reference || txn.id}
-                      {txn.receiptName && <span className="ml-1 text-rose-600 font-extrabold">#</span>}
-                    </button>
+                    <span className={`font-mono ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-slate-400'}`}>{formatDate(txn.date)}</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDetailTransaction(txn)}
+                        className={`font-mono font-bold px-2 py-0.5 rounded-md whitespace-nowrap cursor-pointer focus:outline-hidden ${txn.status === 'DELETED' ? 'text-slate-400 line-through bg-slate-100' : 'text-indigo-600 hover:text-indigo-800 hover:underline bg-indigo-50/50 hover:bg-indigo-50'}`}
+                      >
+                        {txn.reference || txn.id}
+                        {txn.receiptName && <span className="ml-1 text-rose-600 font-extrabold">#</span>}
+                      </button>
+                      {txn.status === 'DELETED' && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-extrabold text-rose-700 bg-rose-100 border border-rose-200 rounded-md uppercase">
+                          DELETED
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Middle row: Paid To & Amount */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h4 className="font-bold text-slate-900 text-sm">{txn.merchant}</h4>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{txn.description}</p>
+                      <h4 className={`font-bold text-sm ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-500' : 'text-slate-900'}`}>{txn.merchant}</h4>
+                      <p className={`text-xs mt-1 leading-relaxed ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-slate-500'}`}>{txn.description}</p>
+                      {txn.status === 'DELETED' && txn.deleteReason && (
+                        <p className="text-[10px] text-rose-600 font-semibold italic mt-1">Reason: {txn.deleteReason}</p>
+                      )}
                     </div>
                     <div className="text-right whitespace-nowrap">
-                      <span className="font-bold text-rose-600 text-base">
+                      <span className={`font-bold text-base ${txn.status === 'DELETED' ? 'line-through decoration-rose-500/80 text-slate-400' : 'text-rose-600'}`}>
                         {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       {txn.paymentType && (
@@ -3425,7 +3498,11 @@ export default function RegisterView({
                       Print
                     </button>
 
-                    {currentUser.role === 'ADMIN' && (
+                    {txn.status === 'DELETED' ? (
+                      <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1.5 rounded-lg">
+                        Voided
+                      </span>
+                    ) : currentUser.role === 'ADMIN' && (
                       <>
                         <button
                           onClick={() => handleEditClick(txn)}
@@ -3435,33 +3512,13 @@ export default function RegisterView({
                           Edit
                         </button>
                         
-                        {deleteConfirmId === txn.id ? (
-                          <div className="flex items-center gap-1 bg-red-50 border border-red-200 p-0.5 rounded-lg animate-in fade-in duration-200 h-8">
-                            <button
-                              onClick={() => {
-                                if (onDeleteTransaction) onDeleteTransaction(txn.id);
-                                setDeleteConfirmId(null);
-                              }}
-                              className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold rounded-md shadow-xs cursor-pointer h-full flex items-center"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(null)}
-                              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setDeleteConfirmId(txn.id)}
-                            className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Delete
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleOpenDeleteModal(txn)}
+                          className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
                       </>
                     )}
                   </div>
@@ -4038,6 +4095,103 @@ export default function RegisterView({
 
         {renderBatchPrintModal()}
         {renderDetailModals()}
+
+        {/* Delete / Void Transaction Confirmation Modal */}
+        {deletingTxn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden">
+              <div className="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-rose-100 text-rose-600 rounded-xl">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">Delete / Void Voucher</h3>
+                    <p className="text-[11px] text-rose-700 font-semibold font-mono">
+                      {deletingTxn.reference || deletingTxn.id}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeletingTxn(null)}
+                  className="p-1 hover:bg-rose-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Voucher Number:</span>
+                    <span className="font-mono font-bold text-slate-800">{deletingTxn.reference || deletingTxn.id}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Amount:</span>
+                    <span className="font-bold text-slate-900">{currencySymbol}{deletingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-medium">{deletingTxn.type === 'IN' ? 'Deposited By:' : 'Paid To:'}</span>
+                    <span className="font-semibold text-slate-700">{deletingTxn.merchant}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="delete-reason-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    Reason for Deletion <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    id="delete-reason-input"
+                    value={deleteReasonInput}
+                    onChange={(e) => {
+                      setDeleteReasonInput(e.target.value);
+                      if (deleteError) setDeleteError('');
+                    }}
+                    placeholder="e.g. Duplicate entry, Wrong amount, Cancelled expense..."
+                    rows={3}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-rose-500 focus:outline-hidden transition-all"
+                  />
+                  {deleteError && (
+                    <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      {deleteError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+                  <p className="font-bold">What happens when you void this voucher?</p>
+                  <ul className="list-disc pl-4 space-y-0.5 font-medium text-amber-800">
+                    <li>The Voucher ID ({deletingTxn.reference || deletingTxn.id}) will remain occupied to prevent sequence jumps.</li>
+                    <li>The row will remain in the log styled with a strikeout line.</li>
+                    {deletingTxn.type === 'OUT' && (
+                      <li>The expense amount ({currencySymbol}{deletingTxn.amount.toFixed(2)}) will be added back into Cash on Hand balance.</li>
+                    )}
+                  </ul>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setDeletingTxn(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDeleteWithReason}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-900/10 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Confirm Void & Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

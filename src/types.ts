@@ -71,7 +71,7 @@ export interface IntegrationSettings {
 }
 
 export type TransactionType = 'IN' | 'OUT';
-export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAID';
+export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAID' | 'DELETED';
 
 export interface EditHistoryEntry {
   timestamp: string;
@@ -109,6 +109,9 @@ export interface Transaction {
   rejectedBy?: string; // Full name of person who rejected
   rejectedAt?: string; // Timestamp if rejected
   rejectionReason?: string;
+  deletedBy?: string; // Full name of person who deleted/voided
+  deletedAt?: string; // Timestamp if deleted
+  deleteReason?: string; // Reason for deletion
 }
 
 export const formatDateToDMY = (dateStr?: string | null): string => {

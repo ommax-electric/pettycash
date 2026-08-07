@@ -92,21 +92,11 @@ export async function sendEmailNotification(
       : (localStorage.getItem('petty_cash_email_recipients') || '');
     let defaultRecipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
 
-    const tenantId = (integrationSettings
-      ? integrationSettings.msTenantId
-      : (localStorage.getItem('ms_graph_tenant_id') || '')).trim();
-    const clientId = (integrationSettings
-      ? integrationSettings.msClientId
-      : (localStorage.getItem('ms_graph_client_id') || '')).trim();
-    const clientSecret = (integrationSettings
-      ? integrationSettings.msClientSecret
-      : (localStorage.getItem('ms_graph_client_secret') || '')).trim();
-    const senderEmail = (integrationSettings
-      ? integrationSettings.msSenderEmail
-      : (localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com')).trim();
-    const senderName = (integrationSettings
-      ? integrationSettings.msSenderName
-      : (localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk')).trim();
+    const tenantId = (integrationSettings?.msTenantId || localStorage.getItem('ms_graph_tenant_id') || 'a63883ba-4173-48a2-a29d-247ca0c8e59a').trim();
+    const clientId = (integrationSettings?.msClientId || localStorage.getItem('ms_graph_client_id') || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6').trim();
+    const clientSecret = (integrationSettings?.msClientSecret || localStorage.getItem('ms_graph_client_secret') || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz').trim();
+    const senderEmail = (integrationSettings?.msSenderEmail || localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com').trim();
+    const senderName = (integrationSettings?.msSenderName || localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk').trim();
 
     if (!tenantId || !clientId || !clientSecret) {
       return {
@@ -124,21 +114,39 @@ export async function sendEmailNotification(
       const claimantName = (txn.requestedBy || txn.merchant || '').toLowerCase();
       const claimantUser = usersList.find(u => 
         u.fullName.toLowerCase() === claimantName ||
-        u.username.toLowerCase() === claimantName
+        u.username.toLowerCase() === claimantName ||
+        (u.email && u.email.toLowerCase() === claimantName)
       );
       if (claimantUser?.email) claimantEmail = claimantUser.email;
 
-      // Reporting Manager
+      // 1. Reporting Manager on claimantUser first
       if (claimantUser?.reportingTo) {
+        const repStr = claimantUser.reportingTo.trim().toLowerCase();
         const mgr = usersList.find(u => 
-          u.username.toLowerCase() === claimantUser.reportingTo?.toLowerCase() ||
-          u.fullName.toLowerCase() === claimantUser.reportingTo?.toLowerCase()
+          u.username.toLowerCase() === repStr ||
+          u.fullName.toLowerCase() === repStr ||
+          (u.email && u.email.toLowerCase() === repStr)
         );
         if (mgr?.email) managerEmail = mgr.email;
       }
-      if (!managerEmail) {
-        const defaultMgr = usersList.find(u => u.role === 'MANAGER' && u.email);
-        if (defaultMgr?.email) managerEmail = defaultMgr.email;
+
+      // 2. Check explicit approverName on transaction if not generic
+      if (!managerEmail && txn.approverName) {
+        const apprStr = txn.approverName.trim().toLowerCase();
+        const genericTerms = ['admin', 'administrator', 'manager', 'custodian', 'auditor', 'user'];
+        if (!genericTerms.includes(apprStr)) {
+          const mgr = usersList.find(u =>
+            u.fullName.toLowerCase() === apprStr ||
+            u.username.toLowerCase() === apprStr ||
+            (u.email && u.email.toLowerCase() === apprStr)
+          );
+          if (mgr?.email) managerEmail = mgr.email;
+        }
+      }
+
+      // If resolved manager is the claimant themselves, clear managerEmail (claimant cannot approve own request)
+      if (managerEmail && claimantEmail && managerEmail.trim().toLowerCase() === claimantEmail.trim().toLowerCase()) {
+        managerEmail = '';
       }
 
       // Admin
@@ -167,7 +175,7 @@ export async function sendEmailNotification(
     let cardBorderColor = '#ed3833';
 
     // Target recipient emails list
-    let targetRecipients: string[] = [...defaultRecipients];
+    let targetRecipients: string[] = [];
 
     if (type === 'NEW') {
       cardTitle = 'New Voucher Alert';
@@ -178,6 +186,12 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyNew : null) ||
         localStorage.getItem('petty_cash_email_body_new') ||
         'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+      if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients);
+      } else if (adminEmail) {
+        targetRecipients.push(adminEmail);
+      }
+      if (claimantEmail) targetRecipients.push(claimantEmail);
     } else if (type === 'REQUEST_SUBMITTED') {
       cardTitle = 'Petty Cash Claim Pending Approval';
       cardBorderColor = '#f59e0b';
@@ -187,8 +201,16 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestSubmitted : null) ||
         localStorage.getItem('petty_cash_email_body_req_submitted') ||
         'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
-      if (managerEmail) targetRecipients.push(managerEmail);
-      if (adminEmail) targetRecipients.push(adminEmail);
+      
+      // ONLY send approval request to assigned reporting manager (or admin if no manager)
+      // Strictly exclude claimant email from receiving approval request emails for their own claim
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(adminEmail);
+      } else if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients.filter(e => e.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()));
+      }
     } else if (type === 'REQUEST_APPROVED') {
       cardTitle = 'Petty Cash Claim Approved - Action Required: Issue Cash';
       cardBorderColor = '#2563eb';
@@ -200,6 +222,7 @@ export async function sendEmailNotification(
         'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.';
       if (claimantEmail) targetRecipients.push(claimantEmail);
       if (adminEmail) targetRecipients.push(adminEmail);
+      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
     } else if (type === 'REQUEST_PAID') {
       cardTitle = 'Petty Cash Payment Issued';
       cardBorderColor = '#10b981';
@@ -231,6 +254,11 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInward : null) ||
         localStorage.getItem('petty_cash_email_body_inward') ||
         'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+      if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients);
+      } else if (adminEmail) {
+        targetRecipients.push(adminEmail);
+      }
     } else if (type === 'INWARD_EDIT') {
       cardTitle = 'Deposit Changes Alert';
       cardBorderColor = '#f7b944';
@@ -240,6 +268,8 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInwardEdit : null) ||
         localStorage.getItem('petty_cash_email_body_inward_edit') ||
         'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+      if (adminEmail) targetRecipients.push(adminEmail);
+      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
     } else {
       cardTitle = 'Voucher Changes Alert';
       cardBorderColor = '#f7b944';
@@ -249,6 +279,17 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyEdit : null) ||
         localStorage.getItem('petty_cash_email_body_edit') ||
         'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
+      if (adminEmail) targetRecipients.push(adminEmail);
+      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+    }
+
+    // Fallback: If targetRecipients is still empty
+    if (targetRecipients.length === 0) {
+      if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients);
+      } else if (adminEmail) {
+        targetRecipients.push(adminEmail);
+      }
     }
 
     // Deduplicate recipients case-insensitively
@@ -272,9 +313,9 @@ export async function sendEmailNotification(
       .replace(/\{changed_fields\}/g, changedFieldsStr)
       .replace(/\{attachment\}/g, hasAttachment ? 'YES' : 'NO');
 
-    const approverName = txn.approvedBy || txn.approverName || 'Mohan K';
+    const approverName = txn.approvedBy || txn.approverName || 'Mohan';
     const payerName = txn.paidBy || 'David Vance';
-    const rejecterName = txn.rejectedBy || 'Mohan K';
+    const rejecterName = txn.rejectedBy || 'Mohan';
 
     // Helper to send email to specific recipients with or without cash balance
     const dispatchEmailToRecipients = async (recList: string[], includeBalance: boolean) => {

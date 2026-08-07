@@ -5,7 +5,7 @@ import {
   Eye, FileText, Check, X, Paperclip, ExternalLink
 } from 'lucide-react';
 import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
-import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
+import { openAttachmentInNewTab, sortTransactionsByIdDesc, isAssignedManagerForTxn, isMatchUserIdentifier } from '../utils';
 
 interface ApprovalsViewProps {
   transactions: Transaction[];
@@ -48,7 +48,7 @@ export default function ApprovalsView({
     }
     const mgr = users.find(u => (u.role === 'MANAGER' || u.role === 'ADMIN') && u.fullName && !isGenericRoleName(u.fullName));
     if (mgr?.fullName) return mgr.fullName;
-    return 'Mohan K';
+    return 'Mohan';
   };
 
   const resolvePayerName = (txn: Transaction) => {
@@ -68,17 +68,35 @@ export default function ApprovalsView({
     }
     const mgr = users.find(u => (u.role === 'MANAGER' || u.role === 'ADMIN') && u.fullName && !isGenericRoleName(u.fullName));
     if (mgr?.fullName) return mgr.fullName;
-    return 'Mohan K';
+    return 'Mohan';
+  };
+
+  const getAssignedManagerName = (txn: Transaction) => {
+    const reqStr = (txn.requestedBy || txn.merchant || '').trim();
+    const reqUser = users.find(u => 
+      isMatchUserIdentifier(u.fullName, reqStr) ||
+      isMatchUserIdentifier(u.username, reqStr) ||
+      isMatchUserIdentifier(u.email, reqStr) ||
+      isMatchUserIdentifier(u.empId, reqStr)
+    );
+    if (reqUser?.reportingTo) {
+      return reqUser.reportingTo;
+    }
+    if (txn.approverName && !isGenericRoleName(txn.approverName)) {
+      return txn.approverName;
+    }
+    return 'Admin';
   };
 
   const getEffectiveUserFullName = () => {
     if (currentUser?.fullName && !isGenericRoleName(currentUser.fullName)) {
       return currentUser.fullName;
     }
-    if (currentUser?.role === 'ADMIN') return 'Sarah Jenkins';
+    const mgr = users.find(u => u.role === 'MANAGER' && u.fullName);
+    if (currentUser?.role === 'ADMIN') return 'Administrator';
     if (currentUser?.role === 'CUSTODIAN') return 'David Vance';
-    if (currentUser?.role === 'MANAGER') return 'Mohan K';
-    return 'Mohan K';
+    if (currentUser?.role === 'MANAGER') return mgr?.fullName || 'Mohan';
+    return mgr?.fullName || 'Mohan';
   };
 
   const [activeTab, setActiveTab] = useState<'PENDING_APPROVAL' | 'PENDING_PAYMENT' | 'HISTORY'>('PENDING_APPROVAL');
@@ -95,7 +113,11 @@ export default function ApprovalsView({
   const isAdminOrCustodian = currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN';
 
   // Count items per queue
-  const pendingApprovalTxns = transactions.filter(t => t.type === 'OUT' && t.status === 'PENDING');
+  const pendingApprovalTxns = transactions.filter(t => 
+    t.type === 'OUT' && 
+    t.status === 'PENDING' && 
+    isAssignedManagerForTxn(t, currentUser, users)
+  );
   const pendingPaymentTxns = transactions.filter(t => t.type === 'OUT' && t.status === 'APPROVED');
   const historyTxns = transactions.filter(t => t.type === 'OUT' && (t.status === 'PAID' || t.status === 'REJECTED'));
 
@@ -266,9 +288,14 @@ export default function ApprovalsView({
                         <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
                           {formatDateToDMY(txn.date)}
                         </td>
-                        <td className="py-3 px-2.5 sm:px-3 font-semibold text-slate-800 dark:text-slate-200 max-w-[140px] truncate">
-                          {txn.merchant}
-                          {txn.requestedBy && txn.requestedBy !== txn.merchant && (
+                        <td className="py-3 px-2.5 sm:px-3 font-semibold text-slate-800 dark:text-slate-200 max-w-[150px] truncate">
+                          <span className="font-bold text-slate-900 dark:text-slate-100">{txn.merchant || txn.requestedBy}</span>
+                          {isPending && (
+                            <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-semibold truncate mt-0.5">
+                              Approver: {getAssignedManagerName(txn)}
+                            </span>
+                          )}
+                          {!isPending && txn.requestedBy && txn.requestedBy !== txn.merchant && (
                             <span className="block text-[10px] text-slate-400 font-normal truncate">Req: {txn.requestedBy}</span>
                           )}
                         </td>

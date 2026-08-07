@@ -1,4 +1,4 @@
-import { AppSettings } from './types';
+import { AppSettings, User } from './types';
 
 /**
  * Extracts standard IANA timezone identifier from AppSettings.timezone string
@@ -170,5 +170,163 @@ export const sortTransactionsByIdDesc = <T extends { reference?: string; id?: st
     const dateB = b.date ? new Date(b.date).getTime() : 0;
     return dateB - dateA;
   });
+};
+
+/**
+ * Checks if currentUser is the assigned reporting manager to approve a pending transaction request.
+ */
+export const normalizeNameStr = (str?: string | null): string => {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .replace(/\b[a-z]\b/g, '') // remove single letter initials (e.g. 'k' in 'mohan k')
+    .replace(/[^a-z0-9]/g, ''); // strip non-alphanumeric chars
+};
+
+export const isMatchUserIdentifier = (val1?: string | null, val2?: string | null): boolean => {
+  if (!val1 || !val2) return false;
+  const s1 = val1.trim().toLowerCase();
+  const s2 = val2.trim().toLowerCase();
+  if (s1 === s2) return true;
+  
+  const n1 = normalizeNameStr(val1);
+  const n2 = normalizeNameStr(val2);
+  if (n1 && n2 && n1 === n2) return true;
+  return false;
+};
+
+/**
+ * Checks if currentUser is the assigned reporting manager to approve a pending transaction request.
+ */
+export const isAssignedManagerForTxn = (
+  txn: { requestedBy?: string; recordedBy?: string; merchant?: string; approverName?: string },
+  currentUser?: User | null,
+  users: User[] = []
+): boolean => {
+  if (!currentUser) return false;
+
+  const isMatchCurrent = (val?: string | null): boolean => {
+    if (!val) return false;
+    return (
+      isMatchUserIdentifier(val, currentUser.username) ||
+      isMatchUserIdentifier(val, currentUser.fullName) ||
+      isMatchUserIdentifier(val, currentUser.email) ||
+      isMatchUserIdentifier(val, currentUser.empId)
+    );
+  };
+
+  // RULE 1: A user CANNOT approve their own transaction claim!
+  if (
+    isMatchCurrent(txn.requestedBy) ||
+    isMatchCurrent(txn.recordedBy) ||
+    (txn.merchant && isMatchCurrent(txn.merchant))
+  ) {
+    return false;
+  }
+
+  // Find requester user object in users list
+  const reqUser = users.find(u => {
+    return (
+      (!!txn.requestedBy && (
+        isMatchUserIdentifier(u.fullName, txn.requestedBy) ||
+        isMatchUserIdentifier(u.username, txn.requestedBy) ||
+        isMatchUserIdentifier(u.email, txn.requestedBy) ||
+        isMatchUserIdentifier(u.empId, txn.requestedBy)
+      )) ||
+      (!!txn.recordedBy && (
+        isMatchUserIdentifier(u.fullName, txn.recordedBy) ||
+        isMatchUserIdentifier(u.username, txn.recordedBy) ||
+        isMatchUserIdentifier(u.email, txn.recordedBy) ||
+        isMatchUserIdentifier(u.empId, txn.recordedBy)
+      )) ||
+      (!!txn.merchant && (
+        isMatchUserIdentifier(u.fullName, txn.merchant) ||
+        isMatchUserIdentifier(u.username, txn.merchant) ||
+        isMatchUserIdentifier(u.email, txn.merchant) ||
+        isMatchUserIdentifier(u.empId, txn.merchant)
+      ))
+    );
+  });
+
+  if (reqUser) {
+    if (
+      isMatchUserIdentifier(reqUser.username, currentUser.username) ||
+      isMatchUserIdentifier(reqUser.fullName, currentUser.fullName) ||
+      isMatchUserIdentifier(reqUser.email, currentUser.email)
+    ) {
+      return false; // Cannot approve your own transaction
+    }
+  }
+
+  // Helper to test if a string is a generic role name (e.g. 'admin', 'manager')
+  const isGenericRoleName = (str?: string | null): boolean => {
+    if (!str) return true;
+    const s = str.trim().toLowerCase();
+    const genericTerms = [
+      'admin', 'administrator', 'manager', 'custodian', 'auditor', 'user',
+      'administrator / manager', 'manager / admin', 'custodian / admin',
+      'admin user', 'manager user', 'role', 'null', 'undefined'
+    ];
+    return genericTerms.some(term => s === term || s === term + 's');
+  };
+
+  // RULE 2: Determine target approver string from requester's reportingTo or txn.approverName
+  let targetApprover = '';
+  if (reqUser?.reportingTo && reqUser.reportingTo.trim().length > 0) {
+    targetApprover = reqUser.reportingTo.trim();
+  } else if (txn.approverName && !isGenericRoleName(txn.approverName)) {
+    targetApprover = txn.approverName.trim();
+  } else {
+    targetApprover = 'admin';
+  }
+
+  // If targetApprover matches the requester themselves, fallback to admin (requester cannot approve own request)
+  if (reqUser) {
+    if (
+      isMatchUserIdentifier(targetApprover, reqUser.username) ||
+      isMatchUserIdentifier(targetApprover, reqUser.fullName) ||
+      isMatchUserIdentifier(targetApprover, reqUser.email)
+    ) {
+      targetApprover = 'admin';
+    }
+  }
+
+  // RULE 3: If a specific manager target is designated (and is NOT generic admin)
+  if (targetApprover && targetApprover.toLowerCase() !== 'admin' && targetApprover.toLowerCase() !== 'administrator') {
+    // Check direct string match with currentUser
+    if (isMatchCurrent(targetApprover)) {
+      return true;
+    }
+
+    // Check if targetApprover resolves to currentUser in users list
+    const targetUser = users.find(u =>
+      isMatchUserIdentifier(u.username, targetApprover) ||
+      isMatchUserIdentifier(u.fullName, targetApprover) ||
+      isMatchUserIdentifier(u.email, targetApprover) ||
+      isMatchUserIdentifier(u.empId, targetApprover)
+    );
+
+    if (targetUser) {
+      if (
+        isMatchUserIdentifier(targetUser.username, currentUser.username) ||
+        isMatchUserIdentifier(targetUser.fullName, currentUser.fullName) ||
+        isMatchUserIdentifier(targetUser.email, currentUser.email)
+      ) {
+        return true;
+      }
+    }
+
+    // Target is a specific manager; other non-assigned users/managers CANNOT approve
+    return false;
+  }
+
+  // RULE 4: If targetApprover is 'admin' or unassigned:
+  // ONLY Admin role is allowed to approve
+  if (currentUser.role === 'ADMIN') {
+    return true;
+  }
+
+  return false;
 };
 

@@ -20,7 +20,7 @@ import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAUL
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl } from './services/fileAttachmentService';
-import { sortTransactionsByIdDesc } from './utils';
+import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
 
 
 // Subcomponents
@@ -135,7 +135,13 @@ export default function App() {
             setTransactions([]);
           } else {
             const list: Transaction[] = [];
-            snapshot.forEach((d) => list.push(d.data() as Transaction));
+            snapshot.forEach((d) => {
+              const data = d.data() as Transaction;
+              list.push({
+                ...data,
+                id: d.id
+              });
+            });
             setTransactions(sortTransactionsByIdDesc(list));
           }
         }, (err) => console.warn('Firestore transactions sync notice:', err));
@@ -259,6 +265,7 @@ export default function App() {
           const dataUrl = await convertExternalUrlToDataUrl(txn.receiptUrl!);
           if (dataUrl && !cancelled) {
             await updateDoc(doc(db, 'transactions', txn.id), { receiptUrl: dataUrl });
+            setTransactions(prev => prev.map(t => t.id === txn.id ? { ...t, receiptUrl: dataUrl } : t));
           }
         } catch (e) {
           console.warn('Background attachment migration notice:', e);
@@ -275,6 +282,54 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [transactions.length]);
+
+  // Auto-normalize Inward transaction voucher sequences (e.g. fix IW-014 -> IW-005, IW-015 -> IW-006)
+  useEffect(() => {
+    if (transactions.length === 0) return;
+
+    const inwardTxns = transactions.filter(t =>
+      t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'))
+    );
+
+    if (inwardTxns.length === 0) return;
+
+    // Sort inward transactions chronologically ascending
+    const sortedInward = [...inwardTxns].sort((a, b) => {
+      const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+
+      const getNum = (ref?: string, id?: string) => {
+        const match = (ref || id || '').match(/\d+/);
+        return match ? parseInt(match[0], 10) : 0;
+      };
+      return getNum(a.reference, a.id) - getNum(b.reference, b.id);
+    });
+
+    let cancelled = false;
+    const fixInwardSequences = async () => {
+      for (let i = 0; i < sortedInward.length; i++) {
+        if (cancelled) break;
+        const txn = sortedInward[i];
+        const expectedRef = `IW-${String(i + 1).padStart(3, '0')}`;
+        if (txn.reference !== expectedRef) {
+          try {
+            await updateDoc(doc(db, 'transactions', txn.id), { reference: expectedRef });
+          } catch (e) {
+            console.warn('Notice updating inward voucher sequence:', e);
+          }
+        }
+      }
+    };
+
+    const timer = setTimeout(() => {
+      fixInwardSequences();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [transactions]);
 
 
   // Fetch user public IP address for accurate audit log tracking
@@ -524,7 +579,23 @@ export default function App() {
 
     const updatedTxnsList = transactions.map(t => t.id === updatedTxn.id ? finalTxn : t);
     setTransactions(updatedTxnsList);
+    
+    // Save to primary Firestore document ID
     setDoc(doc(db, 'transactions', updatedTxn.id), finalTxn).catch(e => console.warn(e));
+
+    // Also sync to reference key or numeric voucher keys if stored under alternate doc IDs in Firestore
+    if (updatedTxn.reference && updatedTxn.reference !== updatedTxn.id) {
+      setDoc(doc(db, 'transactions', updatedTxn.reference), finalTxn).catch(e => console.warn(e));
+    }
+    const numRef = updatedTxn.reference ? updatedTxn.reference.replace(/\D/g, '') : '';
+    if (numRef) {
+      const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
+      candidates.forEach(cand => {
+        if (cand !== updatedTxn.id) {
+          setDoc(doc(db, 'transactions', cand), finalTxn).catch(() => {});
+        }
+      });
+    }
 
     addLog('TXN_UPDATE', `Modified transaction reference ${updatedTxn.reference} (${updatedTxn.type === 'IN' ? 'Deposit' : 'Disbursement'})`);
 
@@ -538,16 +609,26 @@ export default function App() {
     }
   };
 
-  // Handler: Delete transaction
-  const handleDeleteTransaction = (id: string) => {
+  // Handler: Delete/Void transaction with reason
+  const handleDeleteTransaction = (id: string, reason?: string) => {
     if (!currentUser) return;
     const targetTxn = transactions.find(t => t.id === id);
     if (!targetTxn) return;
 
-    setTransactions(prev => prev.filter(t => t.id !== id));
-    deleteDoc(doc(db, 'transactions', id)).catch(e => console.warn(e));
+    const deletionReasonStr = reason?.trim() || 'Transaction cancelled / voided by admin';
 
-    addLog('TXN_DELETE', `Deleted transaction reference ${targetTxn.reference} of ${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)}`);
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      status: 'DELETED',
+      deletedBy: currentUser.fullName,
+      deletedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      deleteReason: deletionReasonStr
+    };
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('TXN_DELETE', `Deleted/Voided voucher ${targetTxn.reference || targetTxn.id} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)}). Reason: ${deletionReasonStr}`);
   };
 
   const isRoleTitleName = (name: string | undefined | null): boolean => {
@@ -571,9 +652,9 @@ export default function App() {
       const found = users.find(u => u.role === 'MANAGER');
       if (found?.fullName) return found.fullName;
     }
-    if (roleCategory === 'ADMIN') return 'Sarah Jenkins';
+    if (roleCategory === 'ADMIN') return 'Administrator';
     if (roleCategory === 'CUSTODIAN') return 'David Vance';
-    return 'Mohan K';
+    return 'Mohan';
   };
 
   // Workflow Handler: Manager / Admin Approval
@@ -880,16 +961,8 @@ export default function App() {
     if (!currentUser) return 0;
     return transactions.filter(t => {
       if (t.type !== 'OUT') return false;
-      if (currentUser.role === 'ADMIN') {
-        return t.status === 'PENDING' || t.status === 'APPROVED';
-      }
-      const reqUser = users.find(u => 
-        u.fullName.toLowerCase() === (t.requestedBy || '').toLowerCase() ||
-        u.username.toLowerCase() === (t.requestedBy || '').toLowerCase()
-      );
-      const isReportingToMe = reqUser?.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() ||
-                              reqUser?.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase();
-      return t.status === 'PENDING' && (isReportingToMe || currentUser.isManager);
+      if (t.status !== 'PENDING') return false;
+      return isAssignedManagerForTxn(t, currentUser, users);
     }).length;
   }, [transactions, currentUser, users]);
 
