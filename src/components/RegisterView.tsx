@@ -23,7 +23,8 @@ interface RegisterViewProps {
 
 const formatDateToDMY = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
   if (!dateStr) return '';
-  const parts = dateStr.split('-');
+  const cleanDateStr = dateStr.includes(' ') ? dateStr.split(' ')[0] : (dateStr.includes('T') ? dateStr.split('T')[0] : dateStr);
+  const parts = cleanDateStr.split('-');
   if (parts.length === 3) {
     const yyyy = parts[0];
     const mm = parts[1];
@@ -41,6 +42,55 @@ const formatDateToDMY = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
     return `${dd}/${mm}/${yyyy}`;
   }
   return dateStr;
+};
+
+const formatVoidDateTime = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  const hasTime = dateStr.includes(':') || dateStr.includes('T') || (dateStr.includes(' ') && dateStr.trim().length > 10);
+  
+  let d: Date;
+  if (dateStr.endsWith('Z') || dateStr.includes('T')) {
+    d = new Date(dateStr);
+  } else if (dateStr.includes(' ')) {
+    d = new Date(dateStr.replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) {
+      d = new Date(dateStr);
+    }
+  } else {
+    d = new Date(dateStr);
+  }
+
+  if (isNaN(d.getTime())) return dateStr;
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    const parts = formatter.formatToParts(d);
+    const partMap: Record<string, string> = {};
+    parts.forEach(p => { partMap[p.type] = p.value; });
+
+    const dd = partMap.day || '01';
+    const mm = partMap.month || '01';
+    const yyyy = partMap.year || '2026';
+    const hh = partMap.hour || '12';
+    const minutes = partMap.minute || '00';
+    const dayPeriod = (partMap.dayPeriod || 'AM').toUpperCase();
+
+    if (hasTime) {
+      return `${dd}-${mm}-${yyyy} | ${hh}:${minutes} ${dayPeriod}`;
+    }
+    return `${dd}-${mm}-${yyyy}`;
+  } catch {
+    return dateStr;
+  }
 };
 
 const numberToWordsINR = (amount: number): string => {
@@ -1232,6 +1282,7 @@ export default function RegisterView({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
+    const isVoided = txn.status === 'DELETED';
     const amountInWords = numberToWordsINR(txn.amount);
     const formattedAmount = `${currencySymbol} ${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -1239,7 +1290,7 @@ export default function RegisterView({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Cash Voucher - ${txn.reference}</title>
+          <title>Cash Voucher - ${txn.reference}${isVoided ? ' (VOIDED)' : ''}</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
           <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -1305,6 +1356,44 @@ export default function RegisterView({
               display: flex;
               flex-direction: column;
               justify-content: space-between;
+              position: relative;
+              overflow: hidden;
+            }
+
+            /* Void Watermark Stamp Overlay (45 degree angle bottom-left to top-right) */
+            .void-stamp-overlay {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none;
+              z-index: 25;
+            }
+            .void-stamp-banner {
+              transform: rotate(-35deg);
+              font-size: 56px;
+              font-weight: 900;
+              color: rgba(225, 29, 72, 0.28);
+              border: 6px solid rgba(225, 29, 72, 0.4);
+              padding: 6px 40px;
+              border-radius: 12px;
+              letter-spacing: 14px;
+              text-transform: uppercase;
+              text-align: center;
+              white-space: nowrap;
+              box-shadow: inset 0 0 0 2px rgba(225, 29, 72, 0.2);
+            }
+
+            /* Full Strikethrough for Voided Text */
+            .voided-text {
+              text-decoration: line-through !important;
+              text-decoration-color: #dc2626 !important;
+              text-decoration-thickness: 2.5px !important;
+              color: #9f1239 !important;
             }
             
             /* Header Section */
@@ -1409,7 +1498,6 @@ export default function RegisterView({
               font-weight: 700;
               color: #1e40af;
               margin-top: 2mm;
-              margin-bottom: 14mm;
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
@@ -1417,6 +1505,35 @@ export default function RegisterView({
               display: inline-block;
               height: 14px;
               margin-left: 6px;
+            }
+
+            /* Audit Metadata Stamp above signature block */
+            .void-audit-stamp {
+              border: 1.5px dashed #dc2626;
+              background-color: #fef2f2;
+              padding: 3.5px 8px;
+              margin-top: 2.5mm;
+              margin-bottom: 2mm;
+              border-radius: 4px;
+              color: #991b1b;
+              font-size: 9.5px;
+            }
+            .void-audit-title {
+              font-size: 9px;
+              font-weight: 800;
+              color: #dc2626;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 2px;
+              border-bottom: 1px dashed #fecdd3;
+              padding-bottom: 1.5px;
+            }
+            .void-audit-body {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 9.5px;
+              color: #7f1d1d;
             }
 
             .sig-table {
@@ -1446,6 +1563,12 @@ export default function RegisterView({
           <div class="voucher-page">
             <div class="voucher-border">
               
+              ${isVoided ? `
+                <div class="void-stamp-overlay">
+                  <div class="void-stamp-banner">VOID</div>
+                </div>
+              ` : ''}
+
               <!-- Header -->
               <div class="header-row">
                 <table class="meta-table">
@@ -1471,13 +1594,13 @@ export default function RegisterView({
 
                 <div class="header-right">
                   <div class="company-name">Ommax Electric Private Limited</div>
-                  <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}</div>
+                  <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
                 </div>
               </div>
 
               <!-- Pay to (Underlined) -->
               <div class="line-row">
-                <div class="line-label">Pay to</div>
+                <div class="line-label">${txn.type === 'IN' ? 'Received From' : 'Pay to'}</div>
                 <div class="line-content">${txn.merchant || 'Cash'}</div>
               </div>
 
@@ -1495,15 +1618,25 @@ export default function RegisterView({
 
               <!-- and debit (Category) -->
               <div class="line-row">
-                <div class="line-label">and debit</div>
+                <div class="line-label">${txn.type === 'IN' ? 'Account' : 'and debit'}</div>
                 <div class="line-content">${txn.category}</div>
               </div>
 
               <!-- Bottom Signature & Recd Area -->
               <div class="bottom-area">
-                <div class="recd-row">
+                <div class="recd-row" style="margin-bottom: ${isVoided ? '3mm' : '14mm'};">
                   Recd. above sum of Rs. <span class="recd-blank"></span>
                 </div>
+
+                ${isVoided ? `
+                  <div class="void-audit-stamp">
+                    <div class="void-audit-title">VOUCHER HAS BEEN VOIDED</div>
+                    <div class="void-audit-body">
+                      <span><strong>Reason:</strong> ${txn.deleteReason || 'Cancelled / Voided by user'}</span>
+                      <span><strong>Date:</strong> ${formatVoidDateTime(txn.deletedAt || txn.date)}</span>
+                    </div>
+                  </div>
+                ` : ''}
 
                 <table class="sig-table">
                   <tr>
@@ -1543,14 +1676,21 @@ export default function RegisterView({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const vouchersHTML = txnsToPrint.map((txn, index) => {
+    const vouchersHTML = txnsToPrint.map((txn) => {
+      const isVoided = txn.status === 'DELETED';
       const amountInWords = numberToWordsINR(txn.amount);
       const formattedAmount = `${currencySymbol} ${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      const isLast = index === txnsToPrint.length - 1;
 
       return `
         <div class="voucher-page">
           <div class="voucher-border">
+            
+            ${isVoided ? `
+              <div class="void-stamp-overlay">
+                <div class="void-stamp-banner">VOID</div>
+              </div>
+            ` : ''}
+
             <!-- Header -->
             <div class="header-row">
               <table class="meta-table">
@@ -1576,7 +1716,7 @@ export default function RegisterView({
 
               <div class="header-right">
                 <div class="company-name">Ommax Electric Private Limited</div>
-                <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}</div>
+                <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
               </div>
             </div>
 
@@ -1606,9 +1746,19 @@ export default function RegisterView({
 
             <!-- Bottom Signature -->
             <div class="bottom-area">
-              <div class="recd-row">
+              <div class="recd-row" style="margin-bottom: ${isVoided ? '2.5mm' : '12mm'};">
                 Recd. above sum of Rs. <span class="recd-blank"></span>
               </div>
+
+              ${isVoided ? `
+                <div class="void-audit-stamp">
+                  <div class="void-audit-title">VOUCHER HAS BEEN VOIDED</div>
+                  <div class="void-audit-body">
+                    <span><strong>Reason:</strong> ${txn.deleteReason || 'Cancelled / Voided by user'}</span>
+                    <span><strong>Date:</strong> ${formatVoidDateTime(txn.deletedAt || txn.date)}</span>
+                  </div>
+                </div>
+              ` : ''}
 
               <table class="sig-table">
                 <tr>
@@ -1706,6 +1856,44 @@ export default function RegisterView({
               display: flex;
               flex-direction: column;
               justify-content: space-between;
+              position: relative;
+              overflow: hidden;
+            }
+
+            /* Void Watermark Stamp Overlay */
+            .void-stamp-overlay {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none;
+              z-index: 25;
+            }
+            .void-stamp-banner {
+              transform: rotate(-35deg);
+              font-size: 52px;
+              font-weight: 900;
+              color: rgba(225, 29, 72, 0.28);
+              border: 5.5px solid rgba(225, 29, 72, 0.4);
+              padding: 6px 36px;
+              border-radius: 12px;
+              letter-spacing: 12px;
+              text-transform: uppercase;
+              text-align: center;
+              white-space: nowrap;
+              box-shadow: inset 0 0 0 2px rgba(225, 29, 72, 0.2);
+            }
+
+            /* Full Strikethrough for Voided Text */
+            .voided-text {
+              text-decoration: line-through !important;
+              text-decoration-color: #dc2626 !important;
+              text-decoration-thickness: 2.5px !important;
+              color: #9f1239 !important;
             }
             
             /* Header Section */
@@ -1810,7 +1998,6 @@ export default function RegisterView({
               font-weight: 700;
               color: #1e40af;
               margin-top: 1.5mm;
-              margin-bottom: 12mm;
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
@@ -1818,6 +2005,35 @@ export default function RegisterView({
               display: inline-block;
               height: 13px;
               margin-left: 6px;
+            }
+
+            /* Audit Metadata Stamp above signature block */
+            .void-audit-stamp {
+              border: 1.5px dashed #dc2626;
+              background-color: #fef2f2;
+              padding: 3px 8px;
+              margin-top: 2mm;
+              margin-bottom: 1.5mm;
+              border-radius: 4px;
+              color: #991b1b;
+              font-size: 9px;
+            }
+            .void-audit-title {
+              font-size: 8.5px;
+              font-weight: 800;
+              color: #dc2626;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 1.5px;
+              border-bottom: 1px dashed #fecdd3;
+              padding-bottom: 1px;
+            }
+            .void-audit-body {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 9px;
+              color: #7f1d1d;
             }
 
             .sig-table {
@@ -2455,7 +2671,7 @@ export default function RegisterView({
                     <div>
                       <p className="font-bold text-xs uppercase tracking-wider text-rose-900">Transaction Voided / Deleted</p>
                       <p className="text-xs font-medium mt-0.5 text-rose-700">
-                        Deleted by <span className="font-bold">{selectedDetailTransaction.deletedBy || 'Admin'}</span> {selectedDetailTransaction.deletedAt ? `on ${selectedDetailTransaction.deletedAt}` : ''}
+                        Deleted by <span className="font-bold">{selectedDetailTransaction.deletedBy || 'Admin'}</span> {selectedDetailTransaction.deletedAt ? `on ${formatVoidDateTime(selectedDetailTransaction.deletedAt)}` : ''}
                       </p>
                       {selectedDetailTransaction.deleteReason && (
                         <p className="text-xs font-semibold text-rose-900 mt-1.5 bg-white/80 p-2 rounded-xl border border-rose-200">

@@ -616,7 +616,7 @@ export default function App() {
       ...targetTxn,
       status: 'DELETED',
       deletedBy: currentUser.fullName,
-      deletedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      deletedAt: new Date().toISOString(),
       deleteReason: deletionReasonStr
     };
 
