@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw } from 'lucide-react';
+import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
@@ -119,10 +119,17 @@ export default function RegisterView({
   const companyStampWidth = appSettings?.companyStampWidth ?? 85;
   // Query Filter States
   const [search, setSearch] = useState('');
-  const [filterCategory, setFilterCategory] = useState('ALL');
-  const [filterPayee, setFilterPayee] = useState('ALL');
+  const [filterCategory, setFilterCategory] = useState<string[]>([]);
+  const [filterPayee, setFilterPayee] = useState<string[]>([]);
   const [filterType, setFilterType] = useState('ALL');
-  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+
+  // Popover toggle states for multi-select checklist filters
+  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+  const [isPayeeFilterOpen, setIsPayeeFilterOpen] = useState(false);
+  const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [payeeSearch, setPayeeSearch] = useState('');
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -210,6 +217,7 @@ export default function RegisterView({
   const [formMerchant, setFormMerchant] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formRemarks, setFormRemarks] = useState('');
+  const [formProjectRefNo, setFormProjectRefNo] = useState('');
   const [formPaymentType, setFormPaymentType] = useState<'CASH' | 'ONLINE'>('CASH');
 
   // Manual Voucher Entry & Duplicate Check logic
@@ -427,9 +435,9 @@ export default function RegisterView({
       if (forceType === 'IN') {
         return matchesType && matchesDate;
       } else if (forceType === 'OUT') {
-        const matchesPayee = filterPayee === 'ALL' || txn.merchant.trim() === filterPayee;
-        const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
-        const matchesStatus = filterStatus === 'ALL' || (txn.status || 'PAID') === filterStatus;
+        const matchesPayee = filterPayee.length === 0 || filterPayee.includes('ALL') || filterPayee.includes(txn.merchant.trim());
+        const matchesCategory = filterCategory.length === 0 || filterCategory.includes('ALL') || filterCategory.includes(txn.category);
+        const matchesStatus = filterStatus.length === 0 || filterStatus.includes('ALL') || filterStatus.includes(txn.status || 'PAID');
 
         let matchesUser = true;
         if (currentUser.role === 'USER') {
@@ -447,10 +455,11 @@ export default function RegisterView({
         const matchesSearch = 
           txn.merchant.toLowerCase().includes(search.toLowerCase()) ||
           txn.reference.toLowerCase().includes(search.toLowerCase()) ||
-          txn.description.toLowerCase().includes(search.toLowerCase());
+          txn.description.toLowerCase().includes(search.toLowerCase()) ||
+          (txn.projectRefNo || '').toLowerCase().includes(search.toLowerCase());
 
-        const matchesCategory = filterCategory === 'ALL' || txn.category === filterCategory;
-        const matchesStatus = filterStatus === 'ALL' || txn.status === filterStatus;
+        const matchesCategory = filterCategory.length === 0 || filterCategory.includes('ALL') || filterCategory.includes(txn.category);
+        const matchesStatus = filterStatus.length === 0 || filterStatus.includes('ALL') || filterStatus.includes(txn.status || 'PAID');
 
         return matchesSearch && matchesCategory && matchesType && matchesStatus && matchesDate;
       }
@@ -622,6 +631,7 @@ export default function RegisterView({
     setShowMerchantSuggestions(false);
     setFormDescription('');
     setFormRemarks('');
+    setFormProjectRefNo('');
     setFormPaymentType('CASH');
     setReceiptFile(null);
     setFormError('');
@@ -646,6 +656,7 @@ export default function RegisterView({
     setShowMerchantSuggestions(false);
     setFormDescription('');
     setFormRemarks('');
+    setFormProjectRefNo('');
     setFormPaymentType('CASH');
     setReceiptFile(null);
     setFormError('');
@@ -663,6 +674,7 @@ export default function RegisterView({
     setFormMerchant(txn.merchant);
     setFormDescription(txn.description);
     setFormRemarks(txn.remarks || '');
+    setFormProjectRefNo(txn.projectRefNo || '');
     setFormPaymentType(txn.paymentType || 'CASH');
     setReceiptFile(txn.receiptName ? { 
       name: txn.receiptName, 
@@ -837,6 +849,7 @@ export default function RegisterView({
           receiptSize: receiptFile ? receiptFile.size : null,
           receiptUrl: receiptFile ? finalReceiptUrl : null,
           remarks: formRemarks,
+          projectRefNo: formProjectRefNo.trim(),
           paymentType: formPaymentType
         });
       }
@@ -866,6 +879,7 @@ export default function RegisterView({
         receiptSize: receiptFile ? receiptFile.size : null,
         receiptUrl: finalReceiptUrl,
         remarks: formRemarks,
+        projectRefNo: formProjectRefNo.trim(),
         paymentType: formPaymentType
       });
     }
@@ -951,7 +965,7 @@ export default function RegisterView({
     const reportTitle = getReportTitle();
     const periodText = getPeriodText();
     const totalAmount = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const colCount = forceTypeVal === 'IN' ? 5 : 7;
+    const colCount = forceTypeVal === 'IN' ? 5 : 10;
 
     let header: string[] = [];
     let rows: any[][] = [];
@@ -966,15 +980,18 @@ export default function RegisterView({
         t.category
       ]);
     } else {
-      header = ['Date', 'Voucher ID', 'Paid To', 'Particulars', 'Debit Amount', 'Payment Mode', 'Category'];
+      header = ['Date', 'Voucher ID', 'Project Ref. No.', 'Paid To', 'Particulars', 'Debit Amount', 'Payment Mode', 'Category', 'Status', 'Remarks'];
       rows = filteredTransactions.map(t => [
         formatDate(t.date),
         t.reference + (t.receiptName ? ' #' : ''),
+        t.projectRefNo || '-',
         t.merchant,
         t.description,
         t.amount.toFixed(2),
         t.paymentType === 'ONLINE' ? 'Online' : 'Cash',
-        t.category
+        t.category,
+        t.status || 'PAID',
+        t.remarks || '-'
       ]);
     }
 
@@ -989,10 +1006,10 @@ export default function RegisterView({
     
     rows.forEach(row => {
       xlsxContent += '<tr>' + row.map((cell, idx) => {
-        const isParticulars = (forceTypeVal === 'IN' && idx === 2) || (forceTypeVal !== 'IN' && idx === 3);
+        const isParticulars = (forceTypeVal === 'IN' && idx === 2) || (forceTypeVal !== 'IN' && idx === 4);
         const style = isParticulars 
           ? 'padding: 6px; border: 1px solid #e2e8f0; font-size: 12px; font-weight: 500;'
-          : `padding: 6px; border: 1px solid #e2e8f0; ${idx === 0 || idx === 1 || (forceTypeVal === 'IN' ? idx === 3 : idx === 4 || idx === 5) ? 'white-space: nowrap;' : ''}`;
+          : `padding: 6px; border: 1px solid #e2e8f0; ${idx === 0 || idx === 1 || (forceTypeVal === 'IN' ? idx === 3 : idx === 5 || idx === 6) ? 'white-space: nowrap;' : ''}`;
         return `<td style="${style}">${cell}</td>`;
       }).join('') + '</tr>';
     });
@@ -1003,11 +1020,11 @@ export default function RegisterView({
     } else {
       const cashTotal = filteredTransactions.filter(t => t.paymentType !== 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
       const onlineTotal = filteredTransactions.filter(t => t.paymentType === 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
-      xlsxContent += `<tr style="font-weight: bold; background-color: #f8fafc;"><td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: bold;" colspan="4">Total Debit Amount<br/><span style="font-size: 10px; font-weight: normal; color: #475569;">(Cash: ${cashTotal.toFixed(2)} + Online: ${onlineTotal.toFixed(2)})</span></td><td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: bold; color: #e11d48; white-space: nowrap; vertical-align: top;">${totalAmount.toFixed(2)}</td><td style="padding: 6px; border: 1px solid #cbd5e1;" colspan="2"></td></tr>`;
+      xlsxContent += `<tr style="font-weight: bold; background-color: #f8fafc;"><td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: bold;" colspan="5">Total Debit Amount<br/><span style="font-size: 10px; font-weight: normal; color: #475569;">(Cash: ${cashTotal.toFixed(2)} + Online: ${onlineTotal.toFixed(2)})</span></td><td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: bold; color: #e11d48; white-space: nowrap; vertical-align: top;">${totalAmount.toFixed(2)}</td><td style="padding: 6px; border: 1px solid #cbd5e1;" colspan="4"></td></tr>`;
     }
 
     xlsxContent += `<tr><td colspan="${colCount}"></td></tr>`;
-    xlsxContent += `<tr><td colspan="2" style="font-size: 10px; color: #64748b;">Generated On: ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td><td colspan="${colCount - 2}" style="font-size: 10px; color: #64748b; text-align: right;">Generated By: ${currentUser.fullName}</td></tr>`;
+    xlsxContent += `<tr><td colspan="3" style="font-size: 10px; color: #64748b;">Generated On: ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td><td colspan="${colCount - 3}" style="font-size: 10px; color: #64748b; text-align: right;">Generated By: ${currentUser.fullName}</td></tr>`;
     if (forceTypeVal !== 'IN') {
       xlsxContent += `<tr><td colspan="${colCount}" style="font-size: 10px; color: #64748b; font-weight: bold; padding-top: 10px;"># Vouchers has supporting documents</td></tr>`;
     }
@@ -1041,64 +1058,70 @@ export default function RegisterView({
     if (forceTypeVal === 'IN') {
       headerHTML = `
         <tr>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Particulars</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Credit Amount</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
+          <th style="padding: 8px 6px; font-weight: bold; text-transform: uppercase; font-size: 9.5px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
+          <th style="padding: 8px 6px; font-weight: bold; text-transform: uppercase; font-size: 9.5px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
+          <th style="padding: 8px 6px; font-weight: bold; text-transform: uppercase; font-size: 9.5px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Particulars</th>
+          <th style="padding: 8px 6px; font-weight: bold; text-transform: uppercase; font-size: 9.5px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Credit Amount</th>
+          <th style="padding: 8px 6px; font-weight: bold; text-transform: uppercase; font-size: 9.5px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
         </tr>
       `;
       rowsHTML = filteredTransactions.map(t => `
-        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
-          <td style="padding: 8px; white-space: nowrap;">${formatDate(t.date)}</td>
-          <td style="padding: 8px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}</td>
-          <td style="padding: 8px 10px; color: #1e293b; font-size: 13px; font-weight: 500; line-height: 1.45;">${t.description}</td>
-          <td style="padding: 8px; font-weight: bold; color: #059669; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="padding: 8px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 6px; border-radius: 9999px; font-size: 10px; font-weight: bold;">${t.category}</span></td>
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 10px;">
+          <td style="padding: 6px; white-space: nowrap;">${formatDate(t.date)}</td>
+          <td style="padding: 6px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}</td>
+          <td style="padding: 6px 8px; color: #1e293b; font-size: 11px; font-weight: 500; line-height: 1.35;">${t.description}</td>
+          <td style="padding: 6px; font-weight: bold; color: #059669; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 6px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 6px; border-radius: 9999px; font-size: 9.5px; font-weight: bold;">${t.category}</span></td>
         </tr>
       `).join('');
       rowsHTML += `
-        <tr style="background-color: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1; font-size: 11px;">
-          <td style="padding: 10px 8px;" colspan="3">Total Credit Amount</td>
-          <td style="padding: 10px 8px; font-weight: bold; color: #059669; white-space: nowrap;">${currencySymbol}${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="padding: 10px 8px;"></td>
+        <tr style="background-color: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1; font-size: 10.5px;">
+          <td style="padding: 8px 6px;" colspan="3">Total Credit Amount</td>
+          <td style="padding: 8px 6px; font-weight: bold; color: #059669; white-space: nowrap;">${currencySymbol}${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 8px 6px;"></td>
         </tr>
       `;
     } else {
       headerHTML = `
         <tr>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Paid To</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; min-width: 180px;">Particulars</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Debit Amount</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Payment Mode</th>
-          <th style="padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Project Ref</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Paid To</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; min-width: 130px;">Particulars</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: right; white-space: nowrap;">Debit Amount</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: center; white-space: nowrap;">Mode</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: center; white-space: nowrap;">Status</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Remarks</th>
         </tr>
       `;
       rowsHTML = filteredTransactions.map(t => `
-        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
-          <td style="padding: 8px; white-space: nowrap;">${formatDate(t.date)}</td>
-          <td style="padding: 8px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}${t.receiptName ? ' #' : ''}</td>
-          <td style="padding: 8px; font-weight: bold;">${t.merchant}</td>
-          <td style="padding: 8px 10px; color: #1e293b; font-size: 13px; font-weight: 500; line-height: 1.45;">${t.description}</td>
-          <td style="padding: 8px; font-weight: bold; color: #e11d48; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="padding: 8px; white-space: nowrap;">${t.paymentType === 'ONLINE' ? 'Online' : 'Cash'}</td>
-          <td style="padding: 8px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 6px; border-radius: 9999px; font-size: 10px; font-weight: bold;">${t.category}</span></td>
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 9.5px;">
+          <td style="padding: 5px; white-space: nowrap;">${formatDate(t.date)}</td>
+          <td style="padding: 5px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}${t.receiptName ? ' #' : ''}</td>
+          <td style="padding: 5px; font-family: monospace; font-size: 9px; color: #475569; white-space: nowrap;">${t.projectRefNo || '-'}</td>
+          <td style="padding: 5px; font-weight: bold; color: #0f172a;">${t.merchant}</td>
+          <td style="padding: 5px 6px; color: #1e293b; font-size: 10px; font-weight: 500; line-height: 1.3;">${t.description}</td>
+          <td style="padding: 5px; font-weight: bold; color: #e11d48; text-align: right; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px; text-align: center; white-space: nowrap;">${t.paymentType === 'ONLINE' ? 'Online' : 'Cash'}</td>
+          <td style="padding: 5px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.category}</span></td>
+          <td style="padding: 5px; text-align: center; white-space: nowrap;"><span style="background-color: ${t.status === 'APPROVED' ? '#dcfce7' : t.status === 'PAID' ? '#e0e7ff' : t.status === 'REJECTED' ? '#fee2e2' : t.status === 'DELETED' ? '#fef2f2' : '#fef3c7'}; color: ${t.status === 'APPROVED' ? '#166534' : t.status === 'PAID' ? '#3730a3' : t.status === 'REJECTED' ? '#991b1b' : t.status === 'DELETED' ? '#9f1239' : '#92400e'}; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.status || 'PAID'}</span></td>
+          <td style="padding: 5px; color: #64748b; font-size: 9px;">${t.remarks || '-'}</td>
         </tr>
       `).join('');
       const cashTotal = filteredTransactions.filter(t => t.paymentType !== 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
       const onlineTotal = filteredTransactions.filter(t => t.paymentType === 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
       rowsHTML += `
-        <tr style="background-color: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1; font-size: 11px;">
-          <td style="padding: 10px 8px;" colspan="4">
+        <tr style="background-color: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1; font-size: 10px;">
+          <td style="padding: 8px 5px;" colspan="5">
             Total Debit Amount
-            <div style="font-size: 10px; font-weight: normal; color: #475569; margin-top: 3px;">
+            <span style="font-size: 9px; font-weight: normal; color: #475569; margin-left: 8px;">
               (Cash: ${currencySymbol}${cashTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + Online: ${currencySymbol}${onlineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-            </div>
+            </span>
           </td>
-          <td style="padding: 10px 8px; font-weight: bold; color: #e11d48; white-space: nowrap; vertical-align: top;">${currencySymbol}${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="padding: 10px 8px;" colspan="2"></td>
+          <td style="padding: 8px 5px; font-weight: bold; color: #e11d48; text-align: right; white-space: nowrap;">${currencySymbol}${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 8px 5px;" colspan="4"></td>
         </tr>
       `;
     }
@@ -1108,14 +1131,18 @@ export default function RegisterView({
         <head>
           <title>${reportTitle} - ${periodText}</title>
           <style>
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #1e293b; }
-            .company-name { font-size: 20px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
-            .report-title { font-size: 14px; font-weight: 700; color: ${forceTypeVal === 'IN' ? '#059669' : '#e11d48'}; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-            .period-badge { font-size: 12px; font-weight: 700; color: #475569; margin-top: 6px; background-color: #f1f5f9; display: inline-block; padding: 3px 10px; border-radius: 6px; border: 1px solid #cbd5e1; }
-            .header-info { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; font-size: 11px; border-bottom: 2px solid #cbd5e1; padding-bottom: 15px; }
-            .footer-info { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 35px; padding-top: 12px; border-top: 1px solid #cbd5e1; font-size: 11px; color: #475569; }
-            table { border-collapse: collapse; margin-top: 15px; font-size: 11px; width: 100%; text-align: left; }
-            th { background-color: #f1f5f9; padding: 10px 8px; font-weight: bold; text-transform: uppercase; font-size: 10px; color: #475569; border-bottom: 2px solid #cbd5e1; }
+            @page {
+              size: A4 landscape;
+              margin: 8mm;
+            }
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 15px; color: #1e293b; }
+            .company-name { font-size: 18px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
+            .report-title { font-size: 13px; font-weight: 700; color: ${forceTypeVal === 'IN' ? '#059669' : '#e11d48'}; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .period-badge { font-size: 11px; font-weight: 700; color: #475569; margin-top: 4px; background-color: #f1f5f9; display: inline-block; padding: 2px 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
+            .header-info { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; font-size: 10px; border-bottom: 2px solid #cbd5e1; padding-bottom: 10px; }
+            .footer-info { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #475569; }
+            table { border-collapse: collapse; margin-top: 10px; font-size: 9.5px; width: 100%; text-align: left; table-layout: auto; }
+            th { background-color: #f1f5f9; padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; }
           </style>
         </head>
         <body>
@@ -1125,8 +1152,8 @@ export default function RegisterView({
               <div class="report-title">${reportTitle}</div>
               <div class="period-badge">${periodText}</div>
             </div>
-            <div style="text-align: right; line-height: 1.6;">
-              <div style="font-size: 11px; font-weight: 700; color: #475569; background-color: #f8fafc; padding: 6px 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <div style="text-align: right; line-height: 1.5;">
+              <div style="font-size: 10px; font-weight: 700; color: #475569; background-color: #f8fafc; padding: 4px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
                 Total Vouchers: ${filteredTransactions.length}
               </div>
             </div>
@@ -1142,7 +1169,7 @@ export default function RegisterView({
           <div class="footer-info">
             <div>
               <div><strong>Generated On:</strong> ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
-              ${forceTypeVal !== 'IN' ? `<div style="font-size: 11px; color: #475569; font-weight: 600; margin-top: 10px;"># Vouchers has supporting documents</div>` : ''}
+              ${forceTypeVal !== 'IN' ? `<div style="font-size: 9.5px; color: #475569; font-weight: 600; margin-top: 6px;"># Vouchers has supporting documents</div>` : ''}
             </div>
             <div><strong>Generated By:</strong> ${currentUser.fullName}</div>
           </div>
@@ -1823,26 +1850,32 @@ export default function RegisterView({
         `Generated By: ${currentUser.fullName} (${currentUser.role})`
       ]);
     } else {
-      csvRows.push(['Date', 'Voucher ID', 'Paid To', 'Particulars', 'Debit Amount', 'Payment Mode', 'Category']);
+      csvRows.push(['Date', 'Voucher ID', 'Project Ref. No.', 'Paid To', 'Particulars', 'Debit Amount', 'Payment Mode', 'Category', 'Status', 'Remarks']);
       filteredTransactions.forEach(t => {
         csvRows.push([
           formatDateToDMY(t.date),
           t.reference + (t.receiptName ? ' #' : ''),
+          (t.projectRefNo || '-').replace(/"/g, '""'),
           t.merchant.replace(/"/g, '""'),
           t.description.replace(/"/g, '""'),
           t.amount.toFixed(2),
           t.paymentType === 'ONLINE' ? 'Online' : 'Cash',
-          t.category
+          t.category,
+          t.status || 'PAID',
+          (t.remarks || '-').replace(/"/g, '""')
         ]);
       });
       const cashTotal = filteredTransactions.filter(t => t.paymentType !== 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
       const onlineTotal = filteredTransactions.filter(t => t.paymentType === 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
       csvRows.push([]);
-      csvRows.push(['Total Debit Amount', '', '', '', totalAmount.toFixed(2), '', '']);
-      csvRows.push(['Debit Breakup (Cash / Online)', '', '', '', `Cash: ${cashTotal.toFixed(2)} | Online: ${onlineTotal.toFixed(2)}`, '', '']);
+      csvRows.push(['Total Debit Amount', '', '', '', '', totalAmount.toFixed(2), '', '', '', '']);
+      csvRows.push(['Debit Breakup (Cash / Online)', '', '', '', '', `Cash: ${cashTotal.toFixed(2)} | Online: ${onlineTotal.toFixed(2)}`, '', '', '', '']);
       csvRows.push([]);
       csvRows.push([
         `Generated On: ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`,
+        '',
+        '',
+        '',
         '',
         '',
         '',
@@ -2388,6 +2421,14 @@ export default function RegisterView({
                       {selectedDetailTransaction.description}
                     </p>
                   </div>
+                  {selectedDetailTransaction.projectRefNo && (
+                    <div className="col-span-1 sm:col-span-2 space-y-1">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Project Ref. No.</span>
+                      <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-100 inline-block text-xs">
+                        {selectedDetailTransaction.projectRefNo}
+                      </span>
+                    </div>
+                  )}
                   <div className="col-span-1 sm:col-span-2 space-y-1">
                     <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Remarks / Notes</span>
                     <p className="font-medium text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-xl border border-slate-100 min-h-[36px]">
@@ -3348,6 +3389,9 @@ export default function RegisterView({
                       setIsAllTime(false);
                     } else {
                       setIsAllTime(true);
+                      setFilterCategory([]);
+                      setFilterPayee([]);
+                      setFilterStatus([]);
                     }
                   }}
                   className="w-full py-1.5 px-2.5 bg-white hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-200 transition-all text-xs font-bold flex items-center justify-center cursor-pointer shadow-xs h-[36px]"
@@ -3356,54 +3400,262 @@ export default function RegisterView({
                 </button>
               </div>
 
-              {/* Category Filter */}
-              <div className="col-span-1 sm:w-[135px]">
-                <label htmlFor="outward-cat-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Category</label>
-                <select 
-                  id="outward-cat-filter"
-                  value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value)}
-                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
+              {/* Category Multi-Select Filter */}
+              <div className="relative col-span-1 sm:w-[150px]">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">
+                  Category {filterCategory.length > 0 && <span className="text-rose-600 font-extrabold">({filterCategory.length})</span>}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCategoryFilterOpen(!isCategoryFilterOpen);
+                    setIsPayeeFilterOpen(false);
+                    setIsStatusFilterOpen(false);
+                  }}
+                  className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                    filterCategory.length > 0 ? 'border-rose-400 bg-rose-50/20 text-rose-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                  }`}
                 >
-                  <option value="ALL">All Categories</option>
-                  {categories.map((cat, idx) => (
-                    <option key={idx} value={cat.name}>{cat.name}</option>
-                  ))}
-                </select>
+                  <span className="truncate">
+                    {filterCategory.length === 0
+                      ? 'All Categories'
+                      : filterCategory.length === 1
+                      ? filterCategory[0]
+                      : `${filterCategory.length} Selected`}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+                </button>
+
+                {isCategoryFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsCategoryFilterOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                        <span className="font-extrabold text-slate-800 text-[11px]">Filter Category</span>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setFilterCategory(expenseCategories.map(c => c.name))}
+                            className="text-rose-600 hover:underline cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setFilterCategory([])}
+                            className="text-slate-500 hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Search categories..."
+                        value={categorySearch}
+                        onChange={(e) => setCategorySearch(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-rose-400"
+                      />
+                      <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                        {expenseCategories
+                          .filter(c => c.name.toLowerCase().includes(categorySearch.toLowerCase()))
+                          .map((cat, idx) => {
+                            const isChecked = filterCategory.includes(cat.name);
+                            return (
+                              <label
+                                key={idx}
+                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-rose-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setFilterCategory(prev => 
+                                      prev.includes(cat.name) ? prev.filter(c => c !== cat.name) : [...prev, cat.name]
+                                    );
+                                  }}
+                                  className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer accent-rose-600"
+                                />
+                                <span className="truncate">{cat.name}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Paid To Filter */}
-              <div className="col-span-1 sm:w-[135px]">
-                <label htmlFor="outward-paid-to-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Paid to</label>
-                <select 
-                  id="outward-paid-to-filter"
-                  value={filterPayee}
-                  onChange={(e) => setFilterPayee(e.target.value)}
-                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
+              {/* Paid To Multi-Select Filter */}
+              <div className="relative col-span-1 sm:w-[150px]">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">
+                  Paid to {filterPayee.length > 0 && <span className="text-rose-600 font-extrabold">({filterPayee.length})</span>}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPayeeFilterOpen(!isPayeeFilterOpen);
+                    setIsCategoryFilterOpen(false);
+                    setIsStatusFilterOpen(false);
+                  }}
+                  className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                    filterPayee.length > 0 ? 'border-rose-400 bg-rose-50/20 text-rose-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                  }`}
                 >
-                  <option value="ALL">All Payees</option>
-                  {uniquePayees.map((payee, idx) => (
-                    <option key={idx} value={payee}>{payee}</option>
-                  ))}
-                </select>
+                  <span className="truncate">
+                    {filterPayee.length === 0
+                      ? 'All Payees'
+                      : filterPayee.length === 1
+                      ? filterPayee[0]
+                      : `${filterPayee.length} Selected`}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+                </button>
+
+                {isPayeeFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsPayeeFilterOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                        <span className="font-extrabold text-slate-800 text-[11px]">Filter Paid To</span>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setFilterPayee(uniquePayees)}
+                            className="text-rose-600 hover:underline cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setFilterPayee([])}
+                            className="text-slate-500 hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Search payees..."
+                        value={payeeSearch}
+                        onChange={(e) => setPayeeSearch(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-rose-400"
+                      />
+                      <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                        {uniquePayees
+                          .filter(p => p.toLowerCase().includes(payeeSearch.toLowerCase()))
+                          .map((payee, idx) => {
+                            const isChecked = filterPayee.includes(payee);
+                            return (
+                              <label
+                                key={idx}
+                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-rose-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setFilterPayee(prev => 
+                                      prev.includes(payee) ? prev.filter(p => p !== payee) : [...prev, payee]
+                                    );
+                                  }}
+                                  className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer accent-rose-600"
+                                />
+                                <span className="truncate">{payee}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Status Filter */}
-              <div className="col-span-1 sm:w-[125px]">
-                <label htmlFor="outward-status-filter" className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">Status</label>
-                <select 
-                  id="outward-status-filter"
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="w-full py-1.5 px-2.5 bg-white border border-slate-200 focus:border-rose-500 focus:outline-hidden rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer"
+              {/* Status Multi-Select Filter */}
+              <div className="relative col-span-1 sm:w-[140px]">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">
+                  Status {filterStatus.length > 0 && <span className="text-rose-600 font-extrabold">({filterStatus.length})</span>}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsStatusFilterOpen(!isStatusFilterOpen);
+                    setIsCategoryFilterOpen(false);
+                    setIsPayeeFilterOpen(false);
+                  }}
+                  className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                    filterStatus.length > 0 ? 'border-rose-400 bg-rose-50/20 text-rose-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                  }`}
                 >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="PAID">Paid</option>
-                  <option value="REJECTED">Rejected</option>
-                  <option value="DELETED">Deleted / Voided</option>
-                </select>
+                  <span className="truncate">
+                    {filterStatus.length === 0
+                      ? 'All Statuses'
+                      : filterStatus.length === 1
+                      ? filterStatus[0]
+                      : `${filterStatus.length} Selected`}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+                </button>
+
+                {isStatusFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsStatusFilterOpen(false)} />
+                    <div className="absolute right-0 sm:left-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                        <span className="font-extrabold text-slate-800 text-[11px]">Filter Status</span>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setFilterStatus(['PENDING', 'APPROVED', 'PAID', 'REJECTED', 'DELETED'])}
+                            className="text-rose-600 hover:underline cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setFilterStatus([])}
+                            className="text-slate-500 hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        {[
+                          { id: 'PENDING', label: 'Pending' },
+                          { id: 'APPROVED', label: 'Approved' },
+                          { id: 'PAID', label: 'Paid' },
+                          { id: 'REJECTED', label: 'Rejected' },
+                          { id: 'DELETED', label: 'Deleted / Voided' }
+                        ].map((st, idx) => {
+                          const isChecked = filterStatus.includes(st.id);
+                          return (
+                            <label
+                              key={idx}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-rose-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterStatus(prev => 
+                                    prev.includes(st.id) ? prev.filter(s => s !== st.id) : [...prev, st.id]
+                                  );
+                                }}
+                                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer accent-rose-600"
+                              />
+                              <span className="truncate">{st.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -3919,6 +4171,21 @@ export default function RegisterView({
                       />
                     </div>
 
+                    {/* Row: Project Ref. No. (Optional) */}
+                    <div>
+                      <label htmlFor="inward-project-ref" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
+                        Project Ref. No. (Optional)
+                      </label>
+                      <input 
+                        id="inward-project-ref"
+                        type="text"
+                        value={formProjectRefNo}
+                        onChange={(e) => setFormProjectRefNo(e.target.value)}
+                        placeholder="e.g. PRJ-2026-001 or Site Ref"
+                        className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-emerald-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all text-slate-700 font-mono"
+                      />
+                    </div>
+
                     {/* Row 5: Remarks / Notes (Optional) */}
                     <div>
                       <label htmlFor="inward-remarks" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
@@ -4180,6 +4447,21 @@ export default function RegisterView({
                         rows={2}
                         className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all text-slate-700"
                       ></textarea>
+                    </div>
+
+                    {/* Row: Project Ref. No. (Optional) */}
+                    <div>
+                      <label htmlFor="form-project-ref" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
+                        Project Ref. No. (Optional)
+                      </label>
+                      <input 
+                        id="form-project-ref"
+                        type="text"
+                        value={formProjectRefNo}
+                        onChange={(e) => setFormProjectRefNo(e.target.value)}
+                        placeholder="e.g. PRJ-2026-001 or Site Ref"
+                        className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all text-slate-700 font-mono"
+                      />
                     </div>
 
                     {/* Row 5: Remarks / Audit Notes (Optional) */}

@@ -99,6 +99,7 @@ export interface Transaction {
   receiptSize: string | null;
   receiptUrl?: string | null;
   remarks?: string;
+  projectRefNo?: string;
   paymentType?: 'CASH' | 'ONLINE';
   editHistory?: EditHistoryEntry[];
   requestedBy?: string; // Full name or username of requester
