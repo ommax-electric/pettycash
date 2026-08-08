@@ -884,7 +884,7 @@ export default function RegisterView({
                 receiptName: receiptFile?.name || null,
                 receiptSize: receiptFile?.size || null,
                 receiptUrl: finalReceiptUrl || null,
-                remarks: formRemarks || '',
+                remarks: formRemarks.trim() || formDescription.trim() || '',
                 projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
                 paymentType: formPaymentType || 'CASH'
               });
@@ -915,7 +915,7 @@ export default function RegisterView({
               receiptName: receiptFile?.name || null,
               receiptSize: receiptFile?.size || null,
               receiptUrl: finalReceiptUrl || null,
-              remarks: formRemarks || '',
+              remarks: formRemarks.trim() || formDescription.trim() || '',
               projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
               paymentType: formPaymentType || 'CASH'
             });
@@ -3308,8 +3308,11 @@ export default function RegisterView({
                     <input 
                       id="form-desc-in"
                       type="text"
-                      value={formDescription}
-                      onChange={(e) => setFormDescription(e.target.value)}
+                      value={formRemarks || formDescription}
+                      onChange={(e) => {
+                        setFormRemarks(e.target.value);
+                        setFormDescription(e.target.value);
+                      }}
                       placeholder="ATM withdraw, Initial Amount etc."
                       required
                       className="w-full py-3 px-4 bg-white border border-slate-200 focus:border-[#009660] focus:ring-1 focus:ring-[#009660] focus:outline-hidden rounded-[14px] text-xs font-semibold text-slate-800 transition-all placeholder-slate-400"

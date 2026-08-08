@@ -336,7 +336,7 @@ export async function sendEmailNotification(
         .replace(/\{paid_to\}/g, txn.merchant || 'N/A')
         .replace(/\{particulars\}/g, txn.description || 'N/A')
         .replace(/\{category\}/g, txn.category || 'General')
-        .replace(/\{remarks\}/g, txn.remarks || txn.rejectionReason || 'N/A')
+        .replace(/\{remarks\}/g, (txn.remarks && txn.remarks.trim()) ? txn.remarks.trim() : (txn.description && txn.description.trim() ? txn.description.trim() : (txn.rejectionReason || 'N/A')))
         .replace(/\{date\}/g, txn.date)
         .replace(/\{attachment\}/g, attachmentHtml)
         .replace(/\{balance\}/g, currentBalance)
