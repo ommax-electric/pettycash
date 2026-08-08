@@ -107,6 +107,15 @@ export default function ApprovalsView({
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectError, setRejectError] = useState('');
 
+  // Dynamic Confirmation Popup State
+  const [confirmApprovalPopup, setConfirmApprovalPopup] = useState<{
+    type: 'APPROVE' | 'PAY';
+    txn: Transaction;
+    userName: string;
+    activeColorBorderClass: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
   // Check user role privileges
@@ -135,14 +144,34 @@ export default function ApprovalsView({
     setTimeout(() => setActionSuccessMsg(''), 4000);
   };
 
-  const handleConfirmApprove = (id: string, reference: string) => {
-    onApproveRequest(id, getEffectiveUserFullName());
-    triggerSuccessAlert(`Voucher #${reference} successfully APPROVED! Sent for cash disbursement.`);
+  const handleConfirmApprove = (txn: Transaction) => {
+    const userName = getEffectiveUserFullName();
+    setConfirmApprovalPopup({
+      type: 'APPROVE',
+      txn,
+      userName,
+      activeColorBorderClass: 'border-amber-500',
+      onConfirm: () => {
+        onApproveRequest(txn.id, userName);
+        triggerSuccessAlert(`Voucher #${txn.reference || txn.id} successfully APPROVED! Sent for cash disbursement.`);
+        setConfirmApprovalPopup(null);
+      }
+    });
   };
 
-  const handleConfirmPay = (id: string, reference: string) => {
-    onPayRequest(id, getEffectiveUserFullName());
-    triggerSuccessAlert(`Voucher #${reference} successfully DISBURSED & MARKED AS PAID!`);
+  const handleConfirmPay = (txn: Transaction) => {
+    const userName = getEffectiveUserFullName();
+    setConfirmApprovalPopup({
+      type: 'PAY',
+      txn,
+      userName,
+      activeColorBorderClass: 'border-blue-600',
+      onConfirm: () => {
+        onPayRequest(txn.id, userName);
+        triggerSuccessAlert(`Voucher #${txn.reference || txn.id} successfully DISBURSED & MARKED AS PAID!`);
+        setConfirmApprovalPopup(null);
+      }
+    });
   };
 
   const handleConfirmReject = (e: React.FormEvent) => {
@@ -344,13 +373,11 @@ export default function ApprovalsView({
                               title="View Details"
                             >
                               <Eye className="w-4 h-4" />
-                            </button>
-
-                            {/* Pending Manager Approval Actions */}
+                            </button>                             {/* Pending Manager Approval Actions */}
                             {isPending && (
                               <>
                                 <button
-                                  onClick={() => handleConfirmApprove(txn.id, txn.reference || txn.id)}
+                                  onClick={() => handleConfirmApprove(txn)}
                                   className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
                                 >
                                   <Check className="w-3.5 h-3.5" />
@@ -370,7 +397,7 @@ export default function ApprovalsView({
                             {/* Payment Issue Action for Admin / Custodian */}
                             {isApproved && isAdminOrCustodian && (
                               <button
-                                onClick={() => handleConfirmPay(txn.id, txn.reference || txn.id)}
+                                onClick={() => handleConfirmPay(txn)}
                                 className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                               >
                                 <IndianRupee className="w-3.5 h-3.5" />
@@ -472,7 +499,7 @@ export default function ApprovalsView({
                       {isPending && (
                         <div className="grid grid-cols-2 gap-2 w-full">
                           <button
-                            onClick={() => handleConfirmApprove(txn.id, txn.reference || txn.id)}
+                            onClick={() => handleConfirmApprove(txn)}
                             className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                           >
                             <Check className="w-4 h-4" />
@@ -490,7 +517,7 @@ export default function ApprovalsView({
 
                       {isApproved && isAdminOrCustodian && (
                         <button
-                          onClick={() => handleConfirmPay(txn.id, txn.reference || txn.id)}
+                          onClick={() => handleConfirmPay(txn)}
                           className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                         >
                           <IndianRupee className="w-4 h-4" />
@@ -725,12 +752,119 @@ export default function ApprovalsView({
                 </div>
               </div>
 
-              <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  {selectedTxn.status === 'PENDING' && isAssignedManagerForTxn(selectedTxn, currentUser, users) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const t = selectedTxn;
+                          setSelectedTxn(null);
+                          handleConfirmApprove(t);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Approve</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const id = selectedTxn.id;
+                          setSelectedTxn(null);
+                          setRejectingTxnId(id);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                    </>
+                  )}
+                  {selectedTxn.status === 'APPROVED' && isAdminOrCustodian && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const t = selectedTxn;
+                        setSelectedTxn(null);
+                        handleConfirmPay(t);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <IndianRupee className="w-3.5 h-3.5" />
+                      <span>Issue Cash</span>
+                    </button>
+                  )}
+                </div>
                 <button
                   onClick={() => setSelectedTxn(null)}
                   className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                 >
                   Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Confirmation Popup for Approvals / Cash Issue */}
+      <AnimatePresence>
+        {confirmApprovalPopup && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className={`w-full max-w-md bg-white dark:bg-slate-900 border-[1.5px] ${confirmApprovalPopup.activeColorBorderClass} rounded-2xl shadow-2xl p-5 space-y-4`}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-slate-500" />
+                  <span>
+                    {confirmApprovalPopup.type === 'APPROVE' ? 'Confirm Approval' : 'Confirm Cash Disbursement'}
+                  </span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setConfirmApprovalPopup(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed py-1">
+                {confirmApprovalPopup.type === 'APPROVE' ? (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to approve Voucher{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> for{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({confirmApprovalPopup.txn.category}).
+                  </>
+                ) : (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to issue cash of{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> for Voucher{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> ({confirmApprovalPopup.txn.category}).
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setConfirmApprovalPopup(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmApprovalPopup.onConfirm()}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
+                >
+                  {confirmApprovalPopup.type === 'APPROVE' ? 'Approve Voucher' : 'Confirm Cash Issue'}
                 </button>
               </div>
             </motion.div>

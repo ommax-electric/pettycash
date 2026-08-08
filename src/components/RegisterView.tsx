@@ -220,6 +220,17 @@ export default function RegisterView({
   const [formProjectRefNo, setFormProjectRefNo] = useState('');
   const [formPaymentType, setFormPaymentType] = useState<'CASH' | 'ONLINE'>('CASH');
 
+  // Dynamic Confirmation Popup State
+  const [confirmPopupData, setConfirmPopupData] = useState<{
+    isEdit: boolean;
+    voucherNo: string;
+    amount: number;
+    category: string;
+    userName: string;
+    activeColorBorderClass: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   // Manual Voucher Entry & Duplicate Check logic
   const isVoucherEditable = currentUser.role !== 'AUDITOR' && (
     Boolean(appSettings?.allowManualVoucherNumbering) || currentUser.role === 'ADMIN'
@@ -637,22 +648,24 @@ export default function RegisterView({
     setFormError('');
   };
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = (overrideType?: TransactionType) => {
     setEditingTransaction(null);
     setFormDate(new Date().toISOString().split('T')[0]);
-    setFormType(forceType || 'OUT');
-    if (forceTypeVal !== 'IN') {
-      const nextNum = getNextOutwardVoucherNumber(transactions);
-      setFormReference(String(nextNum));
-    } else {
+    const targetType = overrideType || forceType || 'OUT';
+    setFormType(targetType);
+    if (targetType === 'IN') {
       const nextInRef = getNextInwardVoucherNumber(transactions);
       setFormReference(nextInRef);
+      setFormCategory('Cash Source');
+      setFormMerchant('Corporate Treasury');
+    } else {
+      const nextNum = getNextOutwardVoucherNumber(transactions);
+      setFormReference(String(nextNum));
+      if (expenseCategories.length > 0) {
+        setFormCategory(expenseCategories[0].name);
+      }
+      setFormMerchant(currentUser.fullName || '');
     }
-    if (expenseCategories.length > 0) {
-      setFormCategory(expenseCategories[0].name);
-    }
-    setFormAmount('');
-    setFormMerchant(currentUser.fullName || '');
     setShowMerchantSuggestions(false);
     setFormDescription('');
     setFormRemarks('');
@@ -715,8 +728,10 @@ export default function RegisterView({
       return str.trim().toLowerCase().replace(/\d+/g, (m) => String(parseInt(m, 10)));
     };
 
-    if (forceTypeVal === 'IN') {
-      if (!refVal) {
+    const effectiveFormType = forceTypeVal || formType;
+
+    if (effectiveFormType === 'IN') {
+      if (!refVal || !refVal.toUpperCase().startsWith('IW-')) {
         refVal = getNextInwardVoucherNumber(transactions, editingTransaction?.id);
       }
       if (!merchVal) {
@@ -737,7 +752,7 @@ export default function RegisterView({
     // Enforce Unique Voucher ID Validation within the same transaction type namespace (IN vs OUT)
     const refValNum = getNumericPart(refVal);
     const refValNorm = normalizeVoucherStr(refVal);
-    const isCurrentIn = forceTypeVal === 'IN' || refVal.toUpperCase().startsWith('IW-');
+    const isCurrentIn = effectiveFormType === 'IN' || refVal.toUpperCase().startsWith('IW-');
 
     const duplicateTxn = transactions.find(t => {
       // Exclude the record currently being edited
@@ -789,7 +804,12 @@ export default function RegisterView({
       return;
     }
 
-    if (!formDescription.trim()) {
+    let finalDescription = formDescription.trim();
+    if (effectiveFormType === 'IN' && !finalDescription) {
+      finalDescription = formRemarks.trim() || 'Cash Deposit';
+    }
+
+    if (!finalDescription) {
       setFormError('Particulars (Purpose) is required.');
       return;
     }
@@ -834,57 +854,71 @@ export default function RegisterView({
       }
     }
 
-    if (editingTransaction) {
-      if (onUpdateTransaction) {
-        onUpdateTransaction({
-          ...editingTransaction,
-          date: formDate,
-          type: formType,
-          amount: parsedAmount,
-          category: formType === 'IN' ? 'Cash Source' : formCategory,
-          merchant: merchVal,
-          reference: refVal,
-          description: formDescription,
-          receiptName: receiptFile ? receiptFile.name : null,
-          receiptSize: receiptFile ? receiptFile.size : null,
-          receiptUrl: receiptFile ? finalReceiptUrl : null,
-          remarks: formRemarks,
-          projectRefNo: formProjectRefNo.trim(),
-          paymentType: formPaymentType
-        });
+    const categoryName = effectiveFormType === 'IN' ? 'Cash Source' : formCategory;
+    const userName = currentUser.fullName || currentUser.username || 'User';
+    const isCreditIn = effectiveFormType === 'IN';
+    const activeColorBorderClass = isCreditIn ? 'border-emerald-500' : 'border-rose-500';
+
+    setConfirmPopupData({
+      isEdit: Boolean(editingTransaction),
+      isInward: effectiveFormType === 'IN',
+      voucherNo: refVal,
+      amount: parsedAmount,
+      category: categoryName,
+      userName: userName,
+      activeColorBorderClass: activeColorBorderClass,
+      onConfirm: () => {
+        if (editingTransaction) {
+          if (onUpdateTransaction) {
+            onUpdateTransaction({
+              ...editingTransaction,
+              date: formDate,
+              type: effectiveFormType,
+              amount: parsedAmount,
+              category: categoryName,
+              merchant: merchVal,
+              reference: refVal,
+              description: finalDescription,
+              receiptName: receiptFile ? receiptFile.name : null,
+              receiptSize: receiptFile ? receiptFile.size : null,
+              receiptUrl: receiptFile ? finalReceiptUrl : null,
+              remarks: formRemarks,
+              projectRefNo: formProjectRefNo.trim(),
+              paymentType: formPaymentType
+            });
+          }
+        } else {
+          const repTo = (currentUser.reportingTo || '').trim();
+          const hasReportingManager = repTo.length > 0;
+          const isTopAdminOrCustodian = (currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN') && !hasReportingManager;
+
+          const initialStatus = effectiveFormType === 'IN' ? 'APPROVED' : 'PENDING';
+
+          const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? currentUser.fullName : 'admin');
+
+          onAddTransaction({
+            date: formDate,
+            type: effectiveFormType,
+            amount: parsedAmount,
+            category: categoryName,
+            merchant: merchVal,
+            reference: refVal,
+            status: initialStatus,
+            requestedBy: currentUser.fullName,
+            approverName: targetApprover,
+            description: finalDescription,
+            receiptName: receiptFile ? receiptFile.name : null,
+            receiptSize: receiptFile ? receiptFile.size : null,
+            receiptUrl: finalReceiptUrl,
+            remarks: formRemarks,
+            projectRefNo: formProjectRefNo.trim(),
+            paymentType: formPaymentType
+          });
+        }
+        setConfirmPopupData(null);
+        closeModal();
       }
-    } else {
-      const repTo = (currentUser.reportingTo || '').trim();
-      const hasReportingManager = repTo.length > 0;
-      const isTopAdminOrCustodian = (currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN') && !hasReportingManager;
-
-      const initialStatus = formType === 'IN'
-        ? 'APPROVED'
-        : (isTopAdminOrCustodian ? 'PAID' : 'PENDING');
-
-      const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? currentUser.fullName : 'admin');
-
-      onAddTransaction({
-        date: formDate,
-        type: formType,
-        amount: parsedAmount,
-        category: formType === 'IN' ? 'Cash Source' : formCategory,
-        merchant: merchVal,
-        reference: refVal,
-        status: initialStatus,
-        requestedBy: currentUser.fullName,
-        approverName: targetApprover,
-        description: formDescription,
-        receiptName: receiptFile ? receiptFile.name : null,
-        receiptSize: receiptFile ? receiptFile.size : null,
-        receiptUrl: finalReceiptUrl,
-        remarks: formRemarks,
-        projectRefNo: formProjectRefNo.trim(),
-        paymentType: formPaymentType
-      });
-    }
-
-    closeModal();
+    });
   };
 
   const renderPagination = () => {
@@ -2903,10 +2937,7 @@ export default function RegisterView({
 
                 {currentUser.role !== 'AUDITOR' && (
                   <button 
-                    onClick={() => {
-                      setEditingTransaction(null);
-                      setIsModalOpen(true);
-                    }}
+                    onClick={() => handleOpenAddModal('IN')}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl text-xs shadow-md shadow-emerald-950/15 transition-all flex items-center gap-1.5 cursor-pointer h-[34px] whitespace-nowrap"
                   >
                     <Plus className="w-4 h-4" />
@@ -3974,7 +4005,7 @@ export default function RegisterView({
               transition={{ duration: 0.15 }}
               className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-md w-full my-auto md:my-0 max-h-none md:max-h-[calc(100vh-2rem)] overflow-y-auto flex flex-col"
             >
-              {forceTypeVal === 'IN' ? (
+              {(forceTypeVal === 'IN' || formType === 'IN') ? (
                 // Simplified Inward Modal to match the user's spreadsheet concept image
                 <div>
                   {/* Custom Header with light green rounded icon */}
@@ -4165,8 +4196,7 @@ export default function RegisterView({
                         type="text"
                         value={formDescription}
                         onChange={(e) => setFormDescription(e.target.value)}
-                        placeholder="ATM withdraw, Initial Amount etc."
-                        required
+                        placeholder="ATM withdraw, Initial Amount etc. (Optional)"
                         className="w-full py-2.5 px-3.5 bg-slate-50/50 border border-slate-200 focus:border-emerald-500 focus:bg-white focus:outline-hidden rounded-xl text-xs transition-all text-slate-700"
                       />
                     </div>
@@ -4584,6 +4614,68 @@ export default function RegisterView({
         {renderBatchPrintModal()}
         {renderDetailModals()}
         {renderDeleteModal()}
+
+      {/* Minimal Dynamic Confirmation Popup */}
+      <AnimatePresence>
+        {confirmPopupData && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className={`w-full max-w-md bg-white dark:bg-slate-900 border-[1.5px] ${confirmPopupData.activeColorBorderClass} rounded-2xl shadow-2xl p-5 space-y-4`}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <Info className="w-4 h-4 text-slate-500" />
+                  <span>Confirm Voucher Entry</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setConfirmPopupData(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed py-1">
+                {confirmPopupData.isInward ? (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> {confirmPopupData.isEdit ? 'as deposit' : 'as new deposit'} under Voucher{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
+                  </>
+                ) : (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.category}</strong> under Voucher{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setConfirmPopupData(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmPopupData.onConfirm()}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
+                >
+                  Submit & Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
