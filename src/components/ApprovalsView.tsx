@@ -840,12 +840,14 @@ export default function ApprovalsView({
                   <>
                     Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to approve Voucher{' '}
                     <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> for{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({confirmApprovalPopup.txn.category}).
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> requested by{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.txn.requestedBy || confirmApprovalPopup.txn.merchant || 'User'}</strong> for{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.txn.category}</strong>.
                   </>
                 ) : (
                   <>
                     Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to issue cash of{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> for Voucher{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for Voucher{' '}
                     <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> ({confirmApprovalPopup.txn.category}).
                   </>
                 )}
@@ -864,7 +866,7 @@ export default function ApprovalsView({
                   onClick={() => confirmApprovalPopup.onConfirm()}
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
                 >
-                  {confirmApprovalPopup.type === 'APPROVE' ? 'Approve Voucher' : 'Confirm Cash Issue'}
+                  {confirmApprovalPopup.type === 'APPROVE' ? 'Submit & Confirm' : 'Confirm Cash Issue'}
                 </button>
               </div>
             </motion.div>

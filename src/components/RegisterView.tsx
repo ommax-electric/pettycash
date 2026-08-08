@@ -223,6 +223,7 @@ export default function RegisterView({
   // Dynamic Confirmation Popup State
   const [confirmPopupData, setConfirmPopupData] = useState<{
     isEdit: boolean;
+    isInward?: boolean;
     voucherNo: string;
     amount: number;
     category: string;
@@ -855,68 +856,76 @@ export default function RegisterView({
     }
 
     const categoryName = effectiveFormType === 'IN' ? 'Cash Source' : formCategory;
-    const userName = currentUser.fullName || currentUser.username || 'User';
     const isCreditIn = effectiveFormType === 'IN';
+    const userName = currentUser.fullName || currentUser.username || 'User';
     const activeColorBorderClass = isCreditIn ? 'border-emerald-500' : 'border-rose-500';
 
     setConfirmPopupData({
       isEdit: Boolean(editingTransaction),
-      isInward: effectiveFormType === 'IN',
+      isInward: isCreditIn,
       voucherNo: refVal,
       amount: parsedAmount,
       category: categoryName,
       userName: userName,
       activeColorBorderClass: activeColorBorderClass,
       onConfirm: () => {
-        if (editingTransaction) {
-          if (onUpdateTransaction) {
-            onUpdateTransaction({
-              ...editingTransaction,
+        try {
+          if (editingTransaction) {
+            if (onUpdateTransaction) {
+              onUpdateTransaction({
+                ...editingTransaction,
+                date: formDate,
+                type: effectiveFormType,
+                amount: parsedAmount,
+                category: categoryName,
+                merchant: merchVal,
+                reference: refVal,
+                description: finalDescription,
+                receiptName: receiptFile?.name || null,
+                receiptSize: receiptFile?.size || null,
+                receiptUrl: finalReceiptUrl || null,
+                remarks: formRemarks || '',
+                projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
+                paymentType: formPaymentType || 'CASH'
+              });
+            }
+          } else {
+            const repTo = (currentUser.reportingTo || '').trim();
+            const hasReportingManager = repTo.length > 0;
+            const isTopAdminOrCustodian = (currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN') && !hasReportingManager;
+
+            const initialStatus = isCreditIn
+              ? 'APPROVED'
+              : (isTopAdminOrCustodian ? 'PAID' : 'PENDING');
+
+            const reqUser = currentUser.fullName || currentUser.username || 'User';
+            const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? reqUser : 'admin');
+
+            onAddTransaction({
               date: formDate,
               type: effectiveFormType,
               amount: parsedAmount,
               category: categoryName,
               merchant: merchVal,
               reference: refVal,
+              status: initialStatus,
+              requestedBy: reqUser,
+              approverName: targetApprover,
               description: finalDescription,
-              receiptName: receiptFile ? receiptFile.name : null,
-              receiptSize: receiptFile ? receiptFile.size : null,
-              receiptUrl: receiptFile ? finalReceiptUrl : null,
-              remarks: formRemarks,
-              projectRefNo: formProjectRefNo.trim(),
-              paymentType: formPaymentType
+              receiptName: receiptFile?.name || null,
+              receiptSize: receiptFile?.size || null,
+              receiptUrl: finalReceiptUrl || null,
+              remarks: formRemarks || '',
+              projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
+              paymentType: formPaymentType || 'CASH'
             });
           }
-        } else {
-          const repTo = (currentUser.reportingTo || '').trim();
-          const hasReportingManager = repTo.length > 0;
-          const isTopAdminOrCustodian = (currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN') && !hasReportingManager;
-
-          const initialStatus = effectiveFormType === 'IN' ? 'APPROVED' : 'PENDING';
-
-          const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? currentUser.fullName : 'admin');
-
-          onAddTransaction({
-            date: formDate,
-            type: effectiveFormType,
-            amount: parsedAmount,
-            category: categoryName,
-            merchant: merchVal,
-            reference: refVal,
-            status: initialStatus,
-            requestedBy: currentUser.fullName,
-            approverName: targetApprover,
-            description: finalDescription,
-            receiptName: receiptFile ? receiptFile.name : null,
-            receiptSize: receiptFile ? receiptFile.size : null,
-            receiptUrl: finalReceiptUrl,
-            remarks: formRemarks,
-            projectRefNo: formProjectRefNo.trim(),
-            paymentType: formPaymentType
-          });
+        } catch (err) {
+          console.error('Error executing transaction entry:', err);
+        } finally {
+          setConfirmPopupData(null);
+          closeModal();
         }
-        setConfirmPopupData(null);
-        closeModal();
       }
     });
   };
@@ -2333,6 +2342,69 @@ export default function RegisterView({
     );
   };
 
+  const renderConfirmPopupModal = () => (
+    <AnimatePresence>
+      {confirmPopupData && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className={`w-full max-w-md bg-white dark:bg-slate-900 border-[1.5px] ${confirmPopupData.activeColorBorderClass} rounded-2xl shadow-2xl p-5 space-y-4`}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Info className="w-4 h-4 text-slate-500" />
+                <span>Confirm Voucher Entry</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setConfirmPopupData(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed py-1">
+              {confirmPopupData.isInward ? (
+                <>
+                  Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
+                  <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> {confirmPopupData.isEdit ? 'deposit entry' : 'as new deposit'} under Voucher{' '}
+                  <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
+                </>
+              ) : (
+                <>
+                  Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
+                  <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for{' '}
+                  <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.category}</strong> under Voucher{' '}
+                  <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConfirmPopupData(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmPopupData.onConfirm()}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
+              >
+                Submit & Confirm
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+
   const renderDetailModals = () => (
     <>
       {/* Unified Transaction Details & Edit History Modal */}
@@ -3268,6 +3340,7 @@ export default function RegisterView({
         </AnimatePresence>
         {renderDetailModals()}
         {renderDeleteModal()}
+        {renderConfirmPopupModal()}
       </div>
     );
   }
@@ -4597,10 +4670,16 @@ export default function RegisterView({
                       </button>
                       <button 
                         type="submit"
-                        className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 px-4 rounded-xl text-xs shadow-md shadow-rose-950/15 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className={`flex-1 ${
+                          (forceTypeVal || formType) === 'IN'
+                            ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-950/15'
+                            : 'bg-rose-600 hover:bg-rose-700 shadow-rose-950/15'
+                        } text-white font-semibold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer`}
                       >
                         <Check className="w-4 h-4" />
-                        {editingTransaction ? 'Save Changes' : 'Record Payment'}
+                        {editingTransaction 
+                          ? 'Save Changes' 
+                          : ((forceTypeVal || formType) === 'IN' ? 'Record Deposit' : 'Record Payment')}
                       </button>
                     </div>
                   </form>
@@ -4614,68 +4693,7 @@ export default function RegisterView({
         {renderBatchPrintModal()}
         {renderDetailModals()}
         {renderDeleteModal()}
-
-      {/* Minimal Dynamic Confirmation Popup */}
-      <AnimatePresence>
-        {confirmPopupData && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className={`w-full max-w-md bg-white dark:bg-slate-900 border-[1.5px] ${confirmPopupData.activeColorBorderClass} rounded-2xl shadow-2xl p-5 space-y-4`}
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                  <Info className="w-4 h-4 text-slate-500" />
-                  <span>Confirm Voucher Entry</span>
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setConfirmPopupData(null)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed py-1">
-                {confirmPopupData.isInward ? (
-                  <>
-                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> {confirmPopupData.isEdit ? 'as deposit' : 'as new deposit'} under Voucher{' '}
-                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
-                  </>
-                ) : (
-                  <>
-                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.userName}</strong>, you are about to {confirmPopupData.isEdit ? 'update' : 'add'}{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmPopupData.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmPopupData.category}</strong> under Voucher{' '}
-                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmPopupData.voucherNo}</strong>.
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setConfirmPopupData(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => confirmPopupData.onConfirm()}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
-                >
-                  Submit & Confirm
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        {renderConfirmPopupModal()}
     </div>
   );
 }
