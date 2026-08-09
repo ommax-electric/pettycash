@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 
 async function startServer() {
@@ -219,6 +220,279 @@ async function startServer() {
     } catch (err: any) {
       console.error("[File Proxy] Error fetching external file:", err);
       return res.status(500).json({ error: err.message || "Failed to fetch external file" });
+    }
+  });
+
+  // API Route: Test Cloudinary Connection
+  app.post("/api/cloudinary/test-connection", async (req, res) => {
+    try {
+      const { cloudName, apiKey, apiSecret, uploadPreset } = req.body;
+      if (!cloudName) {
+        return res.status(400).json({ error: "Cloudinary Cloud Name is required." });
+      }
+
+      if (apiKey && apiSecret) {
+        // Authenticated Ping via Cloudinary REST Admin API
+        const authString = Buffer.from(`${apiKey.trim()}:${apiSecret.trim()}`).toString("base64");
+        const pingRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName.trim()}/ping`, {
+          headers: { Authorization: `Basic ${authString}` }
+        });
+
+        if (!pingRes.ok) {
+          const errorText = await pingRes.text();
+          return res.status(pingRes.status).json({
+            error: "Cloudinary authentication failed. Please verify API Key & API Secret.",
+            details: errorText
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: `Successfully connected to Cloudinary Cloud Name: '${cloudName.trim()}' using API Key & Secret!`
+        });
+      } else if (uploadPreset) {
+        // Ping Cloudinary ping endpoint for cloud name
+        const pingRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName.trim()}/ping`);
+        if (!pingRes.ok) {
+          return res.status(400).json({ error: `Could not reach Cloudinary cloud '${cloudName.trim()}'. Check Cloud Name.` });
+        }
+        return res.json({
+          success: true,
+          message: `Successfully reached Cloudinary Cloud Name: '${cloudName.trim()}' with Upload Preset '${uploadPreset.trim()}'!`
+        });
+      } else {
+        return res.status(400).json({ error: "Either API Key & API Secret OR Upload Preset is required." });
+      }
+    } catch (err: any) {
+      console.error("[Cloudinary Test Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to connect to Cloudinary" });
+    }
+  });
+
+  // API Route: Upload File to Cloudinary
+  app.post("/api/cloudinary/upload", async (req, res) => {
+    try {
+      const { cloudName, apiKey, apiSecret, uploadPreset, file, folder, publicId } = req.body;
+
+      if (!cloudName) {
+        return res.status(400).json({ error: "Missing Cloud Name" });
+      }
+      if (!file) {
+        return res.status(400).json({ error: "Missing file payload" });
+      }
+
+      const cleanCloudName = cloudName.trim();
+      const cleanApiKey = apiKey?.trim();
+      const cleanApiSecret = apiSecret?.trim();
+      const cleanPreset = uploadPreset?.trim();
+      const cleanFolder = folder?.trim();
+      const cleanPublicId = publicId?.trim();
+
+      const uploadUrl = `https://api.cloudinary.com/v1_1/${cleanCloudName}/auto/upload`;
+
+      // Helper to ensure returned URL always has proper extension
+      const formatReturnUrl = (uploadData: any): string => {
+        let finalUrl = uploadData.secure_url || uploadData.url || "";
+        if (!finalUrl) return finalUrl;
+
+        // Check if URL already ends with extension
+        if (/\.(pdf|png|jpg|jpeg|webp|gif|svg|bmp)(\?.*)?$/i.test(finalUrl)) {
+          return finalUrl;
+        }
+
+        // Determine extension from upload data or publicId
+        let ext = uploadData.format;
+        if (!ext && cleanPublicId) {
+          const m = cleanPublicId.match(/\.([a-zA-Z0-9]+)$/);
+          if (m) ext = m[1];
+        }
+        if (!ext && file && file.startsWith("data:")) {
+          if (file.startsWith("data:application/pdf")) ext = "pdf";
+          else if (file.startsWith("data:image/jpeg") || file.startsWith("data:image/jpg")) ext = "jpg";
+          else if (file.startsWith("data:image/png")) ext = "png";
+          else if (file.startsWith("data:image/webp")) ext = "webp";
+        }
+
+        if (ext) {
+          return `${finalUrl}.${ext}`;
+        }
+        return finalUrl;
+      };
+
+      // 1. Try Signed Upload if API Key & Secret are provided
+      if (cleanApiKey && cleanApiSecret) {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const formData = new URLSearchParams();
+        formData.append("file", file);
+        formData.append("api_key", cleanApiKey);
+        formData.append("timestamp", String(timestamp));
+
+        const paramsToSign: Record<string, string> = { timestamp: String(timestamp) };
+        if (cleanFolder) {
+          formData.append("folder", cleanFolder);
+          paramsToSign.folder = cleanFolder;
+        }
+        if (cleanPublicId) {
+          formData.append("public_id", cleanPublicId);
+          paramsToSign.public_id = cleanPublicId;
+        }
+        if (cleanPreset) {
+          formData.append("upload_preset", cleanPreset);
+          paramsToSign.upload_preset = cleanPreset;
+        }
+
+        const sortedQuery = Object.keys(paramsToSign)
+          .sort()
+          .map(k => `${k}=${paramsToSign[k]}`)
+          .join("&");
+
+        const stringToSign = `${sortedQuery}${cleanApiSecret}`;
+        const signature = crypto.createHash("sha1").update(stringToSign).digest("hex");
+        formData.append("signature", signature);
+
+        const uploadRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formData.toString()
+        });
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          return res.json({
+            success: true,
+            url: formatReturnUrl(uploadData),
+            publicId: uploadData.public_id,
+            format: uploadData.format,
+            bytes: uploadData.bytes
+          });
+        }
+
+        const errTxt = await uploadRes.text();
+        let parsedErr = errTxt;
+        try {
+          const parsed = JSON.parse(errTxt);
+          if (parsed?.error?.message) {
+            parsedErr = parsed.error.message;
+          }
+        } catch {
+          // ignore
+        }
+
+        console.warn("[Cloudinary Signed Upload Failed]", parsedErr);
+
+        // Fallback to Unsigned Upload if preset exists
+        if (cleanPreset) {
+          const unsignedFormData = new URLSearchParams();
+          unsignedFormData.append("file", file);
+          unsignedFormData.append("upload_preset", cleanPreset);
+          if (cleanFolder) unsignedFormData.append("folder", cleanFolder);
+          if (cleanPublicId) unsignedFormData.append("public_id", cleanPublicId);
+
+          const unsignedRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: unsignedFormData.toString()
+          });
+
+          if (unsignedRes.ok) {
+            const uploadData = await unsignedRes.json();
+            return res.json({
+              success: true,
+              url: formatReturnUrl(uploadData),
+              publicId: uploadData.public_id,
+              format: uploadData.format,
+              bytes: uploadData.bytes
+            });
+          }
+
+          // Simple Unsigned retry without public_id/folder if preset restricts them
+          const simpleFormData = new URLSearchParams();
+          simpleFormData.append("file", file);
+          simpleFormData.append("upload_preset", cleanPreset);
+
+          const simpleRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: simpleFormData.toString()
+          });
+
+          if (simpleRes.ok) {
+            const uploadData = await simpleRes.json();
+            return res.json({
+              success: true,
+              url: formatReturnUrl(uploadData),
+              publicId: uploadData.public_id,
+              format: uploadData.format,
+              bytes: uploadData.bytes
+            });
+          }
+        }
+
+        // Return descriptive error if key permissions are missing
+        if (parsedErr.includes("missing permissions") || parsedErr.includes("actions=[\"create\"]") || parsedErr.includes("forbidden")) {
+          return res.status(403).json({
+            error: "Your Cloudinary API Key lacks 'create' permissions. Please check Access Keys in Cloudinary Console, or create an Unsigned Upload Preset in Cloudinary (Settings > Upload > Add upload preset) and enter its name in the Upload Preset field."
+          });
+        }
+
+        return res.status(uploadRes.status).json({ error: "Cloudinary upload failed: " + parsedErr });
+      }
+
+      // 2. Try Unsigned Upload directly if only Upload Preset is provided
+      if (cleanPreset) {
+        const unsignedFormData = new URLSearchParams();
+        unsignedFormData.append("file", file);
+        unsignedFormData.append("upload_preset", cleanPreset);
+        if (cleanFolder) unsignedFormData.append("folder", cleanFolder);
+        if (cleanPublicId) unsignedFormData.append("public_id", cleanPublicId);
+
+        let uploadRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: unsignedFormData.toString()
+        });
+
+        if (!uploadRes.ok) {
+          const fallbackFormData = new URLSearchParams();
+          fallbackFormData.append("file", file);
+          fallbackFormData.append("upload_preset", cleanPreset);
+
+          uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: fallbackFormData.toString()
+          });
+        }
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          return res.json({
+            success: true,
+            url: formatReturnUrl(uploadData),
+            publicId: uploadData.public_id,
+            format: uploadData.format,
+            bytes: uploadData.bytes
+          });
+        }
+
+        const errTxt = await uploadRes.text();
+        let parsedErr = errTxt;
+        try {
+          const parsed = JSON.parse(errTxt);
+          if (parsed?.error?.message) {
+            parsedErr = parsed.error.message;
+          }
+        } catch {
+          // ignore
+        }
+
+        return res.status(uploadRes.status).json({ error: "Cloudinary Unsigned Upload failed: " + parsedErr });
+      }
+
+      return res.status(400).json({ error: "Either API Key & API Secret OR an Upload Preset must be configured in Cloudinary settings." });
+    } catch (err: any) {
+      console.error("[Cloudinary Upload Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to upload file to Cloudinary" });
     }
   });
 

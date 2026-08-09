@@ -225,11 +225,6 @@ export const isAssignedManagerForTxn = (
     return false;
   }
 
-  // RULE 1.5: Administrator role can approve any pending request (except their own claim)
-  if (currentUser.role === 'ADMIN') {
-    return true;
-  }
-
   // Find requester user object in users list
   const reqUser = users.find(u => {
     return (
@@ -322,12 +317,16 @@ export const isAssignedManagerForTxn = (
       }
     }
 
-    // Target is a specific manager; other non-assigned users/managers CANNOT approve
+    // Target is a specific manager (e.g., Parthiban); other non-assigned users/admins (like Moorthi) CANNOT approve
     return false;
   }
 
   // RULE 4: If targetApprover is 'admin' or unassigned:
-  // Non-assigned users/managers cannot approve unassigned claims
+  // Only ADMIN role users can approve unassigned or admin-directed claims
+  if (currentUser.role === 'ADMIN') {
+    return true;
+  }
+
   return false;
 };
 

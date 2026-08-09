@@ -112,45 +112,71 @@ export async function sendEmailNotification(
     let adminEmail = '';
 
     if (usersList && usersList.length > 0) {
-      const claimantName = (txn.requestedBy || txn.merchant || '').toLowerCase();
-      const claimantUser = usersList.find(u => 
-        u.fullName.toLowerCase() === claimantName ||
-        u.username.toLowerCase() === claimantName ||
-        (u.email && u.email.toLowerCase() === claimantName)
-      );
-      if (claimantUser?.email) claimantEmail = claimantUser.email;
-
-      // 1. Reporting Manager on claimantUser first
-      if (claimantUser?.reportingTo) {
-        const repStr = claimantUser.reportingTo.trim().toLowerCase();
-        const mgr = usersList.find(u => 
-          u.username.toLowerCase() === repStr ||
-          u.fullName.toLowerCase() === repStr ||
-          (u.email && u.email.toLowerCase() === repStr)
+      // 1. Identify claimant user object
+      const claimantUser = usersList.find(u => {
+        if (currentUser && (
+          (u.username && u.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+          (u.fullName && u.fullName.toLowerCase() === currentUser.fullName.toLowerCase()) ||
+          (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
+        )) {
+          return true;
+        }
+        const reqStr = (txn.requestedBy || txn.recordedBy || txn.merchant || '').trim().toLowerCase();
+        if (!reqStr) return false;
+        return (
+          (u.fullName && u.fullName.toLowerCase() === reqStr) ||
+          (u.username && u.username.toLowerCase() === reqStr) ||
+          (u.email && u.email.toLowerCase() === reqStr) ||
+          (u.empId && u.empId.toLowerCase() === reqStr) ||
+          (u.fullName && (reqStr.includes(u.fullName.toLowerCase()) || u.fullName.toLowerCase().includes(reqStr)))
         );
-        if (mgr?.email) managerEmail = mgr.email;
+      });
+
+      if (claimantUser?.email) claimantEmail = claimantUser.email;
+      else if (currentUser?.email) claimantEmail = currentUser.email;
+
+      // 2. Identify reporting manager string (prioritize non-generic txn.approverName, claimantUser.reportingTo, or currentUser.reportingTo)
+      const genericTerms = ['admin', 'administrator', 'manager', 'custodian', 'auditor', 'user'];
+      let reportingToTarget = '';
+
+      if (txn.approverName && !genericTerms.includes(txn.approverName.trim().toLowerCase())) {
+        reportingToTarget = txn.approverName.trim();
+      } else if (claimantUser?.reportingTo && !genericTerms.includes(claimantUser.reportingTo.trim().toLowerCase())) {
+        reportingToTarget = claimantUser.reportingTo.trim();
+      } else if (currentUser?.reportingTo && !genericTerms.includes(currentUser.reportingTo.trim().toLowerCase())) {
+        reportingToTarget = currentUser.reportingTo.trim();
       }
 
-      // 2. Check explicit approverName on transaction if not generic
-      if (!managerEmail && txn.approverName) {
-        const apprStr = txn.approverName.trim().toLowerCase();
-        const genericTerms = ['admin', 'administrator', 'manager', 'custodian', 'auditor', 'user'];
-        if (!genericTerms.includes(apprStr)) {
-          const mgr = usersList.find(u =>
-            u.fullName.toLowerCase() === apprStr ||
-            u.username.toLowerCase() === apprStr ||
-            (u.email && u.email.toLowerCase() === apprStr)
+      if (reportingToTarget) {
+        const repLower = reportingToTarget.toLowerCase();
+        
+        const mgrUser = usersList.find(u => {
+          if (!u.email) return false;
+          const uFull = (u.fullName || '').toLowerCase();
+          const uUser = (u.username || '').toLowerCase();
+          const uEmail = (u.email || '').toLowerCase();
+          const uEmp = (u.empId || '').toLowerCase();
+
+          return (
+            uFull === repLower ||
+            uUser === repLower ||
+            uEmail === repLower ||
+            uEmp === repLower ||
+            (repLower.length > 2 && (uFull.includes(repLower) || repLower.includes(uFull)))
           );
-          if (mgr?.email) managerEmail = mgr.email;
+        });
+
+        if (mgrUser?.email) {
+          managerEmail = mgrUser.email;
         }
       }
 
-      // If resolved manager is the claimant themselves, clear managerEmail (claimant cannot approve own request)
+      // If resolved manager is the claimant themselves, clear managerEmail (cannot approve own claim)
       if (managerEmail && claimantEmail && managerEmail.trim().toLowerCase() === claimantEmail.trim().toLowerCase()) {
         managerEmail = '';
       }
 
-      // Admin
+      // 3. Identify Admin user email
       const adminUser = usersList.find(u => u.role === 'ADMIN' && u.email);
       if (adminUser?.email) adminEmail = adminUser.email;
     }

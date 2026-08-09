@@ -14,6 +14,7 @@ import {
   setDoc as setDocOriginal,
   serverTimestamp 
 } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -24,6 +25,10 @@ const databaseId = configAny.firestoreDatabaseId || 'ai-studio-pettycashregiste-
 export const db = databaseId && databaseId !== '(default)'
   ? getFirestore(app, databaseId)
   : getFirestore(app);
+
+export const storage = configAny.storageBucket
+  ? getStorage(app, configAny.storageBucket)
+  : getStorage(app);
 
 export function sanitizeForFirestore<T>(data: T): T {
   if (data === null || data === undefined) {

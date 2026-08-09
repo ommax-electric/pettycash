@@ -20,6 +20,7 @@ import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAUL
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl } from './services/fileAttachmentService';
+import { uploadToFirebaseStorage } from './services/firebaseStorageService';
 import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
 
 
@@ -269,7 +270,7 @@ export default function App() {
     };
   }, []);
 
-  // Auto-migrate legacy Cloudinary/external attachment URLs to native Firestore Data URLs in the background
+  // Auto-migrate legacy external HTTP attachment URLs to native Firestore Data URLs in the background
   useEffect(() => {
     if (transactions.length === 0) return;
     const legacyTxns = transactions.filter(t => t.receiptUrl && t.receiptUrl.startsWith('http'));
@@ -293,7 +294,7 @@ export default function App() {
 
     const timer = setTimeout(() => {
       runAutoMigration();
-    }, 2000);
+    }, 1500);
 
     return () => {
       cancelled = true;

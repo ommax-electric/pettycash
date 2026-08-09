@@ -110,14 +110,21 @@ export async function compressAndProcessFile(file: File): Promise<ProcessedFileR
  * and converts them into Base64 Data URLs so they are stored natively inside Firestore.
  */
 export async function convertExternalUrlToDataUrl(url: string): Promise<string | null> {
-  if (!url || !url.startsWith('http')) return null;
+  if (!url) return null;
+
+  let targetUrl = url;
+  if (targetUrl.startsWith('/')) {
+    targetUrl = window.location.origin + targetUrl;
+  }
+
+  if (!targetUrl.startsWith('http')) return null;
 
   // 1. Try server proxy API endpoint first (downloads PDFs and files server-side bypassing CORS)
   try {
     const proxyRes = await fetch('/api/fetch-external-file', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url: targetUrl })
     });
     if (proxyRes.ok) {
       const data = await proxyRes.json();
@@ -176,5 +183,91 @@ export async function convertExternalUrlToDataUrl(url: string): Promise<string |
     img.onerror = () => resolve(null);
     img.src = url;
   });
+}
+
+/**
+ * Tests connection to Cloudinary account
+ */
+export async function testCloudinaryConnection(config: {
+  cloudName: string;
+  apiKey?: string;
+  apiSecret?: string;
+  uploadPreset?: string;
+}): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/cloudinary/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        message: data.message || 'Successfully connected to Cloudinary!'
+      };
+    } else {
+      return {
+        success: false,
+        message: data.error || 'Failed to connect to Cloudinary'
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Network error connecting to Cloudinary API'
+    };
+  }
+}
+
+/**
+ * Uploads a base64 Data URL attachment to Cloudinary
+ * Returns the Cloudinary secure CDN URL on success, or falls back to original dataUrl on error.
+ */
+export async function uploadFileToCloudinary(
+  dataUrl: string,
+  fileName: string,
+  folderPath: string,
+  config: {
+    cloudName: string;
+    apiKey?: string;
+    apiSecret?: string;
+    uploadPreset?: string;
+  }
+): Promise<{ success: boolean; url: string; publicId?: string; error?: string }> {
+  if (!dataUrl || !config.cloudName) {
+    return { success: false, url: dataUrl, error: 'Missing Cloudinary cloud name or file data' };
+  }
+
+  try {
+    const response = await fetch('/api/cloudinary/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cloudName: config.cloudName,
+        apiKey: config.apiKey,
+        apiSecret: config.apiSecret,
+        uploadPreset: config.uploadPreset,
+        file: dataUrl,
+        folder: folderPath || 'Petty Cash/2026/08',
+        publicId: fileName
+      })
+    });
+
+    const data = await response.json();
+    if (response.ok && data.success && data.url) {
+      return {
+        success: true,
+        url: data.url,
+        publicId: data.publicId
+      };
+    } else {
+      console.warn('Cloudinary upload failed:', data.error);
+      return { success: false, url: dataUrl, error: data.error || 'Cloudinary Upload failed' };
+    }
+  } catch (err: any) {
+    console.warn('Exception during Cloudinary upload:', err);
+    return { success: false, url: dataUrl, error: err.message || 'Network error uploading to Cloudinary' };
+  }
 }
 

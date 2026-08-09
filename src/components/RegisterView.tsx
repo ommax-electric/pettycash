@@ -5,7 +5,8 @@ import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, A
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
 import { uploadReceiptToGoogleDrive } from '../services/googleDriveService';
-import { convertExternalUrlToDataUrl } from '../services/fileAttachmentService';
+import { convertExternalUrlToDataUrl, uploadFileToCloudinary } from '../services/fileAttachmentService';
+import { uploadToFirebaseStorage } from '../services/firebaseStorageService';
 import { db, doc, updateDoc } from '../firebase';
 
 interface RegisterViewProps {
@@ -19,6 +20,107 @@ interface RegisterViewProps {
   forceType?: 'IN' | 'OUT';
   appSettings?: AppSettings;
   integrationSettings?: IntegrationSettings;
+}
+
+// Dedicated PDF In-App Previewer Component
+function PdfViewerModalContent({
+  url,
+  attachmentBlobUrl,
+  name,
+  size,
+  openAttachmentInNewTab
+}: {
+  url: string;
+  attachmentBlobUrl: string | null;
+  name: string;
+  size: string;
+  openAttachmentInNewTab: (url: string, name?: string) => void;
+}) {
+  const [pdfPage, setPdfPage] = useState(1);
+  const [imgError, setImgError] = useState(false);
+
+  const isCloudinary = url.includes('cloudinary.com');
+  
+  // Construct Cloudinary page image rendering URL (works for PDFs hosted on Cloudinary)
+  let cloudinaryPageImgUrl: string | null = null;
+  if (isCloudinary) {
+    let cleanUrl = url;
+    if (cleanUrl.includes('/image/upload/')) {
+      cleanUrl = cleanUrl.replace('/image/upload/', `/image/upload/f_png,pg_${pdfPage},w_1200,c_limit/`);
+    } else if (cleanUrl.includes('/raw/upload/')) {
+      cleanUrl = cleanUrl.replace('/raw/upload/', `/image/upload/f_png,pg_${pdfPage},w_1200,c_limit/`);
+    }
+    if (/\.pdf$/i.test(cleanUrl)) {
+      cleanUrl = cleanUrl.replace(/\.pdf$/i, '.png');
+    } else if (!/\.(png|jpg|jpeg|webp)$/i.test(cleanUrl)) {
+      cleanUrl = `${cleanUrl}.png`;
+    }
+    cloudinaryPageImgUrl = cleanUrl;
+  }
+
+  return (
+    <div className="w-full bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 min-h-[48vh] flex flex-col items-center justify-center overflow-hidden relative">
+      {cloudinaryPageImgUrl && !imgError ? (
+        <div className="flex flex-col items-center justify-center w-full space-y-3">
+          <img
+            key={`pdf-page-${pdfPage}`}
+            src={cloudinaryPageImgUrl}
+            alt={`${name} - Page ${pdfPage}`}
+            onError={() => setImgError(true)}
+            className="max-w-full max-h-[50vh] sm:max-h-[56vh] object-contain rounded-xl border border-slate-100 shadow-xs"
+          />
+          <div className="flex flex-wrap items-center justify-between w-full px-2 text-[11px] font-semibold text-slate-600 gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl">
+              <button
+                type="button"
+                disabled={pdfPage <= 1}
+                onClick={() => setPdfPage(p => Math.max(1, p - 1))}
+                className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 disabled:opacity-40 font-bold hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                ◀ Prev
+              </button>
+              <span className="font-mono px-2 text-slate-700">Page {pdfPage}</span>
+              <button
+                type="button"
+                onClick={() => setPdfPage(p => p + 1)}
+                className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 font-bold hover:bg-slate-50 cursor-pointer"
+              >
+                Next ▶
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
+              className="text-slate-600 underline font-semibold hover:text-slate-900 cursor-pointer"
+            >
+              Open Original PDF
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center p-6 text-center space-y-4 max-w-md">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-xs">
+            <FileText className="w-8 h-8" />
+          </div>
+          <div>
+            <h4 className="font-extrabold text-slate-900 text-sm">{name}</h4>
+            <p className="text-xs text-slate-400 font-mono mt-1">{size || 'PDF Document'}</p>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            To view the full interactive PDF document with original formatting, click below to open in browser tab.
+          </p>
+          <button
+            type="button"
+            onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
+            className="px-5 py-2.5 bg-[#f7b944] hover:bg-[#e5a833] text-slate-950 font-extrabold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all shadow-xs"
+          >
+            <ExternalLink className="w-4 h-4" />
+            <span>Open PDF in New Window</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const formatDateToDMY = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
@@ -419,45 +521,7 @@ export default function RegisterView({
           if (active) setAttachmentBlobUrl(null);
         }
       } else if (url.startsWith('http')) {
-        // Auto-pull external attachment (e.g. legacy Cloudinary URL) into native Data URL and update Firestore
-        convertExternalUrlToDataUrl(url).then(async (dataUrl) => {
-          if (!active || !dataUrl) return;
-
-          try {
-            // 1. Create local Blob URL
-            const parts = dataUrl.split(',');
-            if (parts.length >= 2) {
-              const mimeMatch = parts[0].match(/:(.*?);/);
-              const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-              const binary = atob(parts[1]);
-              const array = new Uint8Array(binary.length);
-              for (let i = 0; i < binary.length; i++) {
-                array[i] = binary.charCodeAt(i);
-              }
-              const blob = new Blob([array], { type: mime });
-              const bUrl = URL.createObjectURL(blob);
-              if (active) setAttachmentBlobUrl(bUrl);
-            }
-
-            // 2. Update viewingAttachment state locally
-            const updatedTxn: Transaction = {
-              ...viewingAttachment,
-              receiptUrl: dataUrl
-            };
-            if (active) setViewingAttachment(updatedTxn);
-
-            // 3. Automatically persist to Firestore Database so it is saved natively in Firestore
-            await updateDoc(doc(db, 'transactions', viewingAttachment.id), {
-              receiptUrl: dataUrl
-            });
-
-            if (onUpdateTransaction) {
-              onUpdateTransaction(updatedTxn);
-            }
-          } catch (e) {
-            console.warn('Failed to auto-save converted external attachment to Firestore:', e);
-          }
-        });
+        if (active) setAttachmentBlobUrl(null);
       } else {
         setAttachmentBlobUrl(null);
       }
@@ -534,7 +598,7 @@ export default function RegisterView({
     currentPage * itemsPerPage
   );
 
-  // Validate and set uploaded file with client-side auto compression & instant auto-upload
+  // Validate and set uploaded file with revised 150KB (images) / 250KB (PDF) size limits & Firebase Storage auto-upload
   const validateAndSetFile = async (file: File) => {
     setFormError('');
     
@@ -548,9 +612,13 @@ export default function RegisterView({
       return false;
     }
     
-    const maxSizeBytes = 10 * 1024 * 1024; // 10MB limit before auto-compression
+    // File size limits: Images < 150 KB, PDF < 250 KB
+    const isPdf = extension === 'pdf';
+    const maxSizeKB = isPdf ? 250 : 150;
+    const maxSizeBytes = maxSizeKB * 1024;
+
     if (file.size > maxSizeBytes) {
-      setFormError('File size exceeds the 10MB limit.');
+      setFormError(`File size exceeds the ${maxSizeKB} KB limit for ${isPdf ? 'PDF' : 'image'} files. Selected file is ${(file.size / 1024).toFixed(1)} KB.`);
       setReceiptFile(null);
       return false;
     }
@@ -558,59 +626,51 @@ export default function RegisterView({
     try {
       const processed = await compressAndProcessFile(file);
       
-      const isGoogleDriveActive = Boolean(integrationSettings?.googleDriveEnabled);
-      const isCloudinaryActive = Boolean(integrationSettings?.cloudinaryEnabled);
-      const isAutoUploadActive = isGoogleDriveActive || isCloudinaryActive;
+      let uploadedCloudinaryUrl: string | null = null;
+      if (
+        (integrationSettings?.cloudinaryEnabled || integrationSettings?.cloudinaryCloudName) &&
+        integrationSettings?.cloudinaryCloudName
+      ) {
+        setReceiptFile({
+          name: processed.name,
+          size: processed.size,
+          dataUrl: processed.dataUrl,
+          cloudinaryUrl: null,
+          isUploading: true,
+          uploadError: null
+        });
+
+        // Generate structured folder path: Petty Cash/YYYY/MM and voucher prefix
+        const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
+        const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
+        const refClean = (formReference || editingTransaction?.reference || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const cleanName = processed.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const filePublicId = `${refClean ? `${refClean}_` : ''}${cleanName}`;
+
+        const cRes = await uploadFileToCloudinary(processed.dataUrl, filePublicId, folderPath, {
+          cloudName: integrationSettings.cloudinaryCloudName,
+          apiKey: integrationSettings.cloudinaryApiKey,
+          apiSecret: integrationSettings.cloudinaryApiSecret,
+          uploadPreset: integrationSettings.cloudinaryUploadPreset
+        });
+
+        if (cRes.success && cRes.url) {
+          uploadedCloudinaryUrl = cRes.url;
+        }
+      }
 
       setReceiptFile({
         name: processed.name,
         size: processed.size,
-        dataUrl: processed.dataUrl,
-        cloudinaryUrl: null,
-        isUploading: isAutoUploadActive,
+        dataUrl: uploadedCloudinaryUrl || processed.dataUrl,
+        cloudinaryUrl: uploadedCloudinaryUrl || null,
+        isUploading: false,
         uploadError: null
       });
 
-      if (isAutoUploadActive) {
-        // Instant Auto Upload to Google Drive / Cloud Storage upon selection!
-        const voucherNo = String(formReference || getNextOutwardVoucherNumber(transactions, editingTransaction?.id) || '1');
-        
-        const uploadFn = isGoogleDriveActive ? uploadReceiptToGoogleDrive : uploadReceiptToCloudinary;
-
-        uploadFn(
-          processed.dataUrl,
-          processed.name,
-          voucherNo,
-          formDate || new Date().toISOString().split('T')[0],
-          integrationSettings
-        ).then((cRes: any) => {
-          const uploadedUrl = cRes.driveUrl || cRes.url;
-          if (cRes.success && uploadedUrl) {
-            setReceiptFile(prev => prev ? {
-              ...prev,
-              cloudinaryUrl: uploadedUrl,
-              isUploading: false
-            } : null);
-          } else {
-            setReceiptFile(prev => prev ? {
-              ...prev,
-              isUploading: false,
-              uploadError: cRes.message || 'Auto-upload failed'
-            } : null);
-          }
-        }).catch((err) => {
-          console.warn('Auto-upload caught error:', err);
-          setReceiptFile(prev => prev ? {
-            ...prev,
-            isUploading: false,
-            uploadError: 'Auto-upload failed'
-          } : null);
-        });
-      }
-
       return true;
     } catch (err) {
-      setFormError('Failed to process or compress attachment file.');
+      setFormError('Failed to process attachment file.');
       setReceiptFile(null);
       return false;
     }
@@ -865,45 +925,8 @@ export default function RegisterView({
       return;
     }
 
-    // Process Google Drive / Cloud Attachment Upload if explicitly enabled
-    let finalReceiptUrl = receiptFile ? (receiptFile.cloudinaryUrl || receiptFile.dataUrl || null) : null;
-
-    if (receiptFile?.dataUrl && !receiptFile.cloudinaryUrl && receiptFile.dataUrl.startsWith('data:')) {
-      const isGoogleDriveActive = Boolean(integrationSettings?.googleDriveEnabled);
-      const isCloudinaryActive = Boolean(integrationSettings?.cloudinaryEnabled);
-
-      if (isGoogleDriveActive) {
-        try {
-          const dRes = await uploadReceiptToGoogleDrive(
-            receiptFile.dataUrl,
-            receiptFile.name,
-            refVal,
-            formDate,
-            integrationSettings
-          );
-          if (dRes.success && dRes.driveUrl) {
-            finalReceiptUrl = dRes.driveUrl;
-          }
-        } catch (err) {
-          console.warn('Google Drive upload warning:', err);
-        }
-      } else if (isCloudinaryActive) {
-        try {
-          const cRes = await uploadReceiptToCloudinary(
-            receiptFile.dataUrl,
-            receiptFile.name,
-            refVal,
-            formDate,
-            integrationSettings
-          );
-          if (cRes.success && cRes.url) {
-            finalReceiptUrl = cRes.url;
-          }
-        } catch (err) {
-          console.warn('Cloudinary upload warning:', err);
-        }
-      }
-    }
+    // Process Attachment URL (Stored natively inside Firestore record)
+    const finalReceiptUrl = receiptFile ? (receiptFile.dataUrl || receiptFile.cloudinaryUrl || null) : null;
 
     const categoryName = effectiveFormType === 'IN' ? 'Cash Source' : formCategory;
     const isCreditIn = effectiveFormType === 'IN';
@@ -2894,8 +2917,9 @@ export default function RegisterView({
           const name = viewingAttachment.receiptName || 'Attachment';
           const size = viewingAttachment.receiptSize || 'Attached File';
           const lowerName = name.toLowerCase();
-          const isImage = url.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(lowerName);
-          const isPdf = url.startsWith('data:application/pdf') || /\.pdf$/i.test(lowerName);
+          const lowerUrl = url.toLowerCase();
+          const isPdf = url.startsWith('data:application/pdf') || lowerUrl.includes('.pdf') || lowerName.endsWith('.pdf');
+          const isImage = url.startsWith('data:image/') || lowerUrl.includes('/image/upload/') || /\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i.test(lowerUrl) || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(lowerName);
 
           return (
             <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60]">
@@ -2943,30 +2967,14 @@ export default function RegisterView({
                         </div>
                       </div>
                     ) : isPdf ? (
-                      /* Actual PDF Attachment */
-                      <div className="flex flex-col items-center justify-center space-y-3 w-full">
-                        <object 
-                          data={attachmentBlobUrl || url} 
-                          type="application/pdf"
-                          className="w-full h-[52vh] sm:h-[58vh] rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden"
-                        >
-                          <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
-                            <FileText className="w-12 h-12 text-rose-500 mx-auto" />
-                            <div>
-                              <p className="text-xs font-bold text-slate-800">{name}</p>
-                              <p className="text-[11px] text-slate-500 mt-1 font-mono">{size}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
-                              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all shadow-xs"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                              View / Open PDF Document
-                            </button>
-                          </div>
-                        </object>
-                      </div>
+                      /* Actual PDF Attachment with High-Res In-App Render & Reader */
+                      <PdfViewerModalContent
+                        url={url}
+                        attachmentBlobUrl={attachmentBlobUrl}
+                        name={name}
+                        size={size}
+                        openAttachmentInNewTab={openAttachmentInNewTab}
+                      />
                     ) : (
                       /* Generic Document Attachment */
                       <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-xs space-y-4">
@@ -2975,6 +2983,14 @@ export default function RegisterView({
                           <h3 className="font-extrabold text-slate-900 text-sm">{name}</h3>
                           <p className="text-xs text-slate-400 font-mono mt-1">{size}</p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => openAttachmentInNewTab(url, name)}
+                          className="px-4 py-2 bg-[#f7b944] hover:bg-[#e5a833] text-slate-950 font-extrabold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all shadow-xs mx-auto"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          Open / Download Attachment
+                        </button>
                       </div>
                     )
                   ) : (
@@ -4826,20 +4842,20 @@ export default function RegisterView({
                             {receiptFile.isUploading && (
                               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-medium border border-sky-200 animate-pulse">
                                 <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping"></span>
-                                {integrationSettings?.googleDriveEnabled ? "Auto-Uploading to Google Drive..." : integrationSettings?.cloudinaryEnabled ? "Auto-Uploading to Cloudinary..." : "Processing Attachment..."}
+                                Uploading to Firebase Cloud Storage...
                               </div>
                             )}
 
                             {receiptFile.cloudinaryUrl ? (
                               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
                                 <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                {integrationSettings?.googleDriveEnabled ? "Auto-Uploaded to Google Drive" : integrationSettings?.cloudinaryEnabled ? "Auto-Uploaded to Cloudinary" : "Uploaded"}
+                                Uploaded to Firebase Storage
                               </div>
                             ) : (
                               !receiptFile.isUploading && receiptFile.dataUrl && (
                                 <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
                                   <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                  Attachment Ready (Firestore Storage)
+                                  Attachment Ready
                                 </div>
                               )
                             )}
@@ -4869,7 +4885,7 @@ export default function RegisterView({
                           <div className="space-y-1">
                             <Paperclip className="w-7 h-7 text-slate-400 mx-auto" />
                             <p className="text-[11px] font-bold text-slate-600">Drag & drop receipt here, or <span className="text-slate-900 underline">browse</span></p>
-                            <p className="text-[9px] text-slate-400">PNG, JPG, JPEG, or PDF formats (Auto-Compressed & Auto-Uploaded)</p>
+                            <p className="text-[9px] text-slate-400">PNG, JPG, JPEG (&lt;150KB) or PDF (&lt;250KB) • Firebase Storage</p>
                           </div>
                         )}
                       </div>
