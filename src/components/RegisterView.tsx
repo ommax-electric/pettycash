@@ -934,7 +934,7 @@ export default function RegisterView({
                 receiptName: receiptFile?.name || null,
                 receiptSize: receiptFile?.size || null,
                 receiptUrl: finalReceiptUrl || null,
-                remarks: formRemarks.trim() || formDescription.trim() || '',
+                remarks: formRemarks.trim(),
                 projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
                 paymentType: formPaymentType || 'CASH'
               });
@@ -965,7 +965,7 @@ export default function RegisterView({
               receiptName: receiptFile?.name || null,
               receiptSize: receiptFile?.size || null,
               receiptUrl: finalReceiptUrl || null,
-              remarks: formRemarks.trim() || formDescription.trim() || '',
+              remarks: formRemarks.trim(),
               projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
               paymentType: formPaymentType || 'CASH'
             });
@@ -1084,7 +1084,7 @@ export default function RegisterView({
         t.paymentType === 'ONLINE' ? 'Online' : 'Cash',
         t.category,
         t.status || 'PAID',
-        t.remarks || '-'
+        t.remarks || 'N/A'
       ]);
     }
 
@@ -1200,7 +1200,7 @@ export default function RegisterView({
           <td style="padding: 5px; text-align: center; white-space: nowrap;">${t.paymentType === 'ONLINE' ? 'Online' : 'Cash'}</td>
           <td style="padding: 5px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.category}</span></td>
           <td style="padding: 5px; text-align: center; white-space: nowrap;"><span style="background-color: ${t.status === 'APPROVED' ? '#dcfce7' : t.status === 'PAID' ? '#e0e7ff' : t.status === 'REJECTED' ? '#fee2e2' : t.status === 'DELETED' ? '#fef2f2' : '#fef3c7'}; color: ${t.status === 'APPROVED' ? '#166534' : t.status === 'PAID' ? '#3730a3' : t.status === 'REJECTED' ? '#991b1b' : t.status === 'DELETED' ? '#9f1239' : '#92400e'}; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.status || 'PAID'}</span></td>
-          <td style="padding: 5px; color: #64748b; font-size: 9px;">${t.remarks || '-'}</td>
+          <td style="padding: 5px; color: #64748b; font-size: 9px;">${t.remarks || 'N/A'}</td>
         </tr>
       `).join('');
       const cashTotal = filteredTransactions.filter(t => t.paymentType !== 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
@@ -2121,7 +2121,7 @@ export default function RegisterView({
           t.paymentType === 'ONLINE' ? 'Online' : 'Cash',
           t.category,
           t.status || 'PAID',
-          (t.remarks || '-').replace(/"/g, '""')
+          (t.remarks || 'N/A').replace(/"/g, '""')
         ]);
       });
       const cashTotal = filteredTransactions.filter(t => t.paymentType !== 'ONLINE').reduce((sum, t) => sum + t.amount, 0);
@@ -2754,7 +2754,7 @@ export default function RegisterView({
                   <div className="col-span-1 sm:col-span-2 space-y-1">
                     <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Remarks / Notes</span>
                     <p className="font-medium text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-xl border border-slate-100 min-h-[36px]">
-                      {selectedDetailTransaction.remarks || <span className="text-slate-400 italic font-normal">No remarks provided.</span>}
+                      {(selectedDetailTransaction.remarks && selectedDetailTransaction.remarks.trim()) ? selectedDetailTransaction.remarks.trim() : 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -3516,19 +3516,16 @@ export default function RegisterView({
                     </div>
                   </div>
 
-                  {/* REMARKS / AUDIT NOTES */}
+                  {/* PARTICULARS / PURPOSE */}
                   <div>
                     <label htmlFor="form-desc-in" className="block text-[10px] font-bold text-[#475569] uppercase mb-1.5 tracking-wider">
-                      Remarks / Audit Notes
+                      Particulars / Purpose
                     </label>
                     <input 
                       id="form-desc-in"
                       type="text"
-                      value={formRemarks || formDescription}
-                      onChange={(e) => {
-                        setFormRemarks(e.target.value);
-                        setFormDescription(e.target.value);
-                      }}
+                      value={formDescription}
+                      onChange={(e) => setFormDescription(e.target.value)}
                       placeholder="ATM withdraw, Initial Amount etc."
                       required
                       className="w-full py-3 px-4 bg-white border border-slate-200 focus:border-[#009660] focus:ring-1 focus:ring-[#009660] focus:outline-hidden rounded-[14px] text-xs font-semibold text-slate-800 transition-all placeholder-slate-400"

@@ -195,7 +195,7 @@ export async function sendEmailNotification(
       if (claimantEmail) targetRecipients.push(claimantEmail);
     } else if (type === 'REQUEST_SUBMITTED') {
       cardTitle = 'Petty Cash Claim Pending Approval';
-      cardBorderColor = '#f59e0b';
+      cardBorderColor = '#ff7900';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestSubmitted : null) ||
         localStorage.getItem('petty_cash_email_subject_req_submitted') ||
         '[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}';
@@ -226,7 +226,7 @@ export async function sendEmailNotification(
       if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
     } else if (type === 'REQUEST_PAID') {
       cardTitle = 'Petty Cash Payment Issued';
-      cardBorderColor = '#10b981';
+      cardBorderColor = '#6CC417';
       subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestPaid : null) ||
         localStorage.getItem('petty_cash_email_subject_req_paid') ||
         '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued';
@@ -336,7 +336,7 @@ export async function sendEmailNotification(
         .replace(/\{paid_to\}/g, txn.merchant || 'N/A')
         .replace(/\{particulars\}/g, txn.description || 'N/A')
         .replace(/\{category\}/g, txn.category || 'General')
-        .replace(/\{remarks\}/g, (txn.remarks && txn.remarks.trim()) ? txn.remarks.trim() : (txn.description && txn.description.trim() ? txn.description.trim() : (txn.rejectionReason || 'N/A')))
+        .replace(/\{remarks\}/g, (txn.remarks && txn.remarks.trim()) ? txn.remarks.trim() : (txn.rejectionReason && txn.rejectionReason.trim() ? txn.rejectionReason.trim() : 'N/A'))
         .replace(/\{date\}/g, txn.date)
         .replace(/\{attachment\}/g, attachmentHtml)
         .replace(/\{balance\}/g, currentBalance)
@@ -346,7 +346,7 @@ export async function sendEmailNotification(
         .replace(/\{paid_by\}/g, payerName)
         .replace(/\{rejected_by\}/g, rejecterName);
 
-      const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor);
+      const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor, type);
 
       const emailPayload = {
         tenantId,

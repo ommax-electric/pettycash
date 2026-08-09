@@ -645,14 +645,12 @@ export default function ApprovalsView({
                   </p>
                 </div>
 
-                {selectedTxn.remarks && (
-                  <div>
-                    <span className="text-xs text-slate-400 block font-semibold mb-1">Remarks</span>
-                    <p className="p-3 bg-amber-500/10 rounded-lg text-amber-800 dark:text-amber-300 text-xs border border-amber-500/20">
-                      {selectedTxn.remarks}
-                    </p>
-                  </div>
-                )}
+                <div>
+                  <span className="text-xs text-slate-400 block font-semibold mb-1">Remarks</span>
+                  <p className={`p-3 rounded-lg text-xs border ${selectedTxn.remarks && selectedTxn.remarks.trim() ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800'}`}>
+                    {selectedTxn.remarks && selectedTxn.remarks.trim() ? selectedTxn.remarks.trim() : 'N/A'}
+                  </p>
+                </div>
 
                 {/* Attachment Section */}
                 {(selectedTxn.receiptUrl || selectedTxn.receiptName) && (

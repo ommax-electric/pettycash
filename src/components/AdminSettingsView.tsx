@@ -1823,78 +1823,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#ed3833] animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                New Voucher HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  New Voucher HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-red-50 text-[#ed3833] px-2 py-0.5 rounded-md font-sans font-bold">
-                                  New Voucher Event
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  New Voucher Alert
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-[#ed3833] rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`new-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-[#ed3833] rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => {
-                                          let valDisplay: React.ReactNode = line.value;
-                                          if (line.key.toLowerCase().includes('attachment')) {
-                                            valDisplay = (
-                                              <a href="#" onClick={(e) => e.preventDefault()} className="text-blue-600 font-bold underline hover:text-blue-800">
-                                                YES
-                                              </a>
-                                            );
-                                          }
-                                          return (
-                                            <div key={`nline-${lIdx}`}>
-                                              <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                              <span className={line.key.toLowerCase().includes('amount') ? 'text-[#ed3833] font-bold' : 'text-slate-700 font-medium'}>
-                                                {valDisplay}
-                                              </span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`new-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`new-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="New Voucher Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('New Voucher Alert', previewBodyRaw, '#3b82f6', 'NEW')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -1971,80 +1921,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#f7b944] animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                Voucher Changes HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Voucher Changes HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Voucher Modification Event
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Voucher Changes Alert
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-[#f7b944] rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`edit-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-[#f7b944] rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => {
-                                          let valDisplay: React.ReactNode = line.value;
-                                          if (line.key.toLowerCase().includes('attachment')) {
-                                            valDisplay = (
-                                              <a href="#" onClick={(e) => e.preventDefault()} className="text-blue-600 font-bold underline hover:text-blue-800">
-                                                YES
-                                              </a>
-                                            );
-                                          } else if (line.key.toLowerCase().includes('changed')) {
-                                            valDisplay = <strong className="text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded font-mono text-[11px]" dangerouslySetInnerHTML={{ __html: line.value }} />;
-                                          }
-                                          return (
-                                            <div key={`eline-${lIdx}`}>
-                                              <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                              <span className={line.key.toLowerCase().includes('amount') ? 'text-amber-700 font-bold' : 'text-slate-700 font-medium'}>
-                                                {valDisplay}
-                                              </span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`edit-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`edit-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Voucher Changes Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Voucher Changes Alert', previewBodyRaw, '#f7b944', 'EDIT')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2134,78 +2032,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#00bc7d] animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                Cash Deposit HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-[#00bc7d] animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Cash Deposit HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-emerald-50 text-[#00bc7d] px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Cash Deposit Event
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Deposit Alert
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-[#00bc7d] rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`inward-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-[#00bc7d] rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => {
-                                          let valDisplay: React.ReactNode = line.value;
-                                          if (line.key.toLowerCase().includes('attachment')) {
-                                            valDisplay = (
-                                              <a href="#" onClick={(e) => e.preventDefault()} className="text-blue-600 font-bold underline hover:text-blue-800">
-                                                YES
-                                              </a>
-                                            );
-                                          }
-                                          return (
-                                            <div key={`iline-${lIdx}`}>
-                                              <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                              <span className={line.key.toLowerCase().includes('amount') ? 'text-[#00bc7d] font-bold' : 'text-slate-700 font-medium'}>
-                                                {valDisplay}
-                                              </span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`inward-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`inward-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Cash Deposit Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Deposit Alert', previewBodyRaw, '#00bc7d', 'INWARD')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2295,80 +2143,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#f7b944] animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                Deposit Changes HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-[#f7b944] animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Deposit Changes HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Deposit Modification Event
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Deposit Changes Alert
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-[#f7b944] rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`inward-edit-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-[#f7b944] rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => {
-                                          let valDisplay: React.ReactNode = line.value;
-                                          if (line.key.toLowerCase().includes('attachment')) {
-                                            valDisplay = (
-                                              <a href="#" onClick={(e) => e.preventDefault()} className="text-blue-600 font-bold underline hover:text-blue-800">
-                                                YES
-                                              </a>
-                                            );
-                                          } else if (line.key.toLowerCase().includes('changed')) {
-                                            valDisplay = <strong className="text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded font-mono text-[11px]" dangerouslySetInnerHTML={{ __html: line.value }} />;
-                                          }
-                                          return (
-                                            <div key={`ie-line-${lIdx}`}>
-                                              <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                              <span className={line.key.toLowerCase().includes('amount') ? 'text-amber-700 font-bold' : 'text-slate-700 font-medium'}>
-                                                {valDisplay}
-                                              </span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`inward-edit-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`inward-edit-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Deposit Changes Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Deposit Changes Alert', previewBodyRaw, '#f7b944', 'INWARD_EDIT')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2445,68 +2241,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                Claim Submitted HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Claim Submitted HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Pending Approval
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Petty Cash Claim Pending Approval
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-amber-500 rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`req-sub-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-amber-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => (
-                                          <div key={`rsline-${lIdx}`}>
-                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-amber-700 font-bold' : 'text-slate-700 font-medium'}>
-                                              {line.value}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`req-sub-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`req-sub-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Claim Submitted Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Claim Pending Approval', previewBodyRaw, '#ff7900', 'REQUEST_SUBMITTED')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2597,61 +2353,16 @@ export default function AdminSettingsView({
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Action Required: Issue Cash
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Claim Approved & Ready for Payment
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-blue-600 rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`req-app-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-blue-600 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => (
-                                          <div key={`raline-${lIdx}`}>
-                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-blue-700 font-bold' : 'text-slate-700 font-medium'}>
-                                              {line.value}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`req-app-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`req-app-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Claim Approved Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Claim Approved & Ready for Payment', previewBodyRaw, '#2563eb', 'REQUEST_APPROVED')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2744,61 +2455,16 @@ export default function AdminSettingsView({
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Cash Disbursed
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Petty Cash Issued & Paid
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-emerald-500 rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`req-paid-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-emerald-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => (
-                                          <div key={`rpline-${lIdx}`}>
-                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-emerald-700 font-bold' : 'text-slate-700 font-medium'}>
-                                              {line.value}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`req-paid-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`req-paid-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Claim Disbursed Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Issued & Paid', previewBodyRaw, '#6CC417', 'REQUEST_PAID')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );
@@ -2877,68 +2543,28 @@ export default function AdminSettingsView({
 
                         return (
                           <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
-                              <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                Claim Rejected HTML Email Card Preview
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Claim Rejected HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
                               </span>
                             </div>
 
-                            <div className="bg-white rounded-3xl p-8 border border-slate-200/90 shadow-sm max-w-xl mx-auto space-y-4 text-left font-sans">
-                              <div className="text-[11px] font-mono text-slate-400 border-b border-slate-100 pb-2 mb-2 flex items-center justify-between">
-                                <span><strong>From:</strong> {msSenderName} &lt;{msSenderEmail}&gt;</span>
-                                <span className="text-[10px] bg-rose-50 text-rose-700 px-2 py-0.5 rounded-md font-sans font-bold">
-                                  Request Rejected
-                                </span>
-                              </div>
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
 
-                              <div>
-                                <h3 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                                  Petty Cash Claim Rejected
-                                </h3>
-                                <div className="text-xs font-semibold text-slate-500 mt-1">
-                                  Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                                </div>
-                                <div className="w-11 h-1 bg-rose-500 rounded-full mt-2.5 mb-4"></div>
-                              </div>
-
-                              <div className="space-y-3">
-                                {previewBlocks.map((block, idx) => {
-                                  if (block.type === 'callout' && block.lines) {
-                                    return (
-                                      <div key={`req-rej-p-block-${idx}`} className="bg-slate-50/90 border-l-4 border-rose-500 rounded-xl p-4 my-4 space-y-1.5 text-xs text-slate-700 leading-relaxed font-sans">
-                                        {block.lines.map((line, lIdx) => (
-                                          <div key={`rrline-${lIdx}`}>
-                                            <strong className="text-slate-900 font-bold">{line.key}:</strong>{' '}
-                                            <span className={line.key.toLowerCase().includes('amount') ? 'text-rose-700 font-bold' : 'text-slate-700 font-medium'}>
-                                              {line.value}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    );
-                                  }
-                                  if (block.type === 'balance') {
-                                    const line = block.lines ? block.lines[0] : null;
-                                    return (
-                                      <div key={`req-rej-p-block-${idx}`} className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 my-4 text-xs font-bold text-slate-800 flex items-center justify-between font-sans">
-                                        <span className="text-slate-900 font-bold">{line ? line.key : 'Current Cash Balance'}:</span>
-                                        <span className="text-emerald-700 font-extrabold text-sm">{line ? line.value : ''}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <p key={`req-rej-p-block-${idx}`} className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                                      {block.text}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-
-                              <div className="border-t border-slate-100 my-4"></div>
-                              <p className="text-[11px] text-slate-400 leading-normal">
-                                This is an automated notification from the Petty Cash Management System.
-                              </p>
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Claim Rejected Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Claim Rejected', previewBodyRaw, '#f43f5e', 'REQUEST_REJECTED')}
+                                className="w-full h-[580px] border-0"
+                              />
                             </div>
                           </div>
                         );

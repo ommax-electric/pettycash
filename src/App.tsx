@@ -551,9 +551,11 @@ export default function App() {
       };
     } else {
       finalTxn = {
-        ...updatedTxn,
-        editHistory: target.editHistory
+        ...updatedTxn
       };
+      if (target.editHistory) {
+        finalTxn.editHistory = target.editHistory;
+      }
     }
 
     const updatedTxnsList = transactions.map(t => t.id === updatedTxn.id ? finalTxn : t);
