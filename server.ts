@@ -218,7 +218,8 @@ async function startServer() {
       const cleanApiSecret = apiSecret?.trim();
       const cleanPreset = uploadPreset?.trim();
       const cleanFolder = folder?.trim();
-      const cleanPublicId = publicId?.trim();
+      const rawPublicId = publicId?.trim();
+      const cleanPublicId = rawPublicId ? rawPublicId.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_') : undefined;
 
       const uploadUrl = `https://api.cloudinary.com/v1_1/${cleanCloudName}/auto/upload`;
 
@@ -251,45 +252,95 @@ async function startServer() {
         return finalUrl;
       };
 
-      // 1. Try Signed Upload if API Key & Secret are provided
+      let lastErrorMsg = "";
+
+      // 1. Signed Upload Attempts (if API Key & Secret are provided)
       if (cleanApiKey && cleanApiSecret) {
         const timestamp = Math.floor(Date.now() / 1000);
-        const formData = new URLSearchParams();
-        formData.append("file", file);
-        formData.append("api_key", cleanApiKey);
-        formData.append("timestamp", String(timestamp));
 
-        const paramsToSign: Record<string, string> = { timestamp: String(timestamp) };
-        if (cleanFolder) {
-          formData.append("folder", cleanFolder);
-          paramsToSign.folder = cleanFolder;
-        }
+        // 1a. Try Signed Upload with folder and custom public_id (pure create action)
         if (cleanPublicId) {
+          const formData = new URLSearchParams();
+          formData.append("file", file);
+          formData.append("api_key", cleanApiKey);
+          formData.append("timestamp", String(timestamp));
+          formData.append("overwrite", "true");
+
+          const paramsToSign: Record<string, string> = { 
+            timestamp: String(timestamp),
+            overwrite: "true"
+          };
+          if (cleanFolder) {
+            formData.append("folder", cleanFolder);
+            paramsToSign.folder = cleanFolder;
+          }
           formData.append("public_id", cleanPublicId);
           paramsToSign.public_id = cleanPublicId;
-        }
-        if (cleanPreset) {
-          formData.append("upload_preset", cleanPreset);
-          paramsToSign.upload_preset = cleanPreset;
+
+          const sortedQuery = Object.keys(paramsToSign)
+            .sort()
+            .map(k => `${k}=${paramsToSign[k]}`)
+            .join("&");
+
+          const stringToSign = `${sortedQuery}${cleanApiSecret}`;
+          const signature = crypto.createHash("sha1").update(stringToSign).digest("hex");
+          formData.append("signature", signature);
+
+          const uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formData.toString()
+          });
+
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            return res.json({
+              success: true,
+              url: formatReturnUrl(uploadData),
+              publicId: uploadData.public_id,
+              format: uploadData.format,
+              bytes: uploadData.bytes
+            });
+          }
+
+          const errTxt = await uploadRes.text();
+          try {
+            const parsed = JSON.parse(errTxt);
+            lastErrorMsg = parsed?.error?.message || errTxt;
+          } catch {
+            lastErrorMsg = errTxt;
+          }
         }
 
-        const sortedQuery = Object.keys(paramsToSign)
+        // 1b. Try Signed Upload WITHOUT custom public_id (let Cloudinary auto-generate public_id)
+        const autoFormData = new URLSearchParams();
+        autoFormData.append("file", file);
+        autoFormData.append("api_key", cleanApiKey);
+        autoFormData.append("timestamp", String(timestamp));
+
+        const autoParamsToSign: Record<string, string> = { timestamp: String(timestamp) };
+        if (cleanFolder) {
+          autoFormData.append("folder", cleanFolder);
+          autoParamsToSign.folder = cleanFolder;
+        }
+
+        const autoQuery = Object.keys(autoParamsToSign)
           .sort()
-          .map(k => `${k}=${paramsToSign[k]}`)
+          .map(k => `${k}=${autoParamsToSign[k]}`)
           .join("&");
 
-        const stringToSign = `${sortedQuery}${cleanApiSecret}`;
-        const signature = crypto.createHash("sha1").update(stringToSign).digest("hex");
-        formData.append("signature", signature);
+        const autoStringToSign = `${autoQuery}${cleanApiSecret}`;
+        const autoSignature = crypto.createHash("sha1").update(autoStringToSign).digest("hex");
+        autoFormData.append("signature", autoSignature);
 
-        const uploadRes = await fetch(uploadUrl, {
+        const autoUploadRes = await fetch(uploadUrl, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: formData.toString()
+          body: autoFormData.toString()
         });
 
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
+        if (autoUploadRes.ok) {
+          const uploadData = await autoUploadRes.json();
           return res.json({
             success: true,
             url: formatReturnUrl(uploadData),
@@ -299,105 +350,33 @@ async function startServer() {
           });
         }
 
-        const errTxt = await uploadRes.text();
-        let parsedErr = errTxt;
+        const autoErrTxt = await autoUploadRes.text();
         try {
-          const parsed = JSON.parse(errTxt);
-          if (parsed?.error?.message) {
-            parsedErr = parsed.error.message;
-          }
+          const parsed = JSON.parse(autoErrTxt);
+          lastErrorMsg = parsed?.error?.message || autoErrTxt;
         } catch {
-          // ignore
+          lastErrorMsg = autoErrTxt;
         }
-
-        console.warn("[Cloudinary Signed Upload Failed]", parsedErr);
-
-        // Fallback to Unsigned Upload if preset exists
-        if (cleanPreset) {
-          const unsignedFormData = new URLSearchParams();
-          unsignedFormData.append("file", file);
-          unsignedFormData.append("upload_preset", cleanPreset);
-          if (cleanFolder) unsignedFormData.append("folder", cleanFolder);
-          if (cleanPublicId) unsignedFormData.append("public_id", cleanPublicId);
-
-          const unsignedRes = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: unsignedFormData.toString()
-          });
-
-          if (unsignedRes.ok) {
-            const uploadData = await unsignedRes.json();
-            return res.json({
-              success: true,
-              url: formatReturnUrl(uploadData),
-              publicId: uploadData.public_id,
-              format: uploadData.format,
-              bytes: uploadData.bytes
-            });
-          }
-
-          // Simple Unsigned retry without public_id/folder if preset restricts them
-          const simpleFormData = new URLSearchParams();
-          simpleFormData.append("file", file);
-          simpleFormData.append("upload_preset", cleanPreset);
-
-          const simpleRes = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: simpleFormData.toString()
-          });
-
-          if (simpleRes.ok) {
-            const uploadData = await simpleRes.json();
-            return res.json({
-              success: true,
-              url: formatReturnUrl(uploadData),
-              publicId: uploadData.public_id,
-              format: uploadData.format,
-              bytes: uploadData.bytes
-            });
-          }
-        }
-
-        // Return descriptive error if key permissions are missing
-        if (parsedErr.includes("missing permissions") || parsedErr.includes("actions=[\"create\"]") || parsedErr.includes("forbidden")) {
-          return res.status(403).json({
-            error: "Your Cloudinary API Key lacks 'create' permissions. Please check Access Keys in Cloudinary Console, or create an Unsigned Upload Preset in Cloudinary (Settings > Upload > Add upload preset) and enter its name in the Upload Preset field."
-          });
-        }
-
-        return res.status(uploadRes.status).json({ error: "Cloudinary upload failed: " + parsedErr });
       }
 
-      // 2. Try Unsigned Upload directly if only Upload Preset is provided
+      // 2. Unsigned Upload Fallback (if Upload Preset is provided)
       if (cleanPreset) {
+        // 2a. Unsigned with folder and public_id
         const unsignedFormData = new URLSearchParams();
         unsignedFormData.append("file", file);
         unsignedFormData.append("upload_preset", cleanPreset);
         if (cleanFolder) unsignedFormData.append("folder", cleanFolder);
         if (cleanPublicId) unsignedFormData.append("public_id", cleanPublicId);
+        unsignedFormData.append("overwrite", "true");
 
-        let uploadRes = await fetch(uploadUrl, {
+        const unsignedRes = await fetch(uploadUrl, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: unsignedFormData.toString()
         });
 
-        if (!uploadRes.ok) {
-          const fallbackFormData = new URLSearchParams();
-          fallbackFormData.append("file", file);
-          fallbackFormData.append("upload_preset", cleanPreset);
-
-          uploadRes = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: fallbackFormData.toString()
-          });
-        }
-
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
+        if (unsignedRes.ok) {
+          const uploadData = await unsignedRes.json();
           return res.json({
             success: true,
             url: formatReturnUrl(uploadData),
@@ -407,24 +386,276 @@ async function startServer() {
           });
         }
 
-        const errTxt = await uploadRes.text();
-        let parsedErr = errTxt;
-        try {
-          const parsed = JSON.parse(errTxt);
-          if (parsed?.error?.message) {
-            parsedErr = parsed.error.message;
-          }
-        } catch {
-          // ignore
+        // 2b. Simple Unsigned with preset only
+        const simpleFormData = new URLSearchParams();
+        simpleFormData.append("file", file);
+        simpleFormData.append("upload_preset", cleanPreset);
+
+        const simpleRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: simpleFormData.toString()
+        });
+
+        if (simpleRes.ok) {
+          const uploadData = await simpleRes.json();
+          return res.json({
+            success: true,
+            url: formatReturnUrl(uploadData),
+            publicId: uploadData.public_id,
+            format: uploadData.format,
+            bytes: uploadData.bytes
+          });
         }
 
-        return res.status(uploadRes.status).json({ error: "Cloudinary Unsigned Upload failed: " + parsedErr });
+        const simpleErrTxt = await simpleRes.text();
+        try {
+          const parsed = JSON.parse(simpleErrTxt);
+          lastErrorMsg = parsed?.error?.message || simpleErrTxt;
+        } catch {
+          lastErrorMsg = simpleErrTxt;
+        }
       }
 
-      return res.status(400).json({ error: "Either API Key & API Secret OR an Upload Preset must be configured in Cloudinary settings." });
+      if (lastErrorMsg.includes("missing permissions") || lastErrorMsg.includes("actions=") || lastErrorMsg.includes("forbidden")) {
+        return res.status(403).json({
+          error: "Your Cloudinary API Key lacks upload permissions. Please verify API Key & Secret in Cloudinary Dashboard, or create an Unsigned Upload Preset in Cloudinary (Settings > Upload > Add upload preset) and set preset name to 'petty_cash_receipts'."
+        });
+      }
+
+      return res.status(400).json({ error: "Cloudinary upload failed: " + (lastErrorMsg || "Check API Key, API Secret, or Upload Preset configuration.") });
     } catch (err: any) {
       console.error("[Cloudinary Upload Error]", err);
       return res.status(500).json({ error: err.message || "Failed to upload file to Cloudinary" });
+    }
+  });
+
+  // API Route: Delete File from Cloudinary
+  app.post("/api/cloudinary/delete", async (req, res) => {
+    try {
+      const { cloudName, apiKey, apiSecret, fileUrl, publicId, resourceType } = req.body;
+
+      const cleanCloudName = (cloudName || process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+      const cleanApiKey = (apiKey || process.env.CLOUDINARY_API_KEY || "").trim();
+      const cleanApiSecret = (apiSecret || process.env.CLOUDINARY_API_SECRET || "").trim();
+
+      if (!cleanCloudName) {
+        return res.status(400).json({ error: "Missing Cloud Name" });
+      }
+      if (!cleanApiKey || !cleanApiSecret) {
+        return res.status(400).json({ error: "Cloudinary API Key and API Secret are required to delete files from Cloudinary." });
+      }
+      if (!fileUrl && !publicId) {
+        return res.status(400).json({ error: "Missing fileUrl or publicId parameter." });
+      }
+
+      let extractedFullPath = "";
+      let extractedCleanPath = "";
+      let extractedResourceType = resourceType?.trim() || "image";
+
+      if (fileUrl && fileUrl.includes("cloudinary.com")) {
+        try {
+          const urlObj = new URL(fileUrl);
+          const pathParts = urlObj.pathname.split("/").filter(Boolean);
+          const uploadIdx = pathParts.indexOf("upload");
+          if (uploadIdx > 0) {
+            extractedResourceType = pathParts[uploadIdx - 1] || "image";
+            let remaining = pathParts.slice(uploadIdx + 1);
+            
+            // Look for version segment /v1234567890/
+            const versionIdx = remaining.findIndex(p => /^v\d+$/.test(p));
+            if (versionIdx !== -1) {
+              remaining = remaining.slice(versionIdx + 1);
+            } else {
+              // Skip signature or known transformation segments if no version segment is found
+              while (remaining.length > 1) {
+                const seg = remaining[0];
+                if (
+                  seg.startsWith("s--") || 
+                  seg.includes(",") || 
+                  /^(c|w|h|q|f|e|b|ar|l|u|o|x|y|g|d|a|fl|pg|so|eo|co|bo|p|r|m|vs|du|dn|if|end|fps|ki|dl)_[a-zA-Z0-9:-]+$/i.test(seg)
+                ) {
+                  remaining = remaining.slice(1);
+                } else {
+                  break;
+                }
+              }
+            }
+            extractedFullPath = decodeURIComponent(remaining.join("/"));
+            extractedCleanPath = extractedFullPath.replace(/\.[a-zA-Z0-9]+$/, "");
+          }
+        } catch (e) {
+          console.warn("[Cloudinary Delete] URL parsing exception:", e);
+        }
+      }
+
+      if (!extractedFullPath && publicId) {
+        extractedFullPath = publicId.trim();
+        extractedCleanPath = extractedFullPath.replace(/\.[a-zA-Z0-9]+$/, "");
+      }
+
+      if (!extractedFullPath && !extractedCleanPath) {
+        return res.status(400).json({ error: "Could not determine Cloudinary public_id from provided URL or publicId." });
+      }
+
+      const altResourceType = extractedResourceType === "image" ? "raw" : "image";
+
+      // Build unique candidate list of (resourceType, publicId)
+      const candidateList: Array<{ rType: string; pid: string }> = [];
+      const addCand = (rType: string, pid: string) => {
+        if (!pid) return;
+        const cleanPid = pid.trim();
+        if (cleanPid && !candidateList.some(c => c.rType === rType && c.pid === cleanPid)) {
+          candidateList.push({ rType, pid: cleanPid });
+        }
+      };
+
+      // If explicit publicId passed, add it first!
+      if (publicId && publicId.trim()) {
+        const p = publicId.trim();
+        const pClean = p.replace(/\.[a-zA-Z0-9]+$/, "");
+        addCand(extractedResourceType, p);
+        addCand(extractedResourceType, pClean);
+        addCand(altResourceType, p);
+        addCand(altResourceType, pClean);
+      }
+
+      addCand(extractedResourceType, extractedCleanPath);
+      addCand(extractedResourceType, extractedFullPath);
+      addCand(altResourceType, extractedCleanPath);
+      addCand(altResourceType, extractedFullPath);
+
+      if (/\.(pdf)$/i.test(fileUrl || extractedFullPath)) {
+        addCand("image", `${extractedCleanPath}.pdf`);
+        addCand("raw", `${extractedCleanPath}.pdf`);
+        addCand("image", `${extractedFullPath}.pdf`);
+        addCand("raw", `${extractedFullPath}.pdf`);
+      }
+
+      console.log(`[Cloudinary Delete] Attempting delete across ${candidateList.length} candidates for URL: ${fileUrl || publicId}`);
+
+      // 1. Primary Method: Cloudinary Admin API Delete Resources endpoint using Basic Auth
+      const authHeader = "Basic " + Buffer.from(`${cleanApiKey}:${cleanApiSecret}`).toString("base64");
+      const rTypesToTry = Array.from(new Set([extractedResourceType, altResourceType, "image", "raw"]));
+
+      for (const rType of rTypesToTry) {
+        const pidsForType = Array.from(new Set(candidateList.map(c => c.pid)));
+        if (!pidsForType.length) continue;
+
+        const searchParams = new URLSearchParams();
+        for (const pid of pidsForType) {
+          searchParams.append("public_ids[]", pid);
+        }
+        searchParams.append("invalidate", "true");
+
+        const adminUrl = `https://api.cloudinary.com/v1_1/${cleanCloudName}/resources/${rType}/upload?${searchParams.toString()}`;
+
+        try {
+          const adminRes = await fetch(adminUrl, {
+            method: "DELETE",
+            headers: {
+              "Authorization": authHeader
+            }
+          });
+
+          if (adminRes.ok) {
+            const adminData = await adminRes.json();
+            console.log(`[Cloudinary Admin API Delete Response ${rType}]`, adminData);
+            if (adminData.deleted) {
+              let deletedCount = 0;
+              for (const [pidKey, status] of Object.entries(adminData.deleted)) {
+                if (status === "deleted") {
+                  deletedCount++;
+                  console.log(`[Cloudinary Admin API Delete SUCCESS] Deleted asset '${pidKey}' (${rType})`);
+                }
+              }
+              if (deletedCount > 0) {
+                return res.json({ success: true, result: "ok", method: "admin_api", resourceType: rType, details: adminData });
+              }
+            }
+          } else {
+            const errTxt = await adminRes.text();
+            console.warn(`[Cloudinary Admin API Delete Non-200 ${rType}] Status: ${adminRes.status}`, errTxt);
+          }
+        } catch (err) {
+          console.warn(`[Cloudinary Admin API Exception ${rType}]`, err);
+        }
+      }
+
+      // 2. Secondary Method: Upload API destroy endpoint
+      let lastDestroyResult: any = null;
+
+      for (const cand of candidateList) {
+        const timestamp = Math.floor(Date.now() / 1000);
+
+        // Try Method A: Standard destroy signature with invalidate
+        const toSignWithInvalidate = `invalidate=true&public_id=${cand.pid}&timestamp=${timestamp}${cleanApiSecret}`;
+        const signatureA = crypto.createHash("sha1").update(toSignWithInvalidate).digest("hex");
+        const destroyUrl = `https://api.cloudinary.com/v1_1/${cleanCloudName}/${cand.rType}/destroy`;
+
+        const paramsA = new URLSearchParams({
+          public_id: cand.pid,
+          timestamp: String(timestamp),
+          api_key: cleanApiKey,
+          signature: signatureA,
+          invalidate: "true"
+        });
+
+        try {
+          const destroyResA = await fetch(destroyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: paramsA.toString()
+          });
+          const destroyDataA = await destroyResA.json();
+          console.log(`[Cloudinary Delete Attempt A] '${cand.pid}' (${cand.rType}):`, destroyDataA);
+
+          if (destroyDataA.result === "ok") {
+            console.log(`[Cloudinary Delete SUCCESS] Successfully destroyed asset '${cand.pid}' (${cand.rType})`);
+            return res.json({ success: true, result: "ok", publicId: cand.pid, resourceType: cand.rType });
+          }
+          lastDestroyResult = destroyDataA;
+
+          // If signature failed or invalid, try Method B without invalidate param in signature
+          if (destroyDataA.error?.message?.toLowerCase().includes("signature")) {
+            const toSignSimple = `public_id=${cand.pid}&timestamp=${timestamp}${cleanApiSecret}`;
+            const signatureB = crypto.createHash("sha1").update(toSignSimple).digest("hex");
+            const paramsB = new URLSearchParams({
+              public_id: cand.pid,
+              timestamp: String(timestamp),
+              api_key: cleanApiKey,
+              signature: signatureB
+            });
+
+            const destroyResB = await fetch(destroyUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: paramsB.toString()
+            });
+            const destroyDataB = await destroyResB.json();
+            console.log(`[Cloudinary Delete Attempt B] '${cand.pid}' (${cand.rType}):`, destroyDataB);
+
+            if (destroyDataB.result === "ok") {
+              console.log(`[Cloudinary Delete SUCCESS Method B] Successfully destroyed asset '${cand.pid}' (${cand.rType})`);
+              return res.json({ success: true, result: "ok", publicId: cand.pid, resourceType: cand.rType });
+            }
+            lastDestroyResult = destroyDataB;
+          }
+        } catch (err: any) {
+          console.warn(`[Cloudinary Delete Candidate Exception] '${cand.pid}' (${cand.rType}):`, err);
+        }
+      }
+
+      // If we checked all candidates and none returned "ok", but last result was "not_found", consider asset gone
+      const isNotFound = lastDestroyResult?.result === "not_found" || !lastDestroyResult;
+      return res.json({
+        success: isNotFound,
+        result: isNotFound ? "not_found" : (lastDestroyResult?.result || "failed"),
+        details: lastDestroyResult
+      });
+    } catch (err: any) {
+      console.error("[Cloudinary Delete Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to delete file from Cloudinary" });
     }
   });
 

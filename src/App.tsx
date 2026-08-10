@@ -19,7 +19,7 @@ import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserR
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendEmailNotification } from './services/notificationService';
-import { convertExternalUrlToDataUrl } from './services/fileAttachmentService';
+import { convertExternalUrlToDataUrl, deleteFileFromCloudinary } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
 import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
 
@@ -243,6 +243,11 @@ export default function App() {
                 if (merged.emailBodyRequestPaid) localStorage.setItem('petty_cash_email_body_req_paid', merged.emailBodyRequestPaid);
                 if (merged.emailSubjectRequestRejected) localStorage.setItem('petty_cash_email_subject_req_rejected', merged.emailSubjectRequestRejected);
                 if (merged.emailBodyRequestRejected) localStorage.setItem('petty_cash_email_body_req_rejected', merged.emailBodyRequestRejected);
+                if (merged.cloudinaryEnabled !== undefined) localStorage.setItem('cloudinary_enabled', String(merged.cloudinaryEnabled));
+                if (merged.cloudinaryCloudName) localStorage.setItem('cloudinary_cloud_name', merged.cloudinaryCloudName);
+                if (merged.cloudinaryApiKey) localStorage.setItem('cloudinary_api_key', merged.cloudinaryApiKey);
+                if (merged.cloudinaryApiSecret) localStorage.setItem('cloudinary_api_secret', merged.cloudinaryApiSecret);
+                if (merged.cloudinaryUploadPreset) localStorage.setItem('cloudinary_upload_preset', merged.cloudinaryUploadPreset);
               }
             });
           }
@@ -261,37 +266,7 @@ export default function App() {
     };
   }, []);
 
-  // Auto-migrate legacy external HTTP attachment URLs to native Firestore Data URLs in the background
-  useEffect(() => {
-    if (transactions.length === 0) return;
-    const legacyTxns = transactions.filter(t => t.receiptUrl && t.receiptUrl.startsWith('http'));
-    if (legacyTxns.length === 0) return;
 
-    let cancelled = false;
-    const runAutoMigration = async () => {
-      for (const txn of legacyTxns) {
-        if (cancelled) break;
-        try {
-          const dataUrl = await convertExternalUrlToDataUrl(txn.receiptUrl!);
-          if (dataUrl && !cancelled) {
-            await updateDoc(doc(db, 'transactions', txn.id), { receiptUrl: dataUrl });
-            setTransactions(prev => prev.map(t => t.id === txn.id ? { ...t, receiptUrl: dataUrl } : t));
-          }
-        } catch (e) {
-          console.warn('Background attachment migration notice:', e);
-        }
-      }
-    };
-
-    const timer = setTimeout(() => {
-      runAutoMigration();
-    }, 1500);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [transactions.length]);
 
 
 
@@ -520,6 +495,16 @@ export default function App() {
         fieldLabel = fieldLabel.charAt(0).toUpperCase() + fieldLabel.slice(1);
       }
 
+      // If comparing receiptUrl, skip if receiptName already recorded an attachment change, or sanitize data URLs
+      if (field === 'receiptUrl') {
+        const nameOld = (target.receiptName === null || target.receiptName === undefined) ? '' : String(target.receiptName).trim();
+        const nameNew = (updatedTxn.receiptName === null || updatedTxn.receiptName === undefined) ? '' : String(updatedTxn.receiptName).trim();
+        if (nameOld !== nameNew) return; // 'Attachment' label handles attachment changes
+      }
+
+      if (oldValStr.startsWith('data:')) oldValStr = '[Attached File]';
+      if (newValStr.startsWith('data:')) newValStr = '[Attached File]';
+
       changes.push({
         field: fieldLabel,
         oldValue: oldValStr,
@@ -530,8 +515,8 @@ export default function App() {
     if (changes.length > 0) {
       const editHistory = target.editHistory ? [...target.editHistory] : [];
       const newHistoryEntry = {
-        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        editedBy: currentUser.fullName,
+        timestamp: new Date().toISOString(),
+        editedBy: currentUser ? (currentUser.fullName || currentUser.username || 'Admin') : 'Admin',
         changes
       };
       editHistory.push(newHistoryEntry);
@@ -583,6 +568,17 @@ export default function App() {
     if (!targetTxn) return;
 
     if (permanent) {
+      if (
+        targetTxn.receiptUrl &&
+        targetTxn.receiptUrl.includes('cloudinary.com')
+      ) {
+        deleteFileFromCloudinary(targetTxn.receiptUrl, {
+          cloudName: integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '',
+          apiKey: integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '',
+          apiSecret: integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || ''
+        }).catch(e => console.warn('Cloudinary cleanup error on delete:', e));
+      }
+
       setTransactions(prev => prev.filter(t => t.id !== targetTxn.id && t.reference !== targetTxn.reference));
       deleteDoc(doc(db, 'transactions', targetTxn.id)).catch(e => console.warn(e));
       if (targetTxn.reference && targetTxn.reference !== targetTxn.id) {

@@ -33,10 +33,6 @@ export const formatTimestampInTimezone = (
       if (!isoString.includes('T')) {
         isoString = isoString.replace(' ', 'T');
       }
-      // If no timezone offset is present, append 'Z' to treat as UTC
-      if (!isoString.endsWith('Z') && !isoString.includes('+') && !isoString.includes('-')) {
-        isoString += 'Z';
-      }
       d = new Date(isoString);
     } else {
       d = dateInput;

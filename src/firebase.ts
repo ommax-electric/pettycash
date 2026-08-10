@@ -49,16 +49,40 @@ export function sanitizeForFirestore<T>(data: T): T {
   return data;
 }
 
-export const setDoc = (reference: any, data: any, options?: any) => {
-  return options ? setDocOriginal(reference, sanitizeForFirestore(data), options) : setDocOriginal(reference, sanitizeForFirestore(data));
+export const setDoc = async (reference: any, data: any, options?: any) => {
+  try {
+    return options ? await setDocOriginal(reference, sanitizeForFirestore(data), options) : await setDocOriginal(reference, sanitizeForFirestore(data));
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota limit exceeded')) {
+      console.warn('Firestore daily write quota reached:', err?.message || err);
+      throw new Error('Firestore daily write quota reached. Please try again later.');
+    }
+    throw err;
+  }
 };
 
-export const addDoc = (reference: any, data: any) => {
-  return addDocOriginal(reference, sanitizeForFirestore(data));
+export const addDoc = async (reference: any, data: any) => {
+  try {
+    return await addDocOriginal(reference, sanitizeForFirestore(data));
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota limit exceeded')) {
+      console.warn('Firestore daily write quota reached:', err?.message || err);
+      throw new Error('Firestore daily write quota reached. Please try again later.');
+    }
+    throw err;
+  }
 };
 
-export const updateDoc = (reference: any, data: any, options?: any) => {
-  return options ? updateDocOriginal(reference, sanitizeForFirestore(data), options) : updateDocOriginal(reference, sanitizeForFirestore(data));
+export const updateDoc = async (reference: any, data: any, options?: any) => {
+  try {
+    return options ? await updateDocOriginal(reference, sanitizeForFirestore(data), options) : await updateDocOriginal(reference, sanitizeForFirestore(data));
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota limit exceeded')) {
+      console.warn('Firestore daily write quota reached:', err?.message || err);
+      throw new Error('Firestore daily write quota reached. Please try again later.');
+    }
+    throw err;
+  }
 };
 
 export { 

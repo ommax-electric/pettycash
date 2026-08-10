@@ -338,7 +338,9 @@ export default function AdminSettingsView({
       emailBodyRequestSubmitted: emailBodyReqSubmitted,
       emailSubjectRequestApproved: emailSubjectReqApproved,
       emailBodyRequestApproved: emailBodyReqApproved,
-      emailSubjectRequestPaid: emailBodyReqPaid,
+      emailSubjectRequestPaid: emailSubjectReqPaid,
+      emailBodyRequestPaid: emailBodyReqPaid,
+      emailSubjectRequestRejected: emailSubjectReqRejected,
       emailBodyRequestRejected: emailBodyReqRejected,
       cloudinaryEnabled,
       cloudinaryCloudName: cloudinaryCloudName.trim(),
@@ -347,14 +349,14 @@ export default function AdminSettingsView({
       cloudinaryUploadPreset: cloudinaryUploadPreset.trim()
     };
 
+    localStorage.setItem('cloudinary_enabled', String(cloudinaryEnabled));
+    localStorage.setItem('cloudinary_cloud_name', cloudinaryCloudName.trim());
+    localStorage.setItem('cloudinary_api_key', cloudinaryApiKey.trim());
+    localStorage.setItem('cloudinary_api_secret', cloudinaryApiSecret.trim());
+    localStorage.setItem('cloudinary_upload_preset', cloudinaryUploadPreset.trim());
+
     if (onUpdateIntegrationSettings) {
       onUpdateIntegrationSettings(updated);
-    } else {
-      localStorage.setItem('cloudinary_enabled', String(cloudinaryEnabled));
-      localStorage.setItem('cloudinary_cloud_name', cloudinaryCloudName.trim());
-      localStorage.setItem('cloudinary_api_key', cloudinaryApiKey.trim());
-      localStorage.setItem('cloudinary_api_secret', cloudinaryApiSecret.trim());
-      localStorage.setItem('cloudinary_upload_preset', cloudinaryUploadPreset.trim());
     }
 
     setIntegrationSuccess('Cloudinary Cloud Storage settings saved successfully!');
@@ -438,14 +440,7 @@ export default function AdminSettingsView({
 
         const sanitizedName = origName.replace(/[^a-zA-Z0-9_.-]/g, '_');
 
-        let filePublicId = sanitizedName;
-        if (refClean) {
-          if (sanitizedName.toLowerCase().startsWith(`${refClean.toLowerCase()}_`)) {
-            filePublicId = sanitizedName;
-          } else {
-            filePublicId = `${refClean}_${sanitizedName}`;
-          }
-        }
+        const filePublicId = sanitizedName;
 
         const uploadRes = await uploadFileToCloudinary(rawDataUrl, filePublicId, folderPath, {
           cloudName: cloudinaryCloudName.trim(),
@@ -618,7 +613,7 @@ export default function AdminSettingsView({
     e.preventDefault();
     const updated: IntegrationSettings = {
       ...integrationSettings,
-      cloudinaryEnabled: false,
+      cloudinaryEnabled,
       emailEnabled,
       msTenantId,
       msClientId,
@@ -726,7 +721,7 @@ export default function AdminSettingsView({
 
     const currentIntegrationSettings: IntegrationSettings = {
       ...integrationSettings,
-      cloudinaryEnabled: false,
+      cloudinaryEnabled,
       emailEnabled: true,
       msTenantId,
       msClientId,

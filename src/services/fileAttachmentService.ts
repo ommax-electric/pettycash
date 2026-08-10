@@ -271,3 +271,53 @@ export async function uploadFileToCloudinary(
   }
 }
 
+/**
+ * Deletes a file from Cloudinary using its URL or publicId
+ */
+export async function deleteFileFromCloudinary(
+  fileUrl: string,
+  config?: {
+    cloudName?: string;
+    apiKey?: string;
+    apiSecret?: string;
+    publicId?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  if (!fileUrl && !config?.publicId) {
+    return { success: false, error: 'Invalid or missing Cloudinary URL or publicId' };
+  }
+
+  const cloudName = (config?.cloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim();
+  const apiKey = (config?.apiKey || localStorage.getItem('cloudinary_api_key') || '').trim();
+  const apiSecret = (config?.apiSecret || localStorage.getItem('cloudinary_api_secret') || '').trim();
+
+  if (!cloudName || !apiKey || !apiSecret) {
+    console.warn('[Cloudinary Delete] Cannot delete file from Cloudinary: Missing Cloud Name, API Key, or API Secret.');
+    return { success: false, error: 'Missing Cloudinary configuration (Cloud Name, API Key, or API Secret)' };
+  }
+
+  try {
+    const res = await fetch('/api/cloudinary/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cloudName,
+        apiKey,
+        apiSecret,
+        fileUrl: fileUrl || undefined,
+        publicId: config?.publicId || undefined
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      console.log('[Cloudinary Delete Success]', fileUrl || config?.publicId, data);
+    } else {
+      console.warn('[Cloudinary Delete Failed]', fileUrl || config?.publicId, data);
+    }
+    return { success: Boolean(data.success), error: data.error };
+  } catch (err: any) {
+    console.warn('Exception during Cloudinary file deletion:', err);
+    return { success: false, error: err.message || 'Network error deleting from Cloudinary' };
+  }
+}
+

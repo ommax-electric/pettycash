@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
-import { convertExternalUrlToDataUrl, uploadFileToCloudinary } from '../services/fileAttachmentService';
+import { convertExternalUrlToDataUrl, uploadFileToCloudinary, deleteFileFromCloudinary } from '../services/fileAttachmentService';
 import { uploadToFirebaseStorage } from '../services/firebaseStorageService';
 import { db, doc, updateDoc } from '../firebase';
 
@@ -35,8 +35,8 @@ function PdfViewerModalContent({
   size: string;
   openAttachmentInNewTab: (url: string, name?: string) => void;
 }) {
-  const [pdfPage, setPdfPage] = useState(1);
   const [imgError, setImgError] = useState(false);
+  const pdfPage = 1;
 
   const isCloudinary = url.includes('cloudinary.com');
   
@@ -60,41 +60,14 @@ function PdfViewerModalContent({
   return (
     <div className="w-full bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 min-h-[48vh] flex flex-col items-center justify-center overflow-hidden relative">
       {cloudinaryPageImgUrl && !imgError ? (
-        <div className="flex flex-col items-center justify-center w-full space-y-3">
+        <div className="flex flex-col items-center justify-center w-full">
           <img
             key={`pdf-page-${pdfPage}`}
             src={cloudinaryPageImgUrl}
-            alt={`${name} - Page ${pdfPage}`}
+            alt={name}
             onError={() => setImgError(true)}
             className="max-w-full max-h-[50vh] sm:max-h-[56vh] object-contain rounded-xl border border-slate-100 shadow-xs"
           />
-          <div className="flex flex-wrap items-center justify-between w-full px-2 text-[11px] font-semibold text-slate-600 gap-2">
-            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl">
-              <button
-                type="button"
-                disabled={pdfPage <= 1}
-                onClick={() => setPdfPage(p => Math.max(1, p - 1))}
-                className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 disabled:opacity-40 font-bold hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed"
-              >
-                ◀ Prev
-              </button>
-              <span className="font-mono px-2 text-slate-700">Page {pdfPage}</span>
-              <button
-                type="button"
-                onClick={() => setPdfPage(p => p + 1)}
-                className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 font-bold hover:bg-slate-50 cursor-pointer"
-              >
-                Next ▶
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => openAttachmentInNewTab(attachmentBlobUrl || url, name)}
-              className="text-slate-600 underline font-semibold hover:text-slate-900 cursor-pointer"
-            >
-              Open Original PDF
-            </button>
-          </div>
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center p-6 text-center space-y-4 max-w-md">
@@ -147,20 +120,34 @@ const formatDateToDMY = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
 
 const formatVoidDateTime = (dateStr?: string): string => {
   if (!dateStr) return '';
-  const hasTime = dateStr.includes(':') || dateStr.includes('T') || (dateStr.includes(' ') && dateStr.trim().length > 10);
-  
-  let d: Date;
-  if (dateStr.endsWith('Z') || dateStr.includes('T')) {
-    d = new Date(dateStr);
-  } else if (dateStr.includes(' ')) {
-    d = new Date(dateStr.replace(' ', 'T') + 'Z');
-    if (isNaN(d.getTime())) {
-      d = new Date(dateStr);
-    }
-  } else {
-    d = new Date(dateStr);
+  const str = dateStr.trim();
+  if (str.includes('|') || str.includes('AM') || str.includes('PM') || str.includes('am') || str.includes('pm')) {
+    return str;
   }
 
+  // Check if string is a local YYYY-MM-DD [T/space] HH:MM:SS string without 'Z' or offset
+  const localMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  const isUtcIso = str.endsWith('Z') || str.includes('+') || (str.includes('-') && str.indexOf('-', 8) > 10);
+
+  if (localMatch && !isUtcIso) {
+    const [, yyyy, mm, dd, hh, min] = localMatch;
+    const formattedDay = dd.padStart(2, '0');
+    const formattedMonth = mm.padStart(2, '0');
+    const formattedYear = yyyy;
+
+    if (hh !== undefined && hh !== '') {
+      let hourNum = parseInt(hh, 10);
+      const dayPeriod = hourNum >= 12 ? 'PM' : 'AM';
+      hourNum = hourNum % 12 || 12;
+      const formattedHour = String(hourNum).padStart(2, '0');
+      const formattedMin = (min || '00').padStart(2, '0');
+      return `${formattedDay}-${formattedMonth}-${formattedYear} | ${formattedHour}:${formattedMin} ${dayPeriod}`;
+    }
+    return `${formattedDay}-${formattedMonth}-${formattedYear}`;
+  }
+
+  // ISO string with UTC 'Z' or offset -> parse and format in Asia/Kolkata (IST)
+  const d = new Date(str);
   if (isNaN(d.getTime())) return dateStr;
 
   try {
@@ -185,6 +172,7 @@ const formatVoidDateTime = (dateStr?: string): string => {
     const minutes = partMap.minute || '00';
     const dayPeriod = (partMap.dayPeriod || 'AM').toUpperCase();
 
+    const hasTime = str.includes(':') || str.includes('T') || (str.includes(' ') && str.length > 10);
     if (hasTime) {
       return `${dd}-${mm}-${yyyy} | ${hh}:${minutes} ${dayPeriod}`;
     }
@@ -456,6 +444,16 @@ export default function RegisterView({
   const [viewingAttachment, setViewingAttachment] = useState<Transaction | null>(null);
   const [attachmentBlobUrl, setAttachmentBlobUrl] = useState<string | null>(null);
 
+  // Synchronize detail drawer with latest transaction state
+  useEffect(() => {
+    if (selectedDetailTransaction) {
+      const updated = transactions.find(t => t.id === selectedDetailTransaction.id);
+      if (updated) {
+        setSelectedDetailTransaction(updated);
+      }
+    }
+  }, [transactions]);
+
   const [showMerchantSuggestions, setShowMerchantSuggestions] = useState(false);
 
   const merchantSuggestions = React.useMemo(() => {
@@ -623,13 +621,19 @@ export default function RegisterView({
     }
     
     try {
+      // If there was a previous Cloudinary attachment on the voucher/form, queue it for cleanup
+      const prevCloudinaryUrl = receiptFile?.cloudinaryUrl || (editingTransaction?.receiptUrl?.includes('cloudinary.com') ? editingTransaction.receiptUrl : null);
+
       const processed = await compressAndProcessFile(file);
       
+      const cloudName = (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim();
+      const apiKey = (integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '').trim();
+      const apiSecret = (integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || '').trim();
+      const uploadPreset = (integrationSettings?.cloudinaryUploadPreset || localStorage.getItem('cloudinary_upload_preset') || '').trim();
+
       let uploadedCloudinaryUrl: string | null = null;
-      if (
-        (integrationSettings?.cloudinaryEnabled || integrationSettings?.cloudinaryCloudName) &&
-        integrationSettings?.cloudinaryCloudName
-      ) {
+      let uploadedPublicId: string | null = null;
+      if (cloudName) {
         setReceiptFile({
           name: processed.name,
           size: processed.size,
@@ -642,19 +646,28 @@ export default function RegisterView({
         // Generate structured folder path: Petty Cash/YYYY/MM and voucher prefix
         const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
         const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
-        const refClean = (formReference || editingTransaction?.reference || '').replace(/[^a-zA-Z0-9_-]/g, '');
         const cleanName = processed.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-        const filePublicId = `${refClean ? `${refClean}_` : ''}${cleanName}`;
+        const filePublicId = cleanName;
 
         const cRes = await uploadFileToCloudinary(processed.dataUrl, filePublicId, folderPath, {
-          cloudName: integrationSettings.cloudinaryCloudName,
-          apiKey: integrationSettings.cloudinaryApiKey,
-          apiSecret: integrationSettings.cloudinaryApiSecret,
-          uploadPreset: integrationSettings.cloudinaryUploadPreset
+          cloudName,
+          apiKey,
+          apiSecret,
+          uploadPreset
         });
 
         if (cRes.success && cRes.url) {
           uploadedCloudinaryUrl = cRes.url;
+          uploadedPublicId = cRes.publicId || null;
+
+          // Delete the previous Cloudinary file if it exists and is different from the newly uploaded URL
+          if (prevCloudinaryUrl && prevCloudinaryUrl !== cRes.url) {
+            deleteFileFromCloudinary(prevCloudinaryUrl, {
+              cloudName,
+              apiKey,
+              apiSecret
+            }).catch(e => console.warn('Cloudinary previous file cleanup error:', e));
+          }
         }
       }
 
@@ -663,8 +676,11 @@ export default function RegisterView({
         size: processed.size,
         dataUrl: uploadedCloudinaryUrl || processed.dataUrl,
         cloudinaryUrl: uploadedCloudinaryUrl || null,
+        cloudinaryPublicId: uploadedPublicId,
         isUploading: false,
-        uploadError: null
+        uploadError: (cloudName && !uploadedCloudinaryUrl)
+          ? 'Cloudinary upload could not be completed. Check credentials in Admin Settings.'
+          : null
       });
 
       return true;
@@ -799,10 +815,11 @@ export default function RegisterView({
     setFormRemarks(txn.remarks || '');
     setFormProjectRefNo(txn.projectRefNo || '');
     setFormPaymentType(txn.paymentType || 'CASH');
-    setReceiptFile(txn.receiptName ? { 
-      name: txn.receiptName, 
+    setReceiptFile(txn.receiptName || txn.receiptUrl ? { 
+      name: txn.receiptName || 'Attached Document', 
       size: txn.receiptSize || 'N/A', 
-      dataUrl: txn.receiptUrl || null 
+      dataUrl: txn.receiptUrl || null,
+      cloudinaryUrl: txn.receiptUrl?.includes('cloudinary.com') ? txn.receiptUrl : null
     } : null);
     setIsModalOpen(true);
   };
@@ -924,8 +941,43 @@ export default function RegisterView({
       return;
     }
 
-    // Process Attachment URL (Stored natively inside Firestore record)
-    const finalReceiptUrl = receiptFile ? (receiptFile.dataUrl || receiptFile.cloudinaryUrl || null) : null;
+    // Process Attachment URL (Prioritize Cloudinary CDN URLs to prevent heavy Base64 writes to Firestore)
+    let finalReceiptUrl: string | null = null;
+    if (receiptFile) {
+      if (receiptFile.cloudinaryUrl) {
+        finalReceiptUrl = receiptFile.cloudinaryUrl;
+      } else if (receiptFile.dataUrl?.startsWith('http')) {
+        finalReceiptUrl = receiptFile.dataUrl;
+      } else if (receiptFile.dataUrl && receiptFile.dataUrl.startsWith('data:')) {
+        // If Cloudinary is configured, upload Base64 attachment to Cloudinary before saving to Firestore
+        const cloudName = integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name');
+        if (cloudName) {
+          const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
+          const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
+          const cleanName = receiptFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          const filePublicId = cleanName;
+
+          const cRes = await uploadFileToCloudinary(receiptFile.dataUrl, filePublicId, folderPath, {
+            cloudName,
+            apiKey: integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || undefined,
+            apiSecret: integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || undefined,
+            uploadPreset: integrationSettings?.cloudinaryUploadPreset || localStorage.getItem('cloudinary_upload_preset') || undefined
+          });
+
+          if (cRes.success && cRes.url) {
+            finalReceiptUrl = cRes.url;
+            setReceiptFile(prev => prev ? { ...prev, dataUrl: cRes.url, cloudinaryUrl: cRes.url, uploadError: null } : null);
+          } else {
+            setFormError(`Cloudinary Upload Failed: ${cRes.error || 'Check Cloud Name, API Key, or Upload Preset in Admin Settings.'}`);
+            return;
+          }
+        } else {
+          finalReceiptUrl = receiptFile.dataUrl;
+        }
+      } else {
+        finalReceiptUrl = receiptFile.dataUrl || null;
+      }
+    }
 
     const categoryName = effectiveFormType === 'IN' ? 'Cash Source' : formCategory;
     const isCreditIn = effectiveFormType === 'IN';
@@ -943,6 +995,19 @@ export default function RegisterView({
       onConfirm: () => {
         try {
           if (editingTransaction) {
+            // If the transaction previously had a Cloudinary receipt URL and it was removed or replaced
+            if (
+              editingTransaction.receiptUrl &&
+              editingTransaction.receiptUrl.includes('cloudinary.com') &&
+              editingTransaction.receiptUrl !== finalReceiptUrl
+            ) {
+              deleteFileFromCloudinary(editingTransaction.receiptUrl, {
+                cloudName: integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '',
+                apiKey: integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '',
+                apiSecret: integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || ''
+              }).catch(e => console.warn('Cloudinary old file cleanup on edit error:', e));
+            }
+
             if (onUpdateTransaction) {
               onUpdateTransaction({
                 ...editingTransaction,
@@ -2844,7 +2909,7 @@ export default function RegisterView({
                               Edited by <span className="text-indigo-600">{entry.editedBy}</span>
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono font-semibold">
-                              {entry.timestamp}
+                              {formatVoidDateTime(entry.timestamp)}
                             </span>
                           </div>
 
@@ -2918,7 +2983,12 @@ export default function RegisterView({
           const lowerName = name.toLowerCase();
           const lowerUrl = url.toLowerCase();
           const isPdf = url.startsWith('data:application/pdf') || lowerUrl.includes('.pdf') || lowerName.endsWith('.pdf');
-          const isImage = url.startsWith('data:image/') || lowerUrl.includes('/image/upload/') || /\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i.test(lowerUrl) || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(lowerName);
+          const isImage = !isPdf && (
+            url.startsWith('data:image/') ||
+            /\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i.test(lowerUrl) ||
+            /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(lowerName) ||
+            lowerUrl.includes('/image/upload/')
+          );
 
           return (
             <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60]">
@@ -4841,14 +4911,14 @@ export default function RegisterView({
                             {receiptFile.isUploading && (
                               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-medium border border-sky-200 animate-pulse">
                                 <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping"></span>
-                                Uploading to Firebase Cloud Storage...
+                                Uploading to Cloud Storage...
                               </div>
                             )}
 
                             {receiptFile.cloudinaryUrl ? (
                               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
                                 <CheckCircle className="w-3 h-3 text-emerald-600" />
-                                Uploaded to Firebase Storage
+                                Uploaded to Cloud Storage
                               </div>
                             ) : (
                               !receiptFile.isUploading && receiptFile.dataUrl && (
@@ -4872,7 +4942,19 @@ export default function RegisterView({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.preventDefault();
+                                  const urlToDelete = receiptFile?.cloudinaryUrl || (editingTransaction?.receiptUrl?.includes('cloudinary.com') ? editingTransaction.receiptUrl : null);
+                                  const pidToDelete = (receiptFile as any)?.cloudinaryPublicId || undefined;
+                                  if (urlToDelete && urlToDelete.includes('cloudinary.com')) {
+                                    deleteFileFromCloudinary(urlToDelete, {
+                                      cloudName: integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '',
+                                      apiKey: integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '',
+                                      apiSecret: integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || '',
+                                      publicId: pidToDelete
+                                    }).catch(err => console.warn('Cloudinary delete error on remove file click:', err));
+                                  }
                                   setReceiptFile(null);
+                                  const fileInput = document.getElementById('form-receipt-input') as HTMLInputElement | null;
+                                  if (fileInput) fileInput.value = '';
                                 }}
                                 className="mt-1 text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
                               >
