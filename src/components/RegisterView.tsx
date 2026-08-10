@@ -325,6 +325,12 @@ export default function RegisterView({
   const [selectedBatchTxnIds, setSelectedBatchTxnIds] = useState<string[]>([]);
   const [batchSearchQuery, setBatchSearchQuery] = useState('');
 
+  const isPrintableVoucher = (txn: Transaction | null | undefined): boolean => {
+    if (!txn) return false;
+    const s = (txn.status || '').toString().toUpperCase();
+    return s === 'PAID' || s === 'VOID' || s === 'DELETED';
+  };
+
   const toggleBatchSelect = (id: string) => {
     setSelectedBatchTxnIds(prev => {
       if (prev.includes(id)) {
@@ -338,7 +344,7 @@ export default function RegisterView({
   };
 
   const handleSelectLatest3 = () => {
-    const latest3 = filteredTransactions.slice(0, 3).map(t => t.id);
+    const latest3 = filteredTransactions.filter(isPrintableVoucher).slice(0, 3).map(t => t.id);
     setSelectedBatchTxnIds(latest3);
   };
 
@@ -1366,6 +1372,7 @@ export default function RegisterView({
   };
 
   const handlePrintSingleVoucher = (txn: Transaction) => {
+    if (!isPrintableVoucher(txn)) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -1759,11 +1766,12 @@ export default function RegisterView({
   };
 
   const handlePrintBatchVouchers = (txnsToPrint: Transaction[]) => {
-    if (!txnsToPrint || txnsToPrint.length === 0) return;
+    const printableOnly = (txnsToPrint || []).filter(isPrintableVoucher);
+    if (printableOnly.length === 0) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const vouchersHTML = txnsToPrint.map((txn) => {
+    const vouchersHTML = printableOnly.map((txn) => {
       const isVoided = txn.status === 'DELETED';
       const amountInWords = numberToWordsINR(txn.amount);
       const formattedAmount = `${currencySymbol} ${txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2369,8 +2377,9 @@ export default function RegisterView({
                     </div>
                   ) : (
                     searchedVouchers.map((txn) => {
+                      const isPrintable = isPrintableVoucher(txn);
                       const isSelected = selectedBatchTxnIds.includes(txn.id);
-                      const isDisabled = !isSelected && selectedBatchTxnIds.length >= 3;
+                      const isDisabled = !isPrintable || (!isSelected && selectedBatchTxnIds.length >= 3);
 
                       return (
                         <div
@@ -2378,12 +2387,12 @@ export default function RegisterView({
                           onClick={() => {
                             if (!isDisabled) toggleBatchSelect(txn.id);
                           }}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                          className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
                             isSelected 
-                              ? 'bg-rose-50/70 border-rose-300 shadow-xs' 
+                              ? 'bg-rose-50/70 border-rose-300 shadow-xs cursor-pointer' 
                               : isDisabled 
                                 ? 'bg-slate-100/60 border-slate-200 opacity-50 cursor-not-allowed' 
-                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
+                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80 cursor-pointer'
                           }`}
                         >
                           <div className="flex items-center gap-3 min-w-0">
@@ -2392,7 +2401,7 @@ export default function RegisterView({
                               checked={isSelected}
                               disabled={isDisabled}
                               onChange={() => {}} // Handled by container click
-                              className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                              className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer disabled:cursor-not-allowed"
                             />
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
@@ -2402,6 +2411,11 @@ export default function RegisterView({
                                 <span className="text-[10px] text-slate-400 font-mono">
                                   {formatDate(txn.date)}
                                 </span>
+                                {!isPrintable && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                    {txn.status || 'Not Paid'}
+                                  </span>
+                                )}
                               </div>
                               <p className="text-xs font-semibold text-slate-700 truncate">
                                 {txn.merchant}
@@ -2955,8 +2969,15 @@ export default function RegisterView({
               {/* Footer Actions */}
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between">
                 <button
-                  onClick={() => handlePrintSingleVoucher(selectedDetailTransaction)}
-                  className="inline-flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold py-2.5 px-4 rounded-xl text-xs transition-all cursor-pointer"
+                  type="button"
+                  disabled={!selectedDetailTransaction || !isPrintableVoucher(selectedDetailTransaction)}
+                  onClick={() => selectedDetailTransaction && handlePrintSingleVoucher(selectedDetailTransaction)}
+                  className={`inline-flex items-center gap-2 font-bold py-2.5 px-4 rounded-xl text-xs transition-all ${
+                    selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction)
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 opacity-40 cursor-not-allowed'
+                      : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer'
+                  }`}
+                  title={selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction) ? "Print available only after marked Paid or Void" : "Print Cash Voucher"}
                 >
                   <Printer className="w-4 h-4 text-indigo-600" />
                   Print Cash Voucher
@@ -4221,9 +4242,15 @@ export default function RegisterView({
 
                           {/* Print action (accessible to all, including auditors) */}
                           <button
+                            type="button"
+                            disabled={!isPrintableVoucher(txn)}
                             onClick={() => handlePrintSingleVoucher(txn)}
-                            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-[#009660] transition-all cursor-pointer"
-                            title="Print Voucher"
+                            className={`p-1.5 rounded-lg transition-all ${
+                              !isPrintableVoucher(txn)
+                                ? 'opacity-30 cursor-not-allowed text-slate-300'
+                                : 'hover:bg-slate-100 text-slate-400 hover:text-[#009660] cursor-pointer'
+                            }`}
+                            title={!isPrintableVoucher(txn) ? "Print available only after marked Paid or Void" : "Print Voucher"}
                           >
                             <Printer className="w-3.5 h-3.5" />
                           </button>
@@ -4329,8 +4356,15 @@ export default function RegisterView({
                   {/* Actions Row */}
                   <div className="flex items-center justify-end gap-2 pt-1">
                     <button
+                      type="button"
+                      disabled={!isPrintableVoucher(txn)}
                       onClick={() => handlePrintSingleVoucher(txn)}
-                      className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-600 transition-all cursor-pointer h-8"
+                      className={`inline-flex items-center gap-1.5 py-1.5 px-3 border rounded-lg text-[11px] font-bold transition-all h-8 ${
+                        !isPrintableVoucher(txn)
+                          ? 'bg-slate-100 text-slate-400 border-slate-200 opacity-40 cursor-not-allowed'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600 cursor-pointer'
+                      }`}
+                      title={!isPrintableVoucher(txn) ? "Print available only after marked Paid or Void" : "Print Voucher"}
                     >
                       <Printer className="w-3.5 h-3.5" />
                       Print
