@@ -13,20 +13,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 };
 
 export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
-  smsEnabled: false,
-  smsGatewayUrl: 'https://api.sms-gate.app/3rdparty/v1/message',
-  smsUsername: 'WRJ0SQ',
-  smsPassword: 'sdoaxryxfmy5qh',
-  smsRecipients: '+91 90259 76761',
-  smsTemplateNew: 'New Petty Cash Voucher Alert: #{voucher_id} for {amount} paid to {paid_to} ({category}). Cash balance: {balance}.',
-  smsTemplateEdit: 'Changes Alert for Petty Cash Voucher #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.',
-  smsTemplateInward: 'Inward Cash Deposit Alert: #{voucher_id} for {amount} received from {paid_to} ({category}). Cash balance: {balance}.',
-  smsTemplateInwardEdit: 'Deposit Changes Alert for Cash Deposit #{voucher_id}: {changed_fields} changed by {updated_by}. Please review. Balance: {balance}.',
-  googleDriveEnabled: false,
-  googleDriveFolderName: 'Petty Cash Voucher Attachments',
-  googleDriveFolderId: '1A2b3C4d5E6f7G8h9I0j-PettyCashRoot',
-  googleDriveStorageMode: 'HYBRID_FIRESTORE',
-  googleDriveConnectedAccount: 'mail@ommaxelectric.com',
   cloudinaryEnabled: false,
   cloudinaryCloudName: 'ommaxelectric',
   cloudinaryUploadPreset: 'petty_cash_receipts',

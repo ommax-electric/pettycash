@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { formatTimestampInTimezone } from '../utils';
-import { sendSmsNotification, sendEmailNotification, calculateCashBalance } from '../services/notificationService';
+import { sendEmailNotification, calculateCashBalance } from '../services/notificationService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, testCloudinaryConnection } from '../services/fileAttachmentService';
 import { db, doc, updateDoc } from '../firebase';
@@ -618,9 +618,7 @@ export default function AdminSettingsView({
     e.preventDefault();
     const updated: IntegrationSettings = {
       ...integrationSettings,
-      smsEnabled: false,
       cloudinaryEnabled: false,
-      googleDriveEnabled: false,
       emailEnabled,
       msTenantId,
       msClientId,
@@ -728,9 +726,7 @@ export default function AdminSettingsView({
 
     const currentIntegrationSettings: IntegrationSettings = {
       ...integrationSettings,
-      smsEnabled: false,
       cloudinaryEnabled: false,
-      googleDriveEnabled: false,
       emailEnabled: true,
       msTenantId,
       msClientId,

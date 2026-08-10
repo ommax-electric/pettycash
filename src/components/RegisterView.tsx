@@ -4,7 +4,6 @@ import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCir
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
-import { uploadReceiptToGoogleDrive } from '../services/googleDriveService';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary } from '../services/fileAttachmentService';
 import { uploadToFirebaseStorage } from '../services/firebaseStorageService';
 import { db, doc, updateDoc } from '../firebase';

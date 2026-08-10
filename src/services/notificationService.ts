@@ -53,21 +53,6 @@ export function calculateCashBalance(transactions: Transaction[], currencySymbol
 }
 
 /**
- * Dispatches SMS notification via Self-Hosted Android SMSGate HTTP Endpoint
- */
-export async function sendSmsNotification(
-  _type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT',
-  _txn: Transaction,
-  _currentUser: User | null,
-  _transactionsList: Transaction[],
-  _appSettings: AppSettings,
-  _changedFieldLabels: string[] = [],
-  _integrationSettings?: IntegrationSettings | null
-): Promise<{ success: boolean; message: string }> {
-  return { success: false, message: 'SMS Gateway integration has been removed.' };
-}
-
-/**
  * Dispatches Corporate Email notification via configured SMTP / API endpoint
  */
 export async function sendEmailNotification(

@@ -18,7 +18,7 @@ import {
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings } from './types';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
-import { sendSmsNotification, sendEmailNotification } from './services/notificationService';
+import { sendEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
 import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
@@ -222,15 +222,6 @@ export default function App() {
                 };
                 setIntegrationSettings(merged);
                 // Also mirror to localStorage for offline cache
-                if (merged.smsEnabled !== undefined) localStorage.setItem('petty_cash_sms_enabled', String(merged.smsEnabled));
-                if (merged.smsGatewayUrl) localStorage.setItem('petty_cash_sms_url', merged.smsGatewayUrl);
-                if (merged.smsUsername) localStorage.setItem('petty_cash_sms_username', merged.smsUsername);
-                if (merged.smsPassword) localStorage.setItem('petty_cash_sms_password', merged.smsPassword);
-                if (merged.smsRecipients) localStorage.setItem('petty_cash_sms_recipients', merged.smsRecipients);
-                if (merged.smsTemplateNew) localStorage.setItem('petty_cash_sms_template_new', merged.smsTemplateNew);
-                if (merged.smsTemplateEdit) localStorage.setItem('petty_cash_sms_template_edit', merged.smsTemplateEdit);
-                if (merged.smsTemplateInward) localStorage.setItem('petty_cash_sms_template_inward', merged.smsTemplateInward);
-
                 if (merged.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(merged.emailEnabled));
                 if (merged.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', merged.msTenantId);
                 if (merged.msClientId !== undefined) localStorage.setItem('ms_graph_client_id', merged.msClientId);
@@ -448,10 +439,8 @@ export default function App() {
       addLog('TXN_CREATE', `Logged cash voucher reference ${newTxn.reference} of ${appSettings.currencySymbol}${newTxn.amount.toFixed(2)} under ${newTxn.category} (Merchant: ${newTxn.merchant})`);
     }
 
-    // Dispatch automated SMS & Email alerts
-    const smsType = newTxn.type === 'IN' ? 'INWARD' : 'NEW';
+    // Dispatch automated Email alerts
     const emailType = newTxn.type === 'IN' ? 'INWARD' : (newTxn.status === 'PENDING' ? 'REQUEST_SUBMITTED' : 'NEW');
-    sendSmsNotification(smsType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings);
     sendEmailNotification(emailType, newTxn, currentUser, updatedTxnsList, appSettings, [], integrationSettings, users);
   };
 
@@ -572,12 +561,11 @@ export default function App() {
 
     addLog('TXN_UPDATE', `Modified transaction reference ${updatedTxn.reference} (${updatedTxn.type === 'IN' ? 'Deposit' : 'Disbursement'})`);
 
-    // Dispatch automated SMS & Email alerts with dynamic changed fields
+    // Dispatch automated Email alerts with dynamic changed fields
     if (changes.length > 0) {
       const changedFieldLabels = changes.map(c => c.field);
       const isDeposit = finalTxn.type === 'IN';
       const notificationType = isDeposit ? 'INWARD_EDIT' : 'EDIT';
-      sendSmsNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings);
       sendEmailNotification(notificationType, finalTxn, currentUser, updatedTxnsList, appSettings, changedFieldLabels, integrationSettings, users);
     }
   };
@@ -784,18 +772,6 @@ export default function App() {
     setIntegrationSettings(newSettings);
 
     // Save to local storage for local cache
-    localStorage.setItem('petty_cash_sms_enabled', String(newSettings.smsEnabled));
-    localStorage.setItem('petty_cash_sms_url', newSettings.smsGatewayUrl);
-    localStorage.setItem('petty_cash_sms_username', newSettings.smsUsername);
-    localStorage.setItem('petty_cash_sms_password', newSettings.smsPassword);
-    localStorage.setItem('petty_cash_sms_recipients', newSettings.smsRecipients);
-    localStorage.setItem('petty_cash_sms_template_new', newSettings.smsTemplateNew);
-    localStorage.setItem('petty_cash_sms_template_edit', newSettings.smsTemplateEdit);
-    localStorage.setItem('petty_cash_sms_template_inward', newSettings.smsTemplateInward);
-    if (newSettings.smsTemplateInwardEdit) {
-      localStorage.setItem('petty_cash_sms_template_inward_edit', newSettings.smsTemplateInwardEdit);
-    }
-
     localStorage.setItem('petty_cash_email_enabled', String(newSettings.emailEnabled));
     localStorage.setItem('ms_graph_tenant_id', newSettings.msTenantId);
     localStorage.setItem('ms_graph_client_id', newSettings.msClientId);

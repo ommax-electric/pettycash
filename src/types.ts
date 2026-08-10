@@ -26,20 +26,6 @@ export interface AppSettings {
 }
 
 export interface IntegrationSettings {
-  smsEnabled?: boolean;
-  smsGatewayUrl?: string;
-  smsUsername?: string;
-  smsPassword?: string;
-  smsRecipients?: string;
-  smsTemplateNew?: string;
-  smsTemplateEdit?: string;
-  smsTemplateInward?: string;
-  smsTemplateInwardEdit?: string;
-  googleDriveEnabled?: boolean;
-  googleDriveFolderName?: string;
-  googleDriveFolderId?: string;
-  googleDriveStorageMode?: 'DIRECT_DRIVE' | 'HYBRID_FIRESTORE';
-  googleDriveConnectedAccount?: string;
   cloudinaryEnabled?: boolean;
   cloudinaryCloudName?: string;
   cloudinaryApiKey?: string;
@@ -70,13 +56,6 @@ export interface IntegrationSettings {
   emailBodyRequestPaid?: string;
   emailSubjectRequestRejected?: string;
   emailBodyRequestRejected?: string;
-  backblazeEnabled?: boolean;
-  backblazeKeyId?: string;
-  backblazeApplicationKey?: string;
-  backblazeBucketName?: string;
-  backblazeBucketId?: string;
-  backblazeRegion?: string;
-  backblazeStorageMode?: 'DIRECT_B2' | 'HYBRID_FIRESTORE';
 }
 
 export type TransactionType = 'IN' | 'OUT';
