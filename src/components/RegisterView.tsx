@@ -1494,7 +1494,7 @@ export default function RegisterView({
             .header-row {
               display: flex;
               justify-content: space-between;
-              align-items: center;
+              align-items: flex-start;
               margin-bottom: 3mm;
               position: relative;
               min-height: 20mm;
@@ -1555,6 +1555,13 @@ export default function RegisterView({
               letter-spacing: 1.5px;
               text-transform: uppercase;
               margin-top: 1px;
+            }
+            .voucher-project-ref {
+              font-size: 11px;
+              font-weight: 700;
+              color: #0f172a;
+              letter-spacing: 0.5px;
+              margin-top: 1.5px;
             }
 
             /* Line Rows (Underlined, no boxes) */
@@ -1689,6 +1696,7 @@ export default function RegisterView({
                 <div class="header-right">
                   <div class="company-name">Ommax Electric Private Limited</div>
                   <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
+                  ${txn.projectRefNo ? `<div class="voucher-project-ref">Ref. No: ${txn.projectRefNo}</div>` : ''}
                 </div>
               </div>
 
@@ -1812,6 +1820,7 @@ export default function RegisterView({
               <div class="header-right">
                 <div class="company-name">Ommax Electric Private Limited</div>
                 <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
+                ${txn.projectRefNo ? `<div class="voucher-project-ref">Ref. No: ${txn.projectRefNo}</div>` : ''}
               </div>
             </div>
 
@@ -1995,7 +2004,7 @@ export default function RegisterView({
             .header-row {
               display: flex;
               justify-content: space-between;
-              align-items: center;
+              align-items: flex-start;
               margin-bottom: 2.5mm;
               position: relative;
               min-height: 18mm;
@@ -2055,6 +2064,13 @@ export default function RegisterView({
               color: #1d4ed8;
               letter-spacing: 1.2px;
               text-transform: uppercase;
+              margin-top: 1px;
+            }
+            .voucher-project-ref {
+              font-size: 10px;
+              font-weight: 700;
+              color: #0f172a;
+              letter-spacing: 0.5px;
               margin-top: 1px;
             }
 
