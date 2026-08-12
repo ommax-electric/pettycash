@@ -158,7 +158,7 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
       </motion.div>
 
       <div className="mt-6 text-center text-xs text-slate-400">
-        Developed & Managed by <span className="font-extrabold text-[#ed3833]">Ommax</span> <span className="font-extrabold text-[#f7b944]">Electric</span> Private Limited
+        Developed & Managed by <span className="font-extrabold text-[#ed3833]">Ommax</span> <span className="font-extrabold text-[#f7b944]">Electric</span> Private Limited | © 2026
       </div>
     </div>
   );
