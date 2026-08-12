@@ -41,7 +41,9 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   emailSubjectRequestPaid: '[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued',
   emailBodyRequestPaid: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.',
   emailSubjectRequestRejected: '[Petty Cash Rejected] Claim #{voucher_id} - {amount}',
-  emailBodyRequestRejected: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.'
+  emailBodyRequestRejected: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.',
+  emailSubjectRequestRerouted: '[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You',
+  emailBodyRequestRerouted: 'Hello {re_routed_to},\n\nMr./Ms. {re_routed_by} has re-routed an approval request for voucher #{voucher_id} to you due to the following reason:\nReason: {re_route_reason}\n\nVoucher Details:\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.'
 };
 
 export const MOCK_USERS: User[] = [

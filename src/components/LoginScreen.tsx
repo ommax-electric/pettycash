@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, User as UserIcon, Lock, AlertTriangle, Eye, EyeOff, IndianRupee } from 'lucide-react';
+import { ShieldCheck, User as UserIcon, Lock, AlertTriangle, Eye, EyeOff, Network } from 'lucide-react';
 import { User } from '../types';
 import { MOCK_USERS } from '../data';
 
@@ -70,9 +70,9 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
         {/* Header Banner */}
         <div className="bg-slate-900 px-8 py-8 text-white relative text-center flex flex-col items-center">
           <div className="flex items-center justify-center w-11 h-11 rounded-full bg-[#f7b944] text-[#112231] font-bold shadow-md mb-3">
-            <IndianRupee className="w-6 h-6 stroke-[2.5]" />
+            <Network className="w-6 h-6 stroke-[2.5]" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Petty Cash Register</h1>
+          <h1 className="text-3xl font-extrabold tracking-wider font-foldit bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h1>
           <span className="text-xs font-bold text-[#f7b944] tracking-wide uppercase mt-1">Ommax Electric Private Limited</span>
         </div>
 

@@ -113,7 +113,10 @@ export function substituteSampleTags(
     .replace(/\{attachment\}/g, 'YES')
     .replace(/\{balance\}/g, `${currencySymbol}12,500.00`)
     .replace(/\{changed_fields\}/g, 'Amount and Category')
-    .replace(/\{updated_by\}/g, 'Anita');
+    .replace(/\{updated_by\}/g, 'Anita')
+    .replace(/\{re_routed_to\}/g, 'Rajesh Sharma')
+    .replace(/\{re_routed_by\}/g, 'Mohan Kumar')
+    .replace(/\{re_route_reason\}/g, 'Exceeds branch limit authorization threshold');
 }
 
 /**
@@ -280,6 +283,7 @@ export function buildModernHtmlEmailFromText(
     if (norm === 'REQUEST_APPROVED') return '⚡ ACTION REQUIRED: DISBURSE CASH';
     if (norm === 'REQUEST_PAID') return '✓ PAYMENT DISBURSED';
     if (norm === 'REQUEST_REJECTED') return '✕ CLAIM REJECTED';
+    if (norm === 'REQUEST_REROUTED') return '🔀 ACTION REQUIRED: REQUEST RE-ROUTED';
     return '🔔 PETTY CASH NOTIFICATION';
   };
 
@@ -391,6 +395,11 @@ function renderTimelineHeaderHtml(title: string, typeOrStatus?: string): string 
   } else if (normType === 'REQUEST_REJECTED' || normTitle.includes('rejected')) {
     step1State = 'completed';
     step2State = 'rejected';
+    step3State = 'pending';
+    step4State = 'pending';
+  } else if (normType === 'REQUEST_REROUTED' || normTitle.includes('re-routed') || normTitle.includes('rerouted')) {
+    step1State = 'active';
+    step2State = 'pending';
     step3State = 'pending';
     step4State = 'pending';
   } else {

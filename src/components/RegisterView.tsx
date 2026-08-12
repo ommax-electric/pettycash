@@ -1142,8 +1142,8 @@ export default function RegisterView({
   };
 
   const getReportTitle = () => {
-    if (forceTypeVal === 'IN') return 'Petty Cash Register - Inward Report';
-    if (forceTypeVal === 'OUT') return 'Petty Cash Register - Outward Report';
+    if (forceTypeVal === 'IN') return 'Petty Cash Register - Deposit Report';
+    if (forceTypeVal === 'OUT') return 'Petty Cash Register - Expense Report';
     return 'Petty Cash Register Report';
   };
 
@@ -1221,7 +1221,7 @@ export default function RegisterView({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `${forceTypeVal === 'IN' ? 'petty_cash_inward_report' : 'petty_cash_outward_report'}_${new Date().toISOString().slice(0,10)}.xls`);
+    link.setAttribute("download", `${forceTypeVal === 'IN' ? 'petty_cash_deposit_report' : 'petty_cash_expense_report'}_${new Date().toISOString().slice(0,10)}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2245,7 +2245,7 @@ export default function RegisterView({
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `${forceTypeVal === 'IN' ? 'petty_cash_inward_report' : 'petty_cash_outward_report'}_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute("download", `${forceTypeVal === 'IN' ? 'petty_cash_deposit_report' : 'petty_cash_expense_report'}_${new Date().toISOString().slice(0,10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2752,7 +2752,7 @@ export default function RegisterView({
                       {selectedDetailTransaction.reference || selectedDetailTransaction.id}
                     </h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                      {selectedDetailTransaction.type === 'IN' ? 'Inward Cash Receipt' : 'Outward Disbursement Voucher'}
+                      {selectedDetailTransaction.type === 'IN' ? 'Deposit Cash Receipt' : 'Expense Disbursement Voucher'}
                     </p>
                   </div>
                 </div>
@@ -3220,7 +3220,7 @@ export default function RegisterView({
           <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/20 flex flex-col xl:flex-row xl:items-center justify-between gap-4 shrink-0">
             <div>
               <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">
-                Filter inward
+                Filter deposit
               </h3>
             </div>
             
@@ -3680,7 +3680,7 @@ export default function RegisterView({
             <div>
               <h3 className="font-extrabold text-slate-900 text-sm sm:text-base uppercase tracking-wider flex items-center gap-2">
                 <ArrowUpRight className="w-4.5 h-4.5 text-rose-600 stroke-[2.5]" />
-                {forceTypeVal === 'OUT' ? 'Outward Expenses Registry' : 'Account Ledger'}
+                {forceTypeVal === 'OUT' ? 'Expense Registry' : 'Account Ledger'}
               </h3>
               <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                 Record cash disbursements and track voucher disbursements.
@@ -3766,7 +3766,7 @@ export default function RegisterView({
           {/* Bottom Row: Filter Controls Toolbar */}
           <div className="pt-3 border-t border-slate-100/80 bg-slate-50/60 p-3 rounded-2xl border border-slate-100">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 lg:hidden">
-              Filter Outward Expenses
+              Filter Expenses
             </div>
 
             <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-end gap-2.5">
@@ -4424,7 +4424,7 @@ export default function RegisterView({
                       </div>
                       <div>
                         <h3 className="font-bold text-slate-900 text-sm leading-tight">
-                          {editingTransaction ? 'Edit Inward Cash' : 'Record Inward Cash'}
+                          {editingTransaction ? 'Edit Deposit Cash' : 'Record Deposit Cash'}
                         </h3>
                         <p className="text-[10px] text-slate-400 font-semibold mt-0.5 uppercase tracking-wider">
                           {editingTransaction ? 'Modify entry in the petty cash ledger' : 'Add new entry to the petty cash ledger'}
@@ -4669,7 +4669,7 @@ export default function RegisterView({
                       </div>
                       <div>
                         <h3 className="font-extrabold text-slate-950 text-sm tracking-tight">
-                          {editingTransaction ? 'Edit Outward Payment' : 'Record Outward Payment'}
+                          {editingTransaction ? 'Edit Expense Payment' : 'Record Expense Payment'}
                         </h3>
                         <p className="text-[10px] text-slate-400 font-medium mt-0.5">
                           Add new entry to the petty cash ledger

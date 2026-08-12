@@ -230,7 +230,8 @@ export default function AdminSettingsView({
     reqSubmitted: false,
     reqApproved: false,
     reqPaid: false,
-    reqRejected: false
+    reqRejected: false,
+    reqRerouted: false
   });
 
   const toggleEmailAccordion = (key: string) => {
@@ -568,6 +569,23 @@ export default function AdminSettingsView({
   const [emailBodyReqRejected, setEmailBodyReqRejected] = useState<string>(() => {
     return integrationSettings?.emailBodyRequestRejected || localStorage.getItem('petty_cash_email_body_req_rejected') || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.';
   });
+  const [emailSubjectReqRerouted, setEmailSubjectReqRerouted] = useState<string>(() => {
+    return integrationSettings?.emailSubjectRequestRerouted || localStorage.getItem('petty_cash_email_subject_req_rerouted') || '[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You';
+  });
+  const DEFAULT_EMAIL_BODY_REQ_REROUTED = 'Hello {re_routed_to},\n\nAn approval request for petty cash claim #{voucher_id} has been re-routed to you by {re_routed_by}:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRe-Route Reason: {re_route_reason}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
+
+  const [emailBodyReqRerouted, setEmailBodyReqRerouted] = useState<string>(() => {
+    const stored = localStorage.getItem('petty_cash_email_body_req_rerouted');
+    if (stored && (stored.includes('Mr./Ms.') || stored.includes('Voucher Details:'))) {
+      localStorage.setItem('petty_cash_email_body_req_rerouted', DEFAULT_EMAIL_BODY_REQ_REROUTED);
+      return DEFAULT_EMAIL_BODY_REQ_REROUTED;
+    }
+    const fromSettings = integrationSettings?.emailBodyRequestRerouted;
+    if (fromSettings && (fromSettings.includes('Mr./Ms.') || fromSettings.includes('Voucher Details:'))) {
+      return DEFAULT_EMAIL_BODY_REQ_REROUTED;
+    }
+    return fromSettings || stored || DEFAULT_EMAIL_BODY_REQ_REROUTED;
+  });
 
   useEffect(() => {
     if (integrationSettings) {
@@ -594,6 +612,13 @@ export default function AdminSettingsView({
       setEmailBodyReqPaid(integrationSettings.emailBodyRequestPaid || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.');
       setEmailSubjectReqRejected(integrationSettings.emailSubjectRequestRejected || '[Petty Cash Rejected] Claim #{voucher_id} - {amount}');
       setEmailBodyReqRejected(integrationSettings.emailBodyRequestRejected || 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.');
+      setEmailSubjectReqRerouted(integrationSettings.emailSubjectRequestRerouted || '[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You');
+      const reroutedBody = integrationSettings.emailBodyRequestRerouted;
+      if (!reroutedBody || reroutedBody.includes('Mr./Ms.') || reroutedBody.includes('Voucher Details:')) {
+        setEmailBodyReqRerouted(DEFAULT_EMAIL_BODY_REQ_REROUTED);
+      } else {
+        setEmailBodyReqRerouted(reroutedBody);
+      }
       setCloudinaryEnabled(integrationSettings.cloudinaryEnabled ?? false);
       setCloudinaryCloudName(integrationSettings.cloudinaryCloudName || '');
       setCloudinaryApiKey(integrationSettings.cloudinaryApiKey || '');
@@ -636,7 +661,9 @@ export default function AdminSettingsView({
       emailSubjectRequestPaid: emailSubjectReqPaid,
       emailBodyRequestPaid: emailBodyReqPaid,
       emailSubjectRequestRejected: emailSubjectReqRejected,
-      emailBodyRequestRejected: emailBodyReqRejected
+      emailBodyRequestRejected: emailBodyReqRejected,
+      emailSubjectRequestRerouted: emailSubjectReqRerouted,
+      emailBodyRequestRerouted: emailBodyReqRerouted
     };
 
     if (onUpdateIntegrationSettings) {
@@ -665,6 +692,8 @@ export default function AdminSettingsView({
       localStorage.setItem('petty_cash_email_body_req_paid', emailBodyReqPaid);
       localStorage.setItem('petty_cash_email_subject_req_rejected', emailSubjectReqRejected);
       localStorage.setItem('petty_cash_email_body_req_rejected', emailBodyReqRejected);
+      localStorage.setItem('petty_cash_email_subject_req_rerouted', emailSubjectReqRerouted);
+      localStorage.setItem('petty_cash_email_body_req_rerouted', emailBodyReqRerouted);
     }
     setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
@@ -1494,7 +1523,7 @@ export default function AdminSettingsView({
                 <div>
                   <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
                     <Tag className="w-5 h-5 text-[#f7b944]" />
-                    Inward & Outward Register Categories
+                    Deposit & Expense Register Categories
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Configure categories for deposits and petty cash disbursements.
@@ -1535,7 +1564,7 @@ export default function AdminSettingsView({
                             ? 'bg-emerald-100 text-emerald-800' 
                             : 'bg-rose-100 text-rose-800'
                         }`}>
-                          {cat.type === 'IN' ? 'INWARD' : 'OUTWARD'}
+                          {cat.type === 'IN' ? 'DEPOSIT' : 'EXPENSE'}
                         </span>
                       </div>
                     </div>
@@ -3057,6 +3086,109 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
+                {/* ACCORDION 10: CLAIM RE-ROUTED TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('reqRerouted')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">10. Claim Re-Routed Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to newly assigned Manager when an approval request is re-routed</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      {openEmailAccordions.reqRerouted ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.reqRerouted && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{date}', '{remarks}', '{attachment}', '{re_routed_to}', '{re_routed_by}', '{re_route_reason}', '{balance}'].map((tag) => (
+                            <button
+                              key={`req-reroute-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyReqRerouted(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectReqRerouted}
+                            onChange={(e) => setEmailSubjectReqRerouted(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyReqRerouted}
+                            onChange={(e) => setEmailBodyReqRerouted(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectReqRerouted, appSettings.currencySymbol, false)
+                          .replace(/\{re_routed_to\}/g, 'Rajesh Sharma')
+                          .replace(/\{re_routed_by\}/g, 'Mohan Kumar')
+                          .replace(/\{re_route_reason\}/g, 'Exceeds branch limit authorization threshold');
+                        const previewBodyRaw = substituteSampleTags(emailBodyReqRerouted, appSettings.currencySymbol, false)
+                          .replace(/\{re_routed_to\}/g, 'Rajesh Sharma')
+                          .replace(/\{re_routed_by\}/g, 'Mohan Kumar')
+                          .replace(/\{re_route_reason\}/g, 'Exceeds branch limit authorization threshold');
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Claim Re-Routed HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Claim Re-Routed Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Approval Request Re-Routed', previewBodyRaw, '#d97706', 'REQUEST_REROUTED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
                 {/* Bottom Actions Bar */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-end gap-3">
                   <button
@@ -3219,7 +3351,7 @@ export default function AdminSettingsView({
                 <div>
                   <h3 className="font-bold text-base text-rose-900">Danger Zone: Wipe All Financial Data</h3>
                   <p className="text-xs text-rose-700 mt-1 leading-relaxed">
-                    Permanently clear all recorded inward & outward vouchers, reset categories to clean defaults, and erase history. This action cannot be undone.
+                    Permanently clear all recorded deposit & expense vouchers, reset categories to clean defaults, and erase history. This action cannot be undone.
                   </p>
                 </div>
               </div>
@@ -3328,8 +3460,8 @@ export default function AdminSettingsView({
                   onChange={(e) => setCatType(e.target.value as 'IN' | 'OUT' | 'BOTH')}
                   className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold"
                 >
-                  <option value="OUT">Outward Expense</option>
-                  <option value="IN">Inward Deposit</option>
+                  <option value="OUT">Expense</option>
+                  <option value="IN">Deposit</option>
                 </select>
               </div>
 
@@ -3617,7 +3749,7 @@ export default function AdminSettingsView({
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              This will permanently delete all inward/outward vouchers and reset financial registers.
+              This will permanently delete all deposit/expense vouchers and reset financial registers.
               To confirm, type <strong className="text-rose-600 font-mono select-all">WIPE</strong> in the box below:
             </p>
 

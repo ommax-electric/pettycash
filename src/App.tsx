@@ -13,9 +13,9 @@ import {
   Menu, 
   X, 
   User as UserIcon,
-  IndianRupee
+  Network
 } from 'lucide-react';
-import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings } from './types';
+import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendEmailNotification } from './services/notificationService';
@@ -78,7 +78,7 @@ export default function App() {
 
   // Set document title
   useEffect(() => {
-    document.title = 'Petty Cash Register | Ommax Electric Private Limited';
+    document.title = 'CONNECT | Ommax Electric Private Limited';
   }, []);
 
   // Synchronize with Firebase Firestore
@@ -742,6 +742,42 @@ export default function App() {
     sendEmailNotification('REQUEST_REJECTED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
   };
 
+  // Workflow Handler: Re-Route Approval Request to another Manager
+  const handleReRouteRequest = (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => {
+    if (!currentUser) return;
+    const targetTxn = transactions.find(t => t.id === id);
+    if (!targetTxn) return;
+
+    const realRerouter = resolveRealPersonName(reRoutedBy, 'MANAGER');
+    const now = new Date().toISOString();
+
+    const existingWorkflowHistory = targetTxn.workflowHistory || [];
+    const newWorkflowStep: WorkflowHistoryEntry = {
+      id: String(Date.now()),
+      timestamp: now,
+      action: 'RE_ROUTED',
+      actor: realRerouter,
+      target: targetManagerName,
+      reason: reason
+    };
+
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      approverName: targetManagerName, // Assigns to new manager for pending queue visibility
+      reRoutedBy: realRerouter,
+      reRoutedAt: now,
+      reRouteReason: reason,
+      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
+    };
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('TXN_REROUTE', `Re-routed approval for voucher ${updatedTxn.reference} (${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)}) to ${targetManagerName}: ${reason}`);
+
+    sendEmailNotification('REQUEST_REROUTED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+  };
+
   // General Status Update Handler
   const handleUpdateStatus = (id: string, status: TransactionStatus) => {
     if (status === 'APPROVED') {
@@ -968,13 +1004,13 @@ export default function App() {
       { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard }
     ];
 
-    // Inward is only shown for Admin & Custodian (Requirement #4)
+    // Inward (Deposit) is only shown for Admin & Custodian (Requirement #4)
     if (isUserAdmin || isUserCustodian) {
-      tabs.push({ id: 'INWARD', label: 'Inward', icon: ArrowDownCircle });
+      tabs.push({ id: 'INWARD', label: 'Deposit', icon: ArrowDownCircle });
     }
 
-    // Outward is shown for all users
-    tabs.push({ id: 'OUTWARD', label: 'Outward', icon: ArrowUpCircle });
+    // Outward (Expense) is shown for all users
+    tabs.push({ id: 'OUTWARD', label: 'Expense', icon: ArrowUpCircle });
 
     // Approvals tab for Managers, Admins, Custodians or users with subordinates
     const isManagerOrAdmin = isUserAdmin || isUserCustodian || currentUser.isManager || users.some(u => u.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() || u.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase());
@@ -1013,10 +1049,10 @@ export default function App() {
           {/* Main Logo Header Banner */}
           <div className="p-6 border-b border-slate-800 flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-              <IndianRupee className="w-5 h-5 stroke-[2.5]" />
+              <Network className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <h2 className="text-sm font-bold leading-none text-white tracking-tight">Petty Cash Register</h2>
+              <h2 className="text-base font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
               <span className="text-[10px] text-[#f7b944] font-bold tracking-wide block mt-1">Ommax Electric Private Limited</span>
             </div>
           </div>
@@ -1076,10 +1112,10 @@ export default function App() {
         <header className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-              <IndianRupee className="w-4.5 h-4.5 stroke-[2.5]" />
+              <Network className="w-4.5 h-4.5 stroke-[2.5]" />
             </div>
             <div>
-              <h2 className="text-xs font-bold leading-none text-slate-100">Petty Cash Register</h2>
+              <h2 className="text-sm font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
               <span className="text-[9px] text-[#f7b944] font-bold tracking-wide block mt-0.5">Ommax Electric Private Limited</span>
             </div>
           </div>
@@ -1121,10 +1157,10 @@ export default function App() {
                   <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-                        <IndianRupee className="w-4.5 h-4.5 stroke-[2.5]" />
+                        <Network className="w-4.5 h-4.5 stroke-[2.5]" />
                       </div>
                       <div>
-                        <h2 className="text-xs font-bold leading-none text-slate-100">Petty Cash Register</h2>
+                        <h2 className="text-sm font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
                         <span className="text-[9px] text-[#f7b944] font-bold tracking-wide block mt-0.5">Ommax Electric Private Limited</span>
                       </div>
                     </div>
@@ -1245,6 +1281,7 @@ export default function App() {
                   onApproveRequest={handleApproveRequest}
                   onPayRequest={handlePayRequest}
                   onRejectRequest={handleRejectRequest}
+                  onReRouteRequest={handleReRouteRequest}
                   appSettings={appSettings}
                 />
               )}
@@ -1294,8 +1331,8 @@ export default function App() {
               {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-5 h-5 text-[#f7b944]" />}
               <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
                 {activeTab === 'DASHBOARD' && 'Financial Overview'}
-                {activeTab === 'INWARD' && 'Inward Cash Registry'}
-                {activeTab === 'OUTWARD' && 'Outward Expenses Registry'}
+                {activeTab === 'INWARD' && 'Deposit Cash Registry'}
+                {activeTab === 'OUTWARD' && 'Expense Registry'}
                 {activeTab === 'APPROVALS' && 'Petty Cash Approvals Console'}
                 {activeTab === 'SETTINGS' && 'User Settings & Security'}
                 {activeTab === 'ADMIN_SETTINGS' && 'Administrator Control Node'}
@@ -1369,6 +1406,7 @@ export default function App() {
                   onApproveRequest={handleApproveRequest}
                   onPayRequest={handlePayRequest}
                   onRejectRequest={handleRejectRequest}
+                  onReRouteRequest={handleReRouteRequest}
                   appSettings={appSettings}
                 />
               )}

@@ -56,7 +56,7 @@ export function calculateCashBalance(transactions: Transaction[], currencySymbol
  * Dispatches Corporate Email notification via configured SMTP / API endpoint
  */
 export async function sendEmailNotification(
-  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT' | 'REQUEST_SUBMITTED' | 'REQUEST_APPROVED' | 'REQUEST_PAID' | 'REQUEST_REJECTED',
+  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT' | 'REQUEST_SUBMITTED' | 'REQUEST_APPROVED' | 'REQUEST_PAID' | 'REQUEST_REJECTED' | 'REQUEST_REROUTED',
   txn: Transaction,
   currentUser: User | null,
   transactionsList: Transaction[],
@@ -257,6 +257,33 @@ export async function sendEmailNotification(
         localStorage.getItem('petty_cash_email_body_req_rejected') ||
         'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.';
       if (claimantEmail) targetRecipients.push(claimantEmail);
+    } else if (type === 'REQUEST_REROUTED') {
+      cardTitle = 'Petty Cash Approval Request Re-Routed';
+      cardBorderColor = '#d97706';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectRequestRerouted : null) ||
+        localStorage.getItem('petty_cash_email_subject_req_rerouted') ||
+        '[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestRerouted : null) ||
+        localStorage.getItem('petty_cash_email_body_req_rerouted') ||
+        'Hello {re_routed_to},\n\nAn approval request for petty cash claim #{voucher_id} has been re-routed to you by {re_routed_by}:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRe-Route Reason: {re_route_reason}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
+      if (bodyTemplate.includes('Mr./Ms.') || bodyTemplate.includes('Voucher Details:')) {
+        bodyTemplate = 'Hello {re_routed_to},\n\nAn approval request for petty cash claim #{voucher_id} has been re-routed to you by {re_routed_by}:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRe-Route Reason: {re_route_reason}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
+      }
+      
+      // Target recipient: Newly assigned manager
+      const targetMgrName = (txn.approverName || '').trim().toLowerCase();
+      let targetMgrEmail = '';
+      if (usersList && targetMgrName) {
+        const mgrUser = usersList.find(u => 
+          (u.fullName && u.fullName.toLowerCase() === targetMgrName) ||
+          (u.username && u.username.toLowerCase() === targetMgrName) ||
+          (u.email && u.email.toLowerCase() === targetMgrName)
+        );
+        if (mgrUser?.email) targetMgrEmail = mgrUser.email;
+      }
+      if (targetMgrEmail) targetRecipients.push(targetMgrEmail);
+      if (adminEmail && adminEmail !== targetMgrEmail) targetRecipients.push(adminEmail);
+      if (defaultRecipients.length > 0 && targetRecipients.length === 0) targetRecipients.push(...defaultRecipients);
     } else if (type === 'INWARD') {
       cardTitle = 'Deposit Alert';
       cardBorderColor = '#00bc7d';
@@ -355,7 +382,10 @@ export async function sendEmailNotification(
         .replace(/\{updated_by\}/g, updaterName)
         .replace(/\{approved_by\}/g, approverName)
         .replace(/\{paid_by\}/g, payerName)
-        .replace(/\{rejected_by\}/g, rejecterName);
+        .replace(/\{rejected_by\}/g, rejecterName)
+        .replace(/\{re_routed_to\}/g, txn.approverName || 'Manager')
+        .replace(/\{re_routed_by\}/g, txn.reRoutedBy || updaterName)
+        .replace(/\{re_route_reason\}/g, txn.reRouteReason || 'N/A');
 
       const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor, type);
 

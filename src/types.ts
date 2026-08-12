@@ -56,10 +56,21 @@ export interface IntegrationSettings {
   emailBodyRequestPaid?: string;
   emailSubjectRequestRejected?: string;
   emailBodyRequestRejected?: string;
+  emailSubjectRequestRerouted?: string;
+  emailBodyRequestRerouted?: string;
 }
 
 export type TransactionType = 'IN' | 'OUT';
 export type TransactionStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAID' | 'DELETED';
+
+export interface WorkflowHistoryEntry {
+  id?: string;
+  timestamp: string;
+  action: 'CREATED' | 'SUBMITTED' | 'RE_ROUTED' | 'APPROVED' | 'PAID' | 'REJECTED' | 'DELETED';
+  actor: string;
+  target?: string;
+  reason?: string;
+}
 
 export interface EditHistoryEntry {
   timestamp: string;
@@ -89,6 +100,7 @@ export interface Transaction {
   projectRefNo?: string;
   paymentType?: 'CASH' | 'ONLINE';
   editHistory?: EditHistoryEntry[];
+  workflowHistory?: WorkflowHistoryEntry[];
   requestedBy?: string; // Full name or username of requester
   approverName?: string; // Full name or username of manager assigned to approve
   approvedBy?: string; // Full name of manager who approved
@@ -98,6 +110,9 @@ export interface Transaction {
   rejectedBy?: string; // Full name of person who rejected
   rejectedAt?: string; // Timestamp if rejected
   rejectionReason?: string;
+  reRoutedBy?: string; // Full name of manager who re-routed approval
+  reRoutedAt?: string; // Timestamp when re-routed
+  reRouteReason?: string; // Reason for re-routing
   deletedBy?: string; // Full name of person who deleted/voided
   deletedAt?: string; // Timestamp if deleted
   deleteReason?: string; // Reason for deletion

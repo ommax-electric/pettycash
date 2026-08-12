@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CheckCircle2, XCircle, IndianRupee, Clock,
-  Eye, FileText, Check, X, Paperclip, ExternalLink
+  Eye, FileText, Check, X, Paperclip, ExternalLink, ArrowRightLeft
 } from 'lucide-react';
 import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc, isAssignedManagerForTxn, isMatchUserIdentifier } from '../utils';
@@ -15,6 +15,7 @@ interface ApprovalsViewProps {
   onApproveRequest: (id: string, approverName: string) => void;
   onPayRequest: (id: string, paidBy: string) => void;
   onRejectRequest: (id: string, reason: string, rejectedBy: string) => void;
+  onReRouteRequest?: (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => void;
   appSettings?: AppSettings;
 }
 
@@ -25,6 +26,7 @@ export default function ApprovalsView({
   onApproveRequest,
   onPayRequest,
   onRejectRequest,
+  onReRouteRequest,
   appSettings
 }: ApprovalsViewProps) {
   const currencySymbol = appSettings?.currencySymbol || '₹';
@@ -107,6 +109,12 @@ export default function ApprovalsView({
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectError, setRejectError] = useState('');
 
+  // Re-Route Modal state
+  const [reRoutingTxn, setReRoutingTxn] = useState<Transaction | null>(null);
+  const [targetManager, setTargetManager] = useState<string>('');
+  const [reRouteReasonInput, setReRouteReasonInput] = useState<string>('');
+  const [reRouteError, setReRouteError] = useState<string>('');
+
   // Dynamic Confirmation Popup State
   const [confirmApprovalPopup, setConfirmApprovalPopup] = useState<{
     type: 'APPROVE' | 'PAY';
@@ -120,6 +128,7 @@ export default function ApprovalsView({
 
   // Check user role privileges
   const isAdminOrCustodian = currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN';
+  const isManagerRole = currentUser.role === 'MANAGER'; // Strictly MANAGER role only (excludes ADMIN)
 
   // Count items per queue
   const pendingApprovalTxns = transactions.filter(t => 
@@ -373,24 +382,41 @@ export default function ApprovalsView({
                               title="View Details"
                             >
                               <Eye className="w-4 h-4" />
-                            </button>                             {/* Pending Manager Approval Actions */}
+                            </button>
+
+                            {/* Pending Manager Approval Actions */}
                             {isPending && (
                               <>
                                 <button
                                   onClick={() => handleConfirmApprove(txn)}
-                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                                  title="Approve Request"
                                 >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>Approve</span>
+                                  <Check className="w-4 h-4" />
                                 </button>
 
                                 <button
                                   onClick={() => setRejectingTxnId(txn.id)}
-                                  className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                                  className="p-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                                  title="Reject Request"
                                 >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>Reject</span>
+                                  <X className="w-4 h-4" />
                                 </button>
+
+                                {isManagerRole && (
+                                  <button
+                                    onClick={() => {
+                                      setReRoutingTxn(txn);
+                                      setTargetManager('');
+                                      setReRouteReasonInput('');
+                                      setReRouteError('');
+                                    }}
+                                    className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                                    title="Re-Route Request to Another Manager"
+                                  >
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                  </button>
+                                )}
                               </>
                             )}
 
@@ -497,21 +523,35 @@ export default function ApprovalsView({
                       </button>
 
                       {isPending && (
-                        <div className="grid grid-cols-2 gap-2 w-full">
+                        <div className="flex items-center gap-2 w-full">
                           <button
                             onClick={() => handleConfirmApprove(txn)}
-                            className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                            className="flex-1 py-2 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                            title="Approve Request"
                           >
                             <Check className="w-4 h-4" />
-                            <span>Approve</span>
                           </button>
                           <button
                             onClick={() => setRejectingTxnId(txn.id)}
-                            className="w-full py-2 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                            className="flex-1 py-2 px-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                            title="Reject Request"
                           >
                             <X className="w-4 h-4" />
-                            <span>Reject</span>
                           </button>
+                          {isManagerRole && (
+                            <button
+                              onClick={() => {
+                                setReRoutingTxn(txn);
+                                setTargetManager('');
+                                setReRouteReasonInput('');
+                                setReRouteError('');
+                              }}
+                              className="flex-1 py-2 px-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                              title="Re-Route Request to Another Manager"
+                            >
+                              <ArrowRightLeft className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       )}
 
@@ -690,6 +730,57 @@ export default function ApprovalsView({
                       </span>
                     </div>
 
+                    {/* Render Re-Route History steps */}
+                    {selectedTxn.workflowHistory && selectedTxn.workflowHistory.length > 0 ? (
+                      selectedTxn.workflowHistory
+                        .filter(step => step.action === 'RE_ROUTED')
+                        .map((step, sIdx) => (
+                          <div key={step.id || sIdx} className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                <span>Re-Routed to {step.target}:</span>
+                              </span>
+                              <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
+                                {formatISTDateTime(step.timestamp)}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
+                              By: <span className="font-bold">{step.actor}</span>
+                            </div>
+                            {step.reason && (
+                              <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
+                                "{step.reason}"
+                              </div>
+                            )}
+                          </div>
+                        ))
+                    ) : (
+                      selectedTxn.reRoutedBy && (
+                        <div className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                              <span>Re-Routed to {selectedTxn.approverName}:</span>
+                            </span>
+                            {selectedTxn.reRoutedAt && (
+                              <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
+                                {formatISTDateTime(selectedTxn.reRoutedAt)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
+                            By: <span className="font-bold">{selectedTxn.reRoutedBy}</span>
+                          </div>
+                          {selectedTxn.reRouteReason && (
+                            <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
+                              "{selectedTxn.reRouteReason}"
+                            </div>
+                          )}
+                        </div>
+                      )
+                    )}
+
                     {(selectedTxn.approvedBy || selectedTxn.approverName || selectedTxn.approvedAt || selectedTxn.status === 'APPROVED' || selectedTxn.status === 'PAID') && (
                       <>
                         <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
@@ -778,6 +869,24 @@ export default function ApprovalsView({
                         <X className="w-3.5 h-3.5" />
                         <span>Reject</span>
                       </button>
+                      {isManagerRole && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = selectedTxn;
+                            setSelectedTxn(null);
+                            setReRoutingTxn(t);
+                            setTargetManager('');
+                            setReRouteReasonInput('');
+                            setReRouteError('');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
+                          title="Re-Route Request to Another Manager"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5" />
+                          <span>Re-Route</span>
+                        </button>
+                      )}
                     </>
                   )}
                   {selectedTxn.status === 'APPROVED' && isAdminOrCustodian && (
@@ -865,6 +974,164 @@ export default function ApprovalsView({
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
                 >
                   {confirmApprovalPopup.type === 'APPROVE' ? 'Submit & Confirm' : 'Confirm Cash Issue'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Re-Route Request Modal Dialog */}
+      <AnimatePresence>
+        {reRoutingTxn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-600">
+                    <ArrowRightLeft className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 dark:text-slate-100 text-base">Re-Route Approval Request</h3>
+                    <p className="text-xs text-slate-500">Transfer approval responsibility to another Manager</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReRoutingTxn(null);
+                    setTargetManager('');
+                    setReRouteReasonInput('');
+                    setReRouteError('');
+                  }}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Voucher Info Summary */}
+              <div className="bg-amber-50/50 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-100 dark:border-amber-900/30 space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Voucher Reference:</span>
+                  <span className="font-bold font-mono text-slate-900 dark:text-slate-100">#{reRoutingTxn.reference || reRoutingTxn.id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Claimant / Paid To:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{reRoutingTxn.merchant}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Amount:</span>
+                  <span className="font-extrabold text-amber-700 dark:text-amber-400">{currencySymbol}{reRoutingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              {reRouteError && (
+                <div className="p-3 rounded-xl bg-red-50 text-red-600 text-xs font-semibold border border-red-100">
+                  {reRouteError}
+                </div>
+              )}
+
+              {/* Select Target Manager */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  Select Target Manager <span className="text-red-500">*</span>
+                </label>
+                {(() => {
+                  const availableManagers = users.filter(u => 
+                    u.role === 'MANAGER' && 
+                    u.fullName &&
+                    !isMatchUserIdentifier(u.username, currentUser.username) &&
+                    !isMatchUserIdentifier(u.fullName, currentUser.fullName)
+                  );
+
+                  if (availableManagers.length === 0) {
+                    return (
+                      <div className="p-3 bg-slate-50 text-slate-500 text-xs rounded-xl border border-slate-200">
+                        No other manager accounts found in system. Please configure manager users in Admin Settings.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <select
+                      value={targetManager}
+                      onChange={(e) => setTargetManager(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="">-- Choose Manager --</option>
+                      {availableManagers.map((mgr, idx) => (
+                        <option key={mgr.id || idx} value={mgr.fullName || mgr.username}>
+                          {mgr.fullName} ({mgr.empId || mgr.username})
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
+              </div>
+
+              {/* Re-Route Reason */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  Re-Route Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={reRouteReasonInput}
+                  onChange={(e) => setReRouteReasonInput(e.target.value)}
+                  placeholder="State reason for re-routing (e.g., Claim amount exceeds threshold, department scope change, etc.)"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* Footer Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReRoutingTxn(null);
+                    setTargetManager('');
+                    setReRouteReasonInput('');
+                    setReRouteError('');
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!targetManager) {
+                      setReRouteError('Please select a manager to re-route this approval request to.');
+                      return;
+                    }
+                    if (!reRouteReasonInput.trim()) {
+                      setReRouteError('Please provide a reason for re-routing this request.');
+                      return;
+                    }
+                    if (onReRouteRequest && reRoutingTxn) {
+                      onReRouteRequest(
+                        reRoutingTxn.id, 
+                        targetManager, 
+                        reRouteReasonInput.trim(), 
+                        getEffectiveUserFullName()
+                      );
+                      triggerSuccessAlert(`Voucher #${reRoutingTxn.reference || reRoutingTxn.id} successfully re-routed to ${targetManager}!`);
+                      setReRoutingTxn(null);
+                      setTargetManager('');
+                      setReRouteReasonInput('');
+                      setReRouteError('');
+                    }
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  <span>Confirm Re-Route</span>
                 </button>
               </div>
             </motion.div>

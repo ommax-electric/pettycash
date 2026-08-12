@@ -531,7 +531,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
               </div>
             </div>
 
-            {/* Department Progress list - Top 5 Outward Categories */}
+            {/* Department Progress list - Top 5 Expense Categories */}
             <div className="space-y-2.5">
               {computedCategories.slice(0, 5).map((cat, idx) => {
                 const ratio = cat.budget > 0 ? (cat.spent / cat.budget) * 100 : 0;
@@ -560,7 +560,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
           </div>
 
           <div className="border-t border-slate-100 pt-3 flex items-center justify-between text-[10px] text-slate-400 font-medium">
-            <span>Showing top {Math.min(5, computedCategories.length)} outward categories</span>
+            <span>Showing top {Math.min(5, computedCategories.length)} expense categories</span>
           </div>
         </motion.div>
       </div>
@@ -612,7 +612,7 @@ export default function DashboardView({ transactions, categories, currentUser, o
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
                             : 'bg-rose-50 text-rose-700 border-rose-200'
                         }`}>
-                          {isInflow ? 'Inward' : 'Outward'}
+                          {isInflow ? 'Deposit' : 'Expense'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4">

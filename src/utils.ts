@@ -267,12 +267,12 @@ export const isAssignedManagerForTxn = (
     return genericTerms.some(term => s === term || s === term + 's');
   };
 
-  // RULE 2: Determine target approver string from requester's reportingTo or txn.approverName
+  // RULE 2: Determine target approver string from txn.approverName or requester's reportingTo
   let targetApprover = '';
-  if (reqUser?.reportingTo && reqUser.reportingTo.trim().length > 0) {
-    targetApprover = reqUser.reportingTo.trim();
-  } else if (txn.approverName && !isGenericRoleName(txn.approverName)) {
+  if (txn.approverName && !isGenericRoleName(txn.approverName)) {
     targetApprover = txn.approverName.trim();
+  } else if (reqUser?.reportingTo && reqUser.reportingTo.trim().length > 0 && !isGenericRoleName(reqUser.reportingTo)) {
+    targetApprover = reqUser.reportingTo.trim();
   } else {
     targetApprover = 'admin';
   }
