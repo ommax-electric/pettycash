@@ -1387,7 +1387,7 @@ export default function RegisterView({
           <title>Cash Voucher - ${txn.reference}${isVoided ? ' (VOIDED)' : ''}</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
           <style>
             @page {
               size: A4 portrait;
@@ -1558,10 +1558,20 @@ export default function RegisterView({
             }
             .voucher-project-ref {
               font-size: 11px;
-              font-weight: 700;
               color: #0f172a;
               letter-spacing: 0.5px;
-              margin-top: 1.5px;
+              margin-top: 5px;
+              line-height: 1.3;
+            }
+            .voucher-project-ref-label {
+              font-family: 'Outfit', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+              font-weight: 400;
+              font-size: 11px;
+            }
+            .voucher-project-ref-value {
+              font-family: 'Outfit', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+              font-weight: 300;
+              font-size: 11px;
             }
 
             /* Line Rows (Underlined, no boxes) */
@@ -1598,7 +1608,7 @@ export default function RegisterView({
               font-size: 11px;
               font-weight: 700;
               color: #1e40af;
-              margin-top: 2mm;
+              margin-top: calc(2mm + 1.5px);
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
@@ -1696,7 +1706,7 @@ export default function RegisterView({
                 <div class="header-right">
                   <div class="company-name">Ommax Electric Private Limited</div>
                   <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
-                  ${txn.projectRefNo ? `<div class="voucher-project-ref">Ref. No: ${txn.projectRefNo}</div>` : ''}
+                  ${txn.projectRefNo ? `<div class="voucher-project-ref" style="font-size: 11px; margin-top: 5px; color: #0f172a; letter-spacing: 0.5px;"><span class="voucher-project-ref-label" style="font-family: 'Outfit', sans-serif; font-weight: 400; font-size: 11px;">Ref. No:</span> <span class="voucher-project-ref-value" style="font-family: 'Outfit', sans-serif; font-weight: 300; font-size: 11px;">${txn.projectRefNo}</span></div>` : ''}
                 </div>
               </div>
 
@@ -1820,7 +1830,7 @@ export default function RegisterView({
               <div class="header-right">
                 <div class="company-name">Ommax Electric Private Limited</div>
                 <div class="voucher-title">${txn.type === 'IN' ? 'RECEIPT VOUCHER' : 'CASH VOUCHER'}${isVoided ? ' (VOID)' : ''}</div>
-                ${txn.projectRefNo ? `<div class="voucher-project-ref">Ref. No: ${txn.projectRefNo}</div>` : ''}
+                ${txn.projectRefNo ? `<div class="voucher-project-ref" style="font-size: 10px; margin-top: 4px; color: #0f172a; letter-spacing: 0.5px;"><span class="voucher-project-ref-label" style="font-family: 'Outfit', sans-serif; font-weight: 400; font-size: 10px;">Ref. No:</span> <span class="voucher-project-ref-value" style="font-family: 'Outfit', sans-serif; font-weight: 300; font-size: 10px;">${txn.projectRefNo}</span></div>` : ''}
               </div>
             </div>
 
@@ -1894,7 +1904,7 @@ export default function RegisterView({
           <title>Batch Print (${txnsToPrint.length} Vouchers) - Ommax Electric</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
           <style>
             @page {
               size: A4 portrait;
@@ -2068,10 +2078,20 @@ export default function RegisterView({
             }
             .voucher-project-ref {
               font-size: 10px;
-              font-weight: 700;
               color: #0f172a;
               letter-spacing: 0.5px;
-              margin-top: 1px;
+              margin-top: 4px;
+              line-height: 1.3;
+            }
+            .voucher-project-ref-label {
+              font-family: 'Outfit', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+              font-weight: 400;
+              font-size: 10px;
+            }
+            .voucher-project-ref-value {
+              font-family: 'Outfit', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+              font-weight: 300;
+              font-size: 10px;
             }
 
             /* Line Rows */
@@ -2108,7 +2128,7 @@ export default function RegisterView({
               font-size: 10.5px;
               font-weight: 700;
               color: #1e40af;
-              margin-top: 1.5mm;
+              margin-top: calc(1.5mm + 1.5px);
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
