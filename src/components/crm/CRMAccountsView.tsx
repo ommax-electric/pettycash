@@ -35,11 +35,13 @@ import {
   formatCRMIDateTime
 } from '../../crm/types';
 import { User, AppSettings } from '../../types';
+import { MOCK_USERS } from '../../data';
 
 interface CRMAccountsViewProps {
   accounts: CRMAccount[];
   crmSettings: CRMSettings;
   currentUser: User;
+  users?: User[];
   appSettings?: AppSettings;
   onAddAccount: (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateAccount: (acc: CRMAccount) => Promise<void>;
@@ -50,6 +52,7 @@ export default function CRMAccountsView({
   accounts,
   crmSettings,
   currentUser,
+  users = [],
   appSettings,
   onAddAccount,
   onUpdateAccount,
@@ -57,6 +60,11 @@ export default function CRMAccountsView({
 }: CRMAccountsViewProps) {
   const industriesList = crmSettings?.industries?.length ? crmSettings.industries : DEFAULT_CRM_SETTINGS.industries;
   const businessCategoriesList = crmSettings?.businessCategories?.length ? crmSettings.businessCategories : DEFAULT_CRM_SETTINGS.businessCategories;
+
+  // Available Users List for Admin Assignment
+  const availableUsersList = useMemo(() => {
+    return users && users.length > 0 ? users : MOCK_USERS;
+  }, [users]);
 
   // RBAC permissions
   const isAdmin = currentUser.role === 'ADMIN';
@@ -69,6 +77,7 @@ export default function CRMAccountsView({
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
+  const [selectedOwner, setSelectedOwner] = useState<string>('ALL');
 
   // Export dropdown state
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
@@ -304,6 +313,17 @@ export default function CRMAccountsView({
     return Array.from(locSet).sort();
   }, [accounts]);
 
+  // Distinct owners list for filter dropdown
+  const uniqueOwners = useMemo(() => {
+    const ownerSet = new Set<string>();
+    accounts.forEach(a => {
+      if (a.assignedTo && a.assignedTo.trim()) {
+        ownerSet.add(a.assignedTo.trim());
+      }
+    });
+    return Array.from(ownerSet).sort();
+  }, [accounts]);
+
   // Filtering calculation
   const filteredAccounts = useMemo(() => {
     return accounts.filter(acc => {
@@ -311,17 +331,19 @@ export default function CRMAccountsView({
       if (selectedStatus !== 'ALL' && acc.status !== selectedStatus) return false;
       if (selectedCategory !== 'ALL' && acc.businessCategory !== selectedCategory) return false;
       if (selectedLocation !== 'ALL' && acc.billingCity !== selectedLocation) return false;
+      if (selectedOwner !== 'ALL' && acc.assignedTo !== selectedOwner) return false;
       return true;
     });
-  }, [accounts, selectedIndustry, selectedStatus, selectedCategory, selectedLocation]);
+  }, [accounts, selectedIndustry, selectedStatus, selectedCategory, selectedLocation, selectedOwner]);
 
-  const isFilterActive = selectedIndustry !== 'ALL' || selectedStatus !== 'ALL' || selectedCategory !== 'ALL' || selectedLocation !== 'ALL';
+  const isFilterActive = selectedIndustry !== 'ALL' || selectedStatus !== 'ALL' || selectedCategory !== 'ALL' || selectedLocation !== 'ALL' || selectedOwner !== 'ALL';
 
   const handleResetFilters = () => {
     setSelectedIndustry('ALL');
     setSelectedStatus('ALL');
     setSelectedCategory('ALL');
     setSelectedLocation('ALL');
+    setSelectedOwner('ALL');
     setCurrentPage(1);
   };
 
@@ -509,8 +531,8 @@ export default function CRMAccountsView({
               <p style="margin: 3px 0 0 0; font-size: 11px; color: #64748b;">Generated on: ${nowIST} (IST) | Total Filtered Accounts: <strong>${filteredAccounts.length}</strong></p>
             </div>
             <div style="text-align: right;">
-              <span style="background-color: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; border: 1px solid #fde68a;">
-                OMMAX PETTY CRM
+              <span style="background: linear-gradient(135deg, #ec003f, #f7b944); color: #ffffff; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 900; letter-spacing: 1px; display: inline-block;">
+                CONNECT
               </span>
             </div>
           </div>
@@ -532,9 +554,13 @@ export default function CRMAccountsView({
             </tbody>
           </table>
 
-          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 9.5px; color: #94a3b8; display: flex; justify-content: space-between;">
-            <span>Ommax Enterprise ERP & CRM Directory</span>
-            <span>Page 1 of 1</span>
+          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #475569; display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div><strong>Generated On:</strong> ${nowIST} (IST)</div>
+            </div>
+            <div>
+              <strong>Generated By:</strong> ${currentUser.fullName || currentUser.username}
+            </div>
           </div>
 
           <script>
@@ -633,15 +659,15 @@ export default function CRMAccountsView({
         </div>
       </div>
 
-      {/* 2. FILTERS TOOLBAR (Industry, Status, Category, Location) */}
-      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 shrink-0">
-            <Filter className="w-4 h-4 text-slate-500" />
+      {/* 2. FILTERS TOOLBAR (Industry, Status, Category, Location, Account Owner) */}
+      <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 shrink-0">
+            <Filter className="w-3.5 h-3.5 text-slate-500" />
             <span>Filters:</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full lg:w-auto flex-1 max-w-4xl">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 w-full flex-1">
             {/* Industry Filter */}
             <div>
               <select
@@ -650,7 +676,7 @@ export default function CRMAccountsView({
                   setSelectedIndustry(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
               >
                 <option value="ALL">All Industries</option>
                 {industriesList.map(ind => (
@@ -667,7 +693,7 @@ export default function CRMAccountsView({
                   setSelectedStatus(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
               >
                 <option value="ALL">All Statuses</option>
                 <option value="ACTIVE">Active Client</option>
@@ -684,7 +710,7 @@ export default function CRMAccountsView({
                   setSelectedCategory(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
               >
                 <option value="ALL">All Categories</option>
                 {businessCategoriesList.map(cat => (
@@ -701,11 +727,28 @@ export default function CRMAccountsView({
                   setSelectedLocation(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
               >
                 <option value="ALL">All Locations</option>
                 {uniqueLocations.map(loc => (
                   <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Account Owner Filter */}
+            <div className="col-span-2 md:col-span-1">
+              <select
+                value={selectedOwner}
+                onChange={e => {
+                  setSelectedOwner(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+              >
+                <option value="ALL">All Owners</option>
+                {uniqueOwners.map(owner => (
+                  <option key={owner} value={owner}>{owner}</option>
                 ))}
               </select>
             </div>
@@ -714,7 +757,7 @@ export default function CRMAccountsView({
           {isFilterActive && (
             <button
               onClick={handleResetFilters}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] md:text-xs font-bold transition-all cursor-pointer shrink-0 whitespace-nowrap"
               title="Clear all active filters"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -952,29 +995,29 @@ export default function CRMAccountsView({
                 </div>
 
                 {/* Bottom Row: Assigned Owner & Action Buttons */}
-                <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
-                  <div className="text-[10px] text-slate-400">
-                    Owner: <span className="font-semibold text-slate-600">{account.assignedTo || 'Unassigned'}</span>
+                <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 gap-2">
+                  <div className="text-[11px] text-slate-500 truncate flex-1 min-w-0">
+                    Owner: <span className="font-semibold text-slate-800">{account.assignedTo || 'Unassigned'}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
                       onClick={() => setViewingAccount(account)}
-                      className="inline-flex items-center gap-1 py-1 px-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                      className="p-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
+                      title="View Details"
                     >
-                      <Eye className="w-3 h-3 text-slate-600" />
-                      <span>Details</span>
+                      <Eye className="w-4 h-4 text-slate-600" />
                     </button>
 
                     {canEdit && (
                       <button
                         type="button"
                         onClick={() => handleOpenEdit(account)}
-                        className="inline-flex items-center gap-1 py-1 px-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                        className="p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg transition-all cursor-pointer"
+                        title="Edit Account"
                       >
-                        <Pencil className="w-3 h-3 text-amber-600" />
-                        <span>Edit</span>
+                        <Pencil className="w-4 h-4 text-amber-600" />
                       </button>
                     )}
 
@@ -982,10 +1025,10 @@ export default function CRMAccountsView({
                       <button
                         type="button"
                         onClick={() => setDeletingAccountId(account.id)}
-                        className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                        className="p-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg transition-all cursor-pointer"
+                        title="Delete Account"
                       >
-                        <Trash2 className="w-3 h-3 text-red-500" />
-                        <span>Delete</span>
+                        <Trash2 className="w-4 h-4 text-red-500" />
                       </button>
                     )}
                   </div>
@@ -1572,20 +1615,37 @@ export default function CRMAccountsView({
                     <label className="block font-bold text-slate-700 mb-1">
                       Account Owner * {!isAdmin && <span className="text-[10px] font-normal text-slate-400">(Auto-assigned)</span>}
                     </label>
-                    <input
-                      type="text"
-                      required
-                      readOnly={!isAdmin}
-                      disabled={!isAdmin}
-                      placeholder="Assigned Staff / Representative"
-                      value={formData.assignedTo}
-                      onChange={e => setFormData({ ...formData, assignedTo: e.target.value })}
-                      className={`w-full px-3.5 py-2.5 rounded-xl font-semibold text-slate-900 border transition-colors ${
-                        !isAdmin 
-                          ? 'bg-slate-100/80 border-slate-200 text-slate-500 cursor-not-allowed' 
-                          : 'bg-slate-50 border-slate-200 focus:outline-none focus:border-amber-500 focus:bg-white'
-                      }`}
-                    />
+                    {isAdmin ? (
+                      <select
+                        required
+                        value={formData.assignedTo}
+                        onChange={e => setFormData({ ...formData, assignedTo: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors cursor-pointer"
+                      >
+                        <option value="">Select Account Owner</option>
+                        {formData.assignedTo && !availableUsersList.some(u => (u.fullName || u.username) === formData.assignedTo) && (
+                          <option value={formData.assignedTo}>{formData.assignedTo}</option>
+                        )}
+                        {availableUsersList.map(u => {
+                          const displayName = u.fullName || u.username;
+                          return (
+                            <option key={u.id || u.username} value={displayName}>
+                              {displayName}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        readOnly
+                        disabled
+                        placeholder="Assigned Staff / Representative"
+                        value={formData.assignedTo}
+                        className="w-full px-3.5 py-2.5 rounded-xl font-semibold text-slate-500 bg-slate-100/80 border border-slate-200 cursor-not-allowed"
+                      />
+                    )}
                   </div>
                 </div>
 

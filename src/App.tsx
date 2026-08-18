@@ -137,9 +137,9 @@ export default function App() {
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
 
   // CRM States (Completely isolated collections)
-  const [crmAccounts, setCrmAccounts] = useState<CRMAccount[]>(INITIAL_CRM_ACCOUNTS);
-  const [crmContacts, setCrmContacts] = useState<CRMContact[]>(INITIAL_CRM_CONTACTS);
-  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>(INITIAL_CRM_OPPORTUNITIES);
+  const [crmAccounts, setCrmAccounts] = useState<CRMAccount[]>([]);
+  const [crmContacts, setCrmContacts] = useState<CRMContact[]>([]);
+  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>([]);
   const [crmSettings, setCrmSettings] = useState<CRMSettings>(DEFAULT_CRM_SETTINGS);
 
   // Mobile navigation drawer state
@@ -317,7 +317,7 @@ export default function App() {
         // 6. CRM Accounts Sync
         const unsubCrmAccs = onSnapshot(collection(db, 'crm_accounts'), (snapshot) => {
           if (snapshot.empty) {
-            setCrmAccounts(INITIAL_CRM_ACCOUNTS);
+            setCrmAccounts([]);
           } else {
             const list: CRMAccount[] = [];
             snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMAccount));
@@ -329,7 +329,7 @@ export default function App() {
         // 7. CRM Contacts Sync
         const unsubCrmCons = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
           if (snapshot.empty) {
-            setCrmContacts(INITIAL_CRM_CONTACTS);
+            setCrmContacts([]);
           } else {
             const list: CRMContact[] = [];
             snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMContact));
@@ -340,7 +340,7 @@ export default function App() {
         // 8. CRM Opportunities Sync
         const unsubCrmOpps = onSnapshot(collection(db, 'crm_opportunities'), (snapshot) => {
           if (snapshot.empty) {
-            setCrmOpportunities(INITIAL_CRM_OPPORTUNITIES);
+            setCrmOpportunities([]);
           } else {
             const list: CRMOpportunity[] = [];
             snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMOpportunity));
@@ -2107,6 +2107,7 @@ export default function App() {
                   accounts={crmAccounts}
                   crmSettings={crmSettings}
                   currentUser={currentUser}
+                  users={users}
                   appSettings={appSettings}
                   onAddAccount={handleAddCRMAccount}
                   onUpdateAccount={handleUpdateCRMAccount}
