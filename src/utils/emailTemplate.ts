@@ -280,7 +280,7 @@ export function buildModernHtmlEmailFromText(
     if (norm === 'INWARD') return '📥 CASH DEPOSIT ALERT';
     if (norm === 'INWARD_EDIT') return '✏️ DEPOSIT MODIFICATION';
     if (norm === 'REQUEST_SUBMITTED') return '⏳ ACTION REQUIRED: PENDING APPROVAL';
-    if (norm === 'REQUEST_APPROVED') return '⚡ ACTION REQUIRED: DISBURSE CASH';
+    if (norm === 'REQUEST_APPROVED') return '🕒 ACTION REQUIRED: DISBURSE CASH';
     if (norm === 'REQUEST_PAID') return '✓ PAYMENT DISBURSED';
     if (norm === 'REQUEST_REJECTED') return '✕ CLAIM REJECTED';
     if (norm === 'REQUEST_REROUTED') return '🔀 ACTION REQUIRED: REQUEST RE-ROUTED';
@@ -474,7 +474,7 @@ function renderTimelineHeaderHtml(title: string, typeOrStatus?: string): string 
       
       <!-- Step 3: Issue Request -->
       <td width="16%" align="center" valign="middle">
-        ${renderStepCircle(step3State, '⚡', '3')}
+        ${renderStepCircle(step3State, '🕒', '3')}
       </td>
       <td width="12%" align="center" valign="middle"><div style="height: 2px; background-color: ${line3Color}; width: 100%;"></div></td>
       

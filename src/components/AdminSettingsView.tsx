@@ -44,22 +44,29 @@ import {
   HardDrive,
   Folder,
   FolderCheck,
-  Cloud
+  Cloud,
+  Briefcase,
+  Building2,
+  FileText
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
+import { CRMSettings, DEFAULT_CRM_SETTINGS } from '../crm/types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendEmailNotification, calculateCashBalance } from '../services/notificationService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, testCloudinaryConnection } from '../services/fileAttachmentService';
 import { db, doc, updateDoc } from '../firebase';
 
+export type AdminTab = 'APP_SETTINGS' | 'USER_MGMT' | 'INTEGRATIONS' | 'TEMPLATES' | 'SYSTEM_AUDIT' | 'SYSTEM_OPERATIONS';
 
-interface AdminSettingsViewProps {
+export interface AdminSettingsViewProps {
   currentUser: User;
   appSettings: AppSettings;
   onUpdateAppSettings: (newSettings: AppSettings) => void;
   integrationSettings?: IntegrationSettings;
   onUpdateIntegrationSettings?: (newSettings: IntegrationSettings) => void;
+  crmSettings?: CRMSettings;
+  onUpdateCRMSettings?: (settings: CRMSettings) => Promise<void> | void;
   users: User[];
   onAddUser: (user: User) => void;
   onUpdateUser: (updatedUser: User) => void;
@@ -74,9 +81,9 @@ interface AdminSettingsViewProps {
   onBackupData: () => void;
   onRestoreData: (jsonContent: string) => boolean | Promise<boolean>;
   onWipeAllData: () => void | Promise<void>;
+  activeSubTab?: AdminTab;
+  onSubTabChange?: (tab: AdminTab) => void;
 }
-
-type AdminTab = 'APP_SETTINGS' | 'USER_MGMT' | 'SYSTEM_AUDIT' | 'INTEGRATIONS' | 'SYSTEM_OPERATIONS';
 
 export default function AdminSettingsView({
   currentUser,
@@ -84,6 +91,8 @@ export default function AdminSettingsView({
   onUpdateAppSettings,
   integrationSettings,
   onUpdateIntegrationSettings,
+  crmSettings,
+  onUpdateCRMSettings,
   users,
   onAddUser,
   onUpdateUser,
@@ -97,9 +106,26 @@ export default function AdminSettingsView({
   onUpdateTransaction,
   onBackupData,
   onRestoreData,
-  onWipeAllData
+  onWipeAllData,
+  activeSubTab,
+  onSubTabChange
 }: AdminSettingsViewProps) {
-  const [activeTab, setActiveTab] = useState<AdminTab>('APP_SETTINGS');
+  const [activeTab, setActiveTab] = useState<AdminTab>(activeSubTab || 'APP_SETTINGS');
+  const [appSettingsSubTab, setAppSettingsSubTab] = useState<'PETTY_CASH' | 'CRM' | 'HRMS'>('PETTY_CASH');
+  const [templatesSubTab, setTemplatesSubTab] = useState<'PETTY_CASH' | 'CRM' | 'HRMS'>('PETTY_CASH');
+
+  useEffect(() => {
+    if (activeSubTab) {
+      setActiveTab(activeSubTab);
+    }
+  }, [activeSubTab]);
+
+  const handleTabChange = (tab: AdminTab) => {
+    setActiveTab(tab);
+    if (onSubTabChange) {
+      onSubTabChange(tab);
+    }
+  };
 
   // --- 1. App Settings Form State ---
   const defaultSampleStamp = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><circle cx='80' cy='80' r='74' fill='none' stroke='%231d4ed8' stroke-width='3.5' stroke-dasharray='7 3'/><circle cx='80' cy='80' r='66' fill='none' stroke='%231e40af' stroke-width='2.5'/><circle cx='80' cy='80' r='48' fill='none' stroke='%231e40af' stroke-width='1.5'/><path id='c1' fill='none' d='M 28,80 A 52,52 0 1,1 132,80' /><text fill='%231e40af' font-size='9.5' font-weight='800' font-family='sans-serif' letter-spacing='1.2'><textPath href='%23c1' startOffset='50%' text-anchor='middle'>OMMAX ELECTRIC PVT LTD</textPath></text><path id='c2' fill='none' d='M 132,80 A 52,52 0 1,1 28,80' /><text fill='%231e40af' font-size='8.5' font-weight='700' font-family='sans-serif' letter-spacing='1'><textPath href='%23c2' startOffset='50%' text-anchor='middle'>★ APPROVED & AUDITED ★</textPath></text><polygon points='80,60 85,74 100,74 88,83 93,98 80,89 67,98 72,83 60,74 75,74' fill='%232563eb'/><text x='80' y='110' text-anchor='middle' fill='%231e40af' font-size='9' font-weight='900' font-family='sans-serif' letter-spacing='0.5'>PETTY CASH</text></svg>`;
@@ -153,6 +179,20 @@ export default function AdminSettingsView({
   const [catError, setCatError] = useState('');
   const [catDeleteError, setCatDeleteError] = useState('');
   const [deleteConfirmCatName, setDeleteConfirmCatName] = useState<string | null>(null);
+
+  // CRM Settings State for Industry & Business Category Management
+  const currentCrmSettings = crmSettings || DEFAULT_CRM_SETTINGS;
+  const [isIndustryModalOpen, setIsIndustryModalOpen] = useState(false);
+  const [editingIndustry, setEditingIndustry] = useState<string | null>(null);
+  const [industryNameInput, setIndustryNameInput] = useState('');
+  const [industryError, setIndustryError] = useState('');
+  const [deleteConfirmIndustry, setDeleteConfirmIndustry] = useState<string | null>(null);
+
+  const [isBizCatModalOpen, setIsBizCatModalOpen] = useState(false);
+  const [editingBizCat, setEditingBizCat] = useState<string | null>(null);
+  const [bizCatNameInput, setBizCatNameInput] = useState('');
+  const [bizCatError, setBizCatError] = useState('');
+  const [deleteConfirmBizCat, setDeleteConfirmBizCat] = useState<string | null>(null);
 
   // --- 2. User Management State ---
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -699,6 +739,38 @@ export default function AdminSettingsView({
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
 
+  const handleResetEmailDefaults = () => {
+    setEmailSubjectNew('[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})');
+    setEmailBodyNew('Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
+    
+    setEmailSubjectEdit('[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}');
+    setEmailBodyEdit('Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.');
+    
+    setEmailSubjectInward('[Petty Cash Alert] Inward Deposit #{voucher_id} - {amount} ({category})');
+    setEmailBodyInward('Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
+    
+    setEmailSubjectInwardEdit('[Petty Cash Deposit Changes Alert] Deposit #{voucher_id} Modified ({changed_fields}) - {amount}');
+    setEmailBodyInwardEdit('Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.');
+    
+    setEmailSubjectReqSubmitted('[Petty Cash Request] New Claim #{voucher_id} - {amount} requested by {paid_to}');
+    setEmailBodyReqSubmitted('Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.');
+    
+    setEmailSubjectReqApproved('[Action Required] Claim #{voucher_id} - {amount} Approved - Issue Cash');
+    setEmailBodyReqApproved('Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.');
+    
+    setEmailSubjectReqPaid('[Petty Cash Paid] Voucher #{voucher_id} - {amount} Issued');
+    setEmailBodyReqPaid('Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.');
+    
+    setEmailSubjectReqRejected('[Petty Cash Rejected] Claim #{voucher_id} - {amount}');
+    setEmailBodyReqRejected('Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.');
+    
+    setEmailSubjectReqRerouted('[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You');
+    setEmailBodyReqRerouted(DEFAULT_EMAIL_BODY_REQ_REROUTED);
+    
+    setIntegrationSuccess('All Petty Cash email templates have been reset to corporate defaults.');
+    setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
   const handleTestEmail = async () => {
     // Persist current settings first
     localStorage.setItem('petty_cash_email_enabled', 'true');
@@ -867,6 +939,113 @@ export default function AdminSettingsView({
 
     // Require user confirmation modal before deleting
     setDeleteConfirmCatName(categoryName);
+  };
+
+  // ----------------------------------------------------
+  // Handlers for CRM Settings (Industry & Business Category)
+  // ----------------------------------------------------
+  const openAddIndustryModal = () => {
+    setEditingIndustry(null);
+    setIndustryNameInput('');
+    setIndustryError('');
+    setIsIndustryModalOpen(true);
+  };
+
+  const openEditIndustryModal = (ind: string) => {
+    setEditingIndustry(ind);
+    setIndustryNameInput(ind);
+    setIndustryError('');
+    setIsIndustryModalOpen(true);
+  };
+
+  const handleSaveIndustry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = industryNameInput.trim();
+    if (!trimmed) {
+      setIndustryError('Industry name is required.');
+      return;
+    }
+    const currentList = currentCrmSettings.industries || [];
+    let updatedList: string[];
+    if (editingIndustry) {
+      updatedList = currentList.map(item => item === editingIndustry ? trimmed : item);
+    } else {
+      if (currentList.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+        setIndustryError('Industry with this name already exists.');
+        return;
+      }
+      updatedList = [...currentList, trimmed];
+    }
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        industries: updatedList
+      });
+    }
+    setIsIndustryModalOpen(false);
+  };
+
+  const handleDeleteIndustryDirect = async (ind: string) => {
+    if (onUpdateCRMSettings) {
+      const currentList = currentCrmSettings.industries || [];
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        industries: currentList.filter(item => item !== ind)
+      });
+    }
+    setDeleteConfirmIndustry(null);
+  };
+
+  const openAddBizCatModal = () => {
+    setEditingBizCat(null);
+    setBizCatNameInput('');
+    setBizCatError('');
+    setIsBizCatModalOpen(true);
+  };
+
+  const openEditBizCatModal = (cat: string) => {
+    setEditingBizCat(cat);
+    setBizCatNameInput(cat);
+    setBizCatError('');
+    setIsBizCatModalOpen(true);
+  };
+
+  const handleSaveBizCat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = bizCatNameInput.trim();
+    if (!trimmed) {
+      setBizCatError('Business category name is required.');
+      return;
+    }
+    const currentList = currentCrmSettings.businessCategories || [];
+    let updatedList: string[];
+    if (editingBizCat) {
+      updatedList = currentList.map(item => item === editingBizCat ? trimmed : item);
+    } else {
+      if (currentList.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+        setBizCatError('Business category with this name already exists.');
+        return;
+      }
+      updatedList = [...currentList, trimmed];
+    }
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        businessCategories: updatedList
+      });
+    }
+    setIsBizCatModalOpen(false);
+  };
+
+  const handleDeleteBizCatDirect = async (cat: string) => {
+    if (onUpdateCRMSettings) {
+      const currentList = currentCrmSettings.businessCategories || [];
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        businessCategories: currentList.filter(item => item !== cat)
+      });
+    }
+    setDeleteConfirmBizCat(null);
   };
 
   // ----------------------------------------------------
@@ -1048,96 +1227,79 @@ export default function AdminSettingsView({
   });
 
   return (
-    <div className="space-y-6 pb-12">
-      
-      {/* Primary Subtab Bar */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-1.5 shadow-xs grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5">
-        <button
-          onClick={() => setActiveTab('APP_SETTINGS')}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'APP_SETTINGS'
-              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Sliders className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">App Settings</span>
-        </button>
+    <div className="w-full space-y-6 pb-12">
+      <div className="w-full">
+        <AnimatePresence mode="wait">
+          
+          {/* ======================================================== */}
+          {/* TAB 1: APP SETTINGS & SUBTABS (PETTY CASH, CRM, HRMS)    */}
+          {/* ======================================================== */}
+          {activeTab === 'APP_SETTINGS' && (
+            <motion.div
+              key="APP_SETTINGS"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              {/* App Settings Sub-tab Selector */}
+              <div className="bg-slate-100/90 p-1.5 rounded-2xl flex flex-wrap sm:flex-nowrap items-center gap-2 border border-slate-200/80 w-full sm:w-auto inline-flex">
+                <button
+                  type="button"
+                  onClick={() => setAppSettingsSubTab('PETTY_CASH')}
+                  className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    appSettingsSubTab === 'PETTY_CASH'
+                      ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                >
+                  <Sliders className="w-4 h-4 text-[#f7b944] shrink-0" />
+                  <span>Petty Cash Settings</span>
+                  <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">Active</span>
+                </button>
 
-        <button
-          onClick={() => setActiveTab('USER_MGMT')}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'USER_MGMT'
-              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Users ({users.length})</span>
-        </button>
+                <button
+                  type="button"
+                  onClick={() => setAppSettingsSubTab('CRM')}
+                  className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    appSettingsSubTab === 'CRM'
+                      ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                >
+                  <Briefcase className="w-4 h-4 text-[#f7b944] shrink-0" />
+                  <span>CRM Settings</span>
+                  <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">Active</span>
+                </button>
 
-        <button
-          onClick={() => setActiveTab('SYSTEM_AUDIT')}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'SYSTEM_AUDIT'
-              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <History className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Audit Trail ({logs.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('INTEGRATIONS')}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'INTEGRATIONS'
-              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Share2 className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Integrations</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('SYSTEM_OPERATIONS')}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === 'SYSTEM_OPERATIONS'
-              ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-          }`}
-        >
-          <Database className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">System Ops</span>
-        </button>
-      </div>
-
-      {/* Viewport Content */}
-      <AnimatePresence mode="wait">
-        
-        {/* ======================================================== */}
-        {/* TAB 1: APP SETTINGS & CATEGORIES                         */}
-        {/* ======================================================== */}
-        {activeTab === 'APP_SETTINGS' && (
-          <motion.div
-            key="APP_SETTINGS"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-          >
-            {/* Global Formatting & Preferences */}
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
-              <div>
-                <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
-                  <Globe className="w-5 h-5 text-[#f7b944]" />
-                  Global Localization & Display Standards
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Changes made here instantly format amounts, dates, and time stamps across all views, reports, and vouchers.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setAppSettingsSubTab('HRMS')}
+                  className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    appSettingsSubTab === 'HRMS'
+                      ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                >
+                  <span>HRMS Settings</span>
+                  <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-0.5 rounded-md font-bold">Coming Soon</span>
+                </button>
               </div>
+
+              {/* SUBTAB 1.1: PETTY CASH MODULE SETTINGS */}
+              {appSettingsSubTab === 'PETTY_CASH' && (
+                <div className="space-y-6 animate-in fade-in duration-150">
+                  {/* Global Formatting & Preferences */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                        <Globe className="w-5 h-5 text-[#f7b944]" />
+                        Global Localization & Display Standards
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Changes made here instantly format amounts, dates, and time stamps across all views, reports, and vouchers.
+                      </p>
+                    </div>
 
               {settingsSuccess && (
                 <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 font-semibold">
@@ -1589,8 +1751,184 @@ export default function AdminSettingsView({
                 ))}
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
+
+              {/* SUBTAB 1.2: CRM MODULE SETTINGS */}
+              {appSettingsSubTab === 'CRM' && (
+                <div className="space-y-6 animate-in fade-in duration-150">
+                  {/* Industry Categories */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                          <Briefcase className="w-5 h-5 text-[#f7b944]" />
+                          Industry Classifications
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Manage master industry verticals and sectors available across CRM accounts and opportunities.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={openAddIndustryModal}
+                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Industry
+                      </button>
+                    </div>
+
+                    {/* Industries Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {(currentCrmSettings.industries || []).map((ind, idx) => (
+                        <div key={idx} className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-3.5 h-3.5 rounded-full shrink-0 bg-amber-500"></span>
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs text-slate-800 truncate block">{ind}</span>
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-amber-100 text-amber-800 font-mono">
+                                INDUSTRY
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              onClick={() => openEditIndustryModal(ind)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Industry"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirmIndustry(ind)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Industry"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Business Categories */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                          <Tag className="w-5 h-5 text-[#f7b944]" />
+                          Business Categories
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Configure account business categories (e.g. Enterprise, SME, Government, Channel Partner).
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={openAddBizCatModal}
+                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Category
+                      </button>
+                    </div>
+
+                    {/* Business Categories Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {(currentCrmSettings.businessCategories || []).map((cat, idx) => (
+                        <div key={idx} className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-3.5 h-3.5 rounded-full shrink-0 bg-blue-500"></span>
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs text-slate-800 truncate block">{cat}</span>
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-blue-100 text-blue-800 font-mono">
+                                BIZ CATEGORY
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              onClick={() => openEditBizCatModal(cat)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Business Category"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirmBizCat(cat)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Business Category"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUBTAB 1.3: HRMS MODULE SETTINGS (UPCOMING) */}
+              {appSettingsSubTab === 'HRMS' && (
+                <div className="space-y-6 animate-in fade-in duration-150">
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                          <Users className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-base text-slate-900">HRMS & Workforce Settings</h3>
+                            <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full font-mono">
+                              PREPARING MODULE
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Set up organizational departments, designations, payroll cycles, and leave policies.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-slate-600" />
+                          <h4 className="font-bold text-xs text-slate-800">Departments & Designations</h4>
+                        </div>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Manage organizational hierarchies, reporting managers, and role assignments across branches.
+                        </p>
+                      </div>
+
+                      <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-slate-600" />
+                          <h4 className="font-bold text-xs text-slate-800">Attendance & Leave Rules</h4>
+                        </div>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Define standard work shifts, holidays calendar, earned/casual leave accruals, and approvals.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
+                      <div className="flex items-center gap-2.5">
+                        <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span>This configuration partition will automatically activate upon HRMS release.</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
 
         {/* ======================================================== */}
         {/* TAB 2: USER MANAGEMENT                                   */}
@@ -2268,103 +2606,208 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 2: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                {/* Bottom Actions Bar for Email Gateway Settings */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => toggleEmailAccordion('new')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                    onClick={handleTestEmail}
+                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-red-50 text-[#ed3833] flex items-center justify-center shrink-0">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">2. New Voucher Template & Preview</h4>
-                        <p className="text-xs text-slate-400">Corporate email subject & body sent when a new payment voucher is created</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#ed3833]"></span>
-                      {openEmailAccordions.new ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
+                    <Send className="w-3.5 h-3.5 text-sky-600" />
+                    Test Connection & Verify Credentials
                   </button>
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save Email Gateway Settings
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+          </motion.div>
+        )}
 
-                  {openEmailAccordions.new && (
-                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
-                            <button
-                              key={`new-email-${tag}`}
-                              type="button"
-                              onClick={() => setEmailBodyNew(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-red-50 border border-slate-200 hover:border-red-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-red-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
+        {/* ======================================================== */}
+        {/* TAB 4: TEMPLATES & NOTIFICATION BLUEPRINTS (PETTY CASH, CRM, HRMS) */}
+        {/* ======================================================== */}
+        {activeTab === 'TEMPLATES' && (
+          <motion.div
+            key="TEMPLATES"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            {/* Notification Banner */}
+            {integrationSuccess && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-2xl flex items-center gap-2 font-semibold shadow-xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                {integrationSuccess}
+              </div>
+            )}
+
+            {/* Templates Sub-tab Selector */}
+            <div className="bg-slate-100/90 p-1.5 rounded-2xl flex flex-wrap sm:flex-nowrap items-center gap-2 border border-slate-200/80 w-full sm:w-auto inline-flex">
+              <button
+                type="button"
+                onClick={() => setTemplatesSubTab('PETTY_CASH')}
+                className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  templatesSubTab === 'PETTY_CASH'
+                    ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Petty Cash Templates</span>
+                <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">9 Active</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTemplatesSubTab('CRM')}
+                className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  templatesSubTab === 'CRM'
+                    ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                <span>CRM Templates</span>
+                <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-0.5 rounded-md font-bold">Coming Soon</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTemplatesSubTab('HRMS')}
+                className={`flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  templatesSubTab === 'HRMS'
+                    ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                <span>HRMS Templates</span>
+                <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-0.5 rounded-md font-bold">Coming Soon</span>
+              </button>
+            </div>
+
+            {/* SUBTAB 4.1: PETTY CASH AUTOMATED TEMPLATES */}
+            {templatesSubTab === 'PETTY_CASH' && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-indigo-600" />
+                        Petty Cash Communication & Email Templates
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Customize corporate email subjects and body layouts dispatched automatically upon voucher creation, edits, deletions, threshold alerts, and approvals.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Templates Form */}
+                <form onSubmit={handleSaveEmailSettings} className="space-y-4">
+                  {/* ACCORDION 1: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                    <button
+                      type="button"
+                      onClick={() => toggleEmailAccordion('new')}
+                      className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-red-50 text-[#ed3833] flex items-center justify-center shrink-0">
+                          <Mail className="w-4 h-4" />
                         </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
-                          <input
-                            type="text"
-                            value={emailSubjectNew}
-                            onChange={(e) => setEmailSubjectNew(e.target.value)}
-                            placeholder="Subject line"
-                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                            required
-                          />
-                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
-                          <textarea
-                            value={emailBodyNew}
-                            onChange={(e) => setEmailBodyNew(e.target.value)}
-                            rows={5}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                            required
-                          />
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-800">1. New Voucher Template & Preview</h4>
+                          <p className="text-xs text-slate-400">Corporate email subject & body sent when a new payment voucher is created</p>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[#ed3833]"></span>
+                        {openEmailAccordions.new ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                      </div>
+                    </button>
 
-                      {/* Live Card Preview */}
-                      {(() => {
-                        const previewSubject = substituteSampleTags(emailSubjectNew, appSettings.currencySymbol, false);
-                        const previewBodyRaw = substituteSampleTags(emailBodyNew, appSettings.currencySymbol, false);
-                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+                    {openEmailAccordions.new && (
+                      <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                            {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                              <button
+                                key={`new-email-${tag}`}
+                                type="button"
+                                onClick={() => setEmailBodyNew(prev => prev + ' ' + tag)}
+                                className="px-2 py-0.5 bg-slate-100 hover:bg-red-50 border border-slate-200 hover:border-red-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-red-800 cursor-pointer transition-all"
+                              >
+                                + {tag}
+                              </button>
+                            ))}
+                          </div>
 
-                        return (
-                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
-                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                  New Voucher HTML Email Card Preview
+                          <div className="space-y-2">
+                            <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                            <input
+                              type="text"
+                              value={emailSubjectNew}
+                              onChange={(e) => setEmailSubjectNew(e.target.value)}
+                              placeholder="Subject line"
+                              className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                              required
+                            />
+                            <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                            <textarea
+                              value={emailBodyNew}
+                              onChange={(e) => setEmailBodyNew(e.target.value)}
+                              rows={5}
+                              className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        {/* Live Card Preview */}
+                        {(() => {
+                          const previewSubject = substituteSampleTags(emailSubjectNew, appSettings.currencySymbol, false);
+                          const previewBodyRaw = substituteSampleTags(emailBodyNew, appSettings.currencySymbol, false);
+                          const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
+
+                          return (
+                            <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                  <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                    New Voucher HTML Email Card Preview
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-mono text-slate-500">
+                                  From: {msSenderName} &lt;{msSenderEmail}&gt;
                                 </span>
                               </div>
-                              <span className="text-[11px] font-mono text-slate-500">
-                                From: {msSenderName} &lt;{msSenderEmail}&gt;
-                              </span>
-                            </div>
 
-                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
-                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                            </div>
+                              <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                                Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                              </div>
 
-                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
-                              <iframe
-                                title="New Voucher Email Preview"
-                                srcDoc={buildModernHtmlEmailFromText('New Voucher Alert', previewBodyRaw, '#3b82f6', 'NEW')}
-                                className="w-full h-[580px] border-0"
-                              />
+                              <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                                <iframe
+                                  title="New Voucher Email Preview"
+                                  srcDoc={buildModernHtmlEmailFromText('New Voucher Alert', previewBodyRaw, '#3b82f6', 'NEW')}
+                                  className="w-full h-[580px] border-0"
+                                />
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
 
                 {/* ACCORDION 3: VOUCHER CHANGES EMAIL TEMPLATE WITH PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
@@ -2378,7 +2821,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">3. Voucher Changes Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">2. Voucher Changes Template & Preview</h4>
                         <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing voucher is modified</p>
                       </div>
                     </div>
@@ -2464,7 +2907,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 4: DEPOSIT EMAIL TEMPLATE WITH PREVIEW */}
+                {/* ACCORDION 3: DEPOSIT EMAIL TEMPLATE WITH PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2476,7 +2919,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">4. Deposit Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">3. Deposit Template & Preview</h4>
                         <p className="text-xs text-slate-400">Corporate email subject & body sent when cash is deposited into petty cash</p>
                       </div>
                     </div>
@@ -2575,7 +3018,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 5: DEPOSIT CHANGES EMAIL TEMPLATE WITH PREVIEW */}
+                {/* ACCORDION 4: DEPOSIT CHANGES EMAIL TEMPLATE WITH PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2587,7 +3030,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">5. Deposit Changes Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">4. Deposit Changes Template & Preview</h4>
                         <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing inward deposit is modified</p>
                       </div>
                     </div>
@@ -2686,7 +3129,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 6: CLAIM REQUEST SUBMITTED TEMPLATE & PREVIEW */}
+                {/* ACCORDION 5: CLAIM REQUEST SUBMITTED TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2698,7 +3141,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">6. Claim Submitted (Pending Approval) Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">5. Claim Submitted (Pending Approval) Template & Preview</h4>
                         <p className="text-xs text-slate-400">Email sent to Approval Manager when a custodian submits a new petty cash claim</p>
                       </div>
                     </div>
@@ -2784,7 +3227,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 7: CLAIM APPROVED (READY FOR PAYMENT) TEMPLATE & PREVIEW */}
+                {/* ACCORDION 6: CLAIM APPROVED (READY FOR PAYMENT) TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2796,7 +3239,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">7. Claim Approved (Ready for Payment) Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">6. Claim Approved (Ready for Payment) Template & Preview</h4>
                         <p className="text-xs text-slate-400">Email sent to Finance Admin & Claimant when a claim is approved by Manager</p>
                       </div>
                     </div>
@@ -2884,7 +3327,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 8: CLAIM DISBURSED & PAID TEMPLATE & PREVIEW */}
+                {/* ACCORDION 7: CLAIM DISBURSED & PAID TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2896,7 +3339,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">8. Claim Disbursed & Paid Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">7. Claim Disbursed & Paid Template & Preview</h4>
                         <p className="text-xs text-slate-400">Email sent to Claimant, Manager & Admin when cash is issued and marked as PAID</p>
                       </div>
                     </div>
@@ -2986,7 +3429,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 9: CLAIM REJECTED TEMPLATE & PREVIEW */}
+                {/* ACCORDION 8: CLAIM REJECTED TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -2998,7 +3441,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">9. Claim Rejected Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">8. Claim Rejected Template & Preview</h4>
                         <p className="text-xs text-slate-400">Email sent to Claimant when a request is rejected by Manager/Admin</p>
                       </div>
                     </div>
@@ -3086,7 +3529,7 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
-                {/* ACCORDION 10: CLAIM RE-ROUTED TEMPLATE & PREVIEW */}
+                {/* ACCORDION 9: CLAIM RE-ROUTED TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                   <button
                     type="button"
@@ -3098,7 +3541,7 @@ export default function AdminSettingsView({
                         <Mail className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-sm text-slate-800">10. Claim Re-Routed Template & Preview</h4>
+                        <h4 className="font-bold text-sm text-slate-800">9. Claim Re-Routed Template & Preview</h4>
                         <p className="text-xs text-slate-400">Email sent to newly assigned Manager when an approval request is re-routed</p>
                       </div>
                     </div>
@@ -3190,24 +3633,145 @@ export default function AdminSettingsView({
                 </div>
 
                 {/* Bottom Actions Bar */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-end gap-3">
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <button
                     type="button"
-                    onClick={handleTestEmail}
-                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    onClick={handleResetEmailDefaults}
+                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <Send className="w-3.5 h-3.5 text-sky-600" />
-                    Test Dispatched Email Payloads
+                    <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                    Reset to Corporate Defaults
                   </button>
-                  <button
-                    type="submit"
-                    className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Save Email Gateway Settings
-                  </button>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={handleTestEmail}
+                      className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5 text-sky-600" />
+                      Test Dispatched Email Payloads
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save Petty Cash Templates
+                    </button>
+                  </div>
                 </div>
               </form>
+            </div>
+          )}
+
+          {/* SUBTAB 4.2: CRM TEMPLATES (UPCOMING) */}
+          {templatesSubTab === 'CRM' && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                      <Briefcase className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-base text-slate-900">CRM Communication Templates</h3>
+                        <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-mono">
+                          PREPARING MODULE
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Automated customer correspondence, quotation dispatch, deal updates, and client onboarding templates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-slate-600" />
+                      <h4 className="font-bold text-xs text-slate-800">Lead Welcome & Quotations</h4>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Custom HTML email templates with dynamic price estimation tables and PDF quote attachments.
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-600" />
+                      <h4 className="font-bold text-xs text-slate-800">Deal Progress & Reminders</h4>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Automated milestone reminders, contract signing notifications, and payment invoice dispatches.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
+                  <div className="flex items-center gap-2.5">
+                    <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>CRM email and notification templates will automatically unlock when the CRM module is enabled.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUBTAB 4.3: HRMS TEMPLATES (UPCOMING) */}
+          {templatesSubTab === 'HRMS' && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-base text-slate-900">HRMS Communication Templates</h3>
+                        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full font-mono">
+                          PREPARING MODULE
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Offer letters, monthly salary slip notifications, leave approval alerts, and HR announcements.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-slate-600" />
+                      <h4 className="font-bold text-xs text-slate-800">Payslip & Compensation Dispatches</h4>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Encrypted salary breakdown notifications with dynamic gross/net pay placeholders and PDF slip generation.
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-600" />
+                      <h4 className="font-bold text-xs text-slate-800">Leave Approvals & Work Notices</h4>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Automatic supervisor notifications for leave applications, attendance regularization, and team rosters.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
+                  <div className="flex items-center gap-2.5">
+                    <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>HRMS email templates and notices will automatically unlock when the HRMS module is enabled.</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           </motion.div>
@@ -3370,9 +3934,8 @@ export default function AdminSettingsView({
           </motion.div>
         )}
 
-
-
       </AnimatePresence>
+      </div>
 
 
 
@@ -3682,6 +4245,210 @@ export default function AdminSettingsView({
                 className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
               >
                 Delete User
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CRM INDUSTRY                           */}
+      {/* ======================================================== */}
+      {isIndustryModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-800">
+                {editingIndustry ? 'Edit Industry Classification' : 'Add New Industry Classification'}
+              </h3>
+              <button
+                onClick={() => setIsIndustryModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveIndustry} className="space-y-4">
+              {industryError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {industryError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Industry Name</label>
+                <input
+                  type="text"
+                  value={industryNameInput}
+                  onChange={(e) => setIndustryNameInput(e.target.value)}
+                  placeholder="e.g. Smart Metering & AMR"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsIndustryModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Industry
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM INDUSTRY                       */}
+      {/* ======================================================== */}
+      {deleteConfirmIndustry && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Industry Deletion</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to delete the industry <span className="font-bold text-slate-800">"{deleteConfirmIndustry}"</span>?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmIndustry(null)}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteIndustryDirect(deleteConfirmIndustry)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CRM BUSINESS CATEGORY                  */}
+      {/* ======================================================== */}
+      {isBizCatModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-800">
+                {editingBizCat ? 'Edit Business Category' : 'Add New Business Category'}
+              </h3>
+              <button
+                onClick={() => setIsBizCatModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBizCat} className="space-y-4">
+              {bizCatError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {bizCatError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Business Category Name</label>
+                <input
+                  type="text"
+                  value={bizCatNameInput}
+                  onChange={(e) => setBizCatNameInput(e.target.value)}
+                  placeholder="e.g. Public Utility / PSU"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBizCatModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Category
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM BUSINESS CATEGORY              */}
+      {/* ======================================================== */}
+      {deleteConfirmBizCat && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Business Category Deletion</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to delete the business category <span className="font-bold text-slate-800">"{deleteConfirmBizCat}"</span>?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmBizCat(null)}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteBizCatDirect(deleteConfirmBizCat)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Delete
               </button>
             </div>
           </motion.div>

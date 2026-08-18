@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Building2, 
   LayoutDashboard, 
   ArrowDownCircle, 
   ArrowUpCircle, 
-  CheckCircle2,
+  CheckCircle2, 
   FileText, 
   Settings, 
   ShieldAlert, 
@@ -13,9 +13,22 @@ import {
   Menu, 
   X, 
   User as UserIcon,
-  Network
+  Network,
+  Sliders,
+  Users as UsersIcon,
+  Share2,
+  History,
+  Database,
+  ChevronDown,
+  IndianRupee,
+  Briefcase,
+  Users2,
+  Target,
+  UserCheck,
+  TrendingUp
 } from 'lucide-react';
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
+import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendEmailNotification } from './services/notificationService';
@@ -30,9 +43,34 @@ import DashboardView from './components/DashboardView';
 import RegisterView from './components/RegisterView';
 import ApprovalsView from './components/ApprovalsView';
 import SettingsView from './components/SettingsView';
-import AdminSettingsView from './components/AdminSettingsView';
+import AdminSettingsView, { AdminTab } from './components/AdminSettingsView';
 
-type NavigationTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS' | 'SETTINGS' | 'ADMIN_SETTINGS';
+// CRM Subcomponents
+import CRMDashboardView from './components/crm/CRMDashboardView';
+import CRMAccountsView from './components/crm/CRMAccountsView';
+import CRMContactsView from './components/crm/CRMContactsView';
+import CRMOpportunitiesView from './components/crm/CRMOpportunitiesView';
+import CRMSettingsView from './components/crm/CRMSettingsView';
+
+// HRMS Subcomponent
+import HRMSPlaceholderView from './components/hrms/HRMSPlaceholderView';
+
+export type ParentModule = 'CRM' | 'HRMS' | 'CASH_BOOK' | 'ADMIN_SETTINGS';
+export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS' | 'SETTINGS';
+
+type NavigationTab = 
+  | 'CRM_DASHBOARD'
+  | 'CRM_ACCOUNTS'
+  | 'CRM_CONTACTS'
+  | 'CRM_OPPORTUNITIES'
+  | 'CRM_SETTINGS'
+  | 'HRMS'
+  | 'CASHBOOK_DASHBOARD'
+  | 'CASHBOOK_INWARD'
+  | 'CASHBOOK_OUTWARD'
+  | 'CASHBOOK_APPROVALS'
+  | 'CASHBOOK_SETTINGS'
+  | 'ADMIN_SETTINGS';
 
 const getInitials = (name: string) => {
   if (!name) return '';
@@ -43,16 +81,35 @@ const getInitials = (name: string) => {
 
 const getActiveTabClass = (tabId: NavigationTab) => {
   switch (tabId) {
-    case 'DASHBOARD':
-      return 'bg-sky-600 text-white shadow-md shadow-sky-950/20';
-    case 'INWARD':
-      return 'bg-emerald-600 text-white shadow-md shadow-emerald-950/20';
-    case 'OUTWARD':
-      return 'bg-rose-600 text-white shadow-md shadow-rose-950/20';
-    case 'APPROVALS':
+    // CRM
+    case 'CRM_DASHBOARD':
+      return 'bg-[#f7b944] text-slate-950 font-extrabold shadow-md shadow-amber-950/20';
+    case 'CRM_ACCOUNTS':
+      return 'bg-blue-600 text-white shadow-md shadow-blue-950/20';
+    case 'CRM_CONTACTS':
+      return 'bg-indigo-600 text-white shadow-md shadow-indigo-950/20';
+    case 'CRM_OPPORTUNITIES':
       return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
-    case 'SETTINGS':
+    case 'CRM_SETTINGS':
+      return 'bg-slate-700 text-white shadow-md shadow-slate-950/20';
+
+    // HRMS
+    case 'HRMS':
+      return 'bg-indigo-600 text-white shadow-md shadow-indigo-950/20';
+
+    // Cash Book
+    case 'CASHBOOK_DASHBOARD':
+      return 'bg-sky-600 text-white shadow-md shadow-sky-950/20';
+    case 'CASHBOOK_INWARD':
+      return 'bg-emerald-600 text-white shadow-md shadow-emerald-950/20';
+    case 'CASHBOOK_OUTWARD':
+      return 'bg-rose-600 text-white shadow-md shadow-rose-950/20';
+    case 'CASHBOOK_APPROVALS':
+      return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
+    case 'CASHBOOK_SETTINGS':
       return 'bg-slate-600 text-white shadow-md shadow-slate-950/20';
+
+    // Admin
     case 'ADMIN_SETTINGS':
       return 'bg-[#f7b944] text-slate-950 font-extrabold shadow-md shadow-amber-950/20';
     default:
@@ -62,9 +119,15 @@ const getActiveTabClass = (tabId: NavigationTab) => {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<NavigationTab>('DASHBOARD');
   
-  // App States
+  // Navigation State - Accordion & Tabs
+  const [activeTab, setActiveTab] = useState<NavigationTab>('CRM_DASHBOARD');
+  const [openParentModule, setOpenParentModule] = useState<ParentModule | null>(null);
+  
+  // Admin sub tab state
+  const [adminSubTab, setAdminSubTab] = useState<AdminTab>('APP_SETTINGS');
+  
+  // App States (Cash Book)
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>(DEFAULT_INTEGRATION_SETTINGS);
   const [users, setUsers] = useState<User[]>(MOCK_USERS);
@@ -72,6 +135,12 @@ export default function App() {
   const [categories, setCategories] = useState<CategoryLimit[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
+
+  // CRM States (Completely isolated collections)
+  const [crmAccounts, setCrmAccounts] = useState<CRMAccount[]>(INITIAL_CRM_ACCOUNTS);
+  const [crmContacts, setCrmContacts] = useState<CRMContact[]>(INITIAL_CRM_CONTACTS);
+  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>(INITIAL_CRM_OPPORTUNITIES);
+  const [crmSettings, setCrmSettings] = useState<CRMSettings>(DEFAULT_CRM_SETTINGS);
 
   // Mobile navigation drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -112,6 +181,18 @@ export default function App() {
             }
             await setDoc(doc(db, 'app_settings', 'config'), DEFAULT_APP_SETTINGS);
             await setDoc(doc(db, 'app_settings', 'integrations'), DEFAULT_INTEGRATION_SETTINGS);
+            
+            // Seed CRM initial records
+            for (const acc of INITIAL_CRM_ACCOUNTS) {
+              await setDoc(doc(db, 'crm_accounts', acc.id), acc);
+            }
+            for (const con of INITIAL_CRM_CONTACTS) {
+              await setDoc(doc(db, 'crm_contacts', con.id), con);
+            }
+            for (const opp of INITIAL_CRM_OPPORTUNITIES) {
+              await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
+            }
+            await setDoc(doc(db, 'crm_settings', 'config'), DEFAULT_CRM_SETTINGS);
           } else {
             localStorage.setItem('petty_cash_db_seeded', 'true');
           }
@@ -122,6 +203,13 @@ export default function App() {
         const integrationsSnap = await getDoc(integrationsDocRef);
         if (!integrationsSnap.exists()) {
           await setDoc(integrationsDocRef, DEFAULT_INTEGRATION_SETTINGS);
+        }
+
+        // Ensure CRM settings exist
+        const crmSettingsDocRef = doc(db, 'crm_settings', 'config');
+        const crmSettingsSnap = await getDoc(crmSettingsDocRef);
+        if (!crmSettingsSnap.exists()) {
+          await setDoc(crmSettingsDocRef, DEFAULT_CRM_SETTINGS);
         }
       } catch (err) {
         console.warn('Initial seeding check:', err);
@@ -221,39 +309,58 @@ export default function App() {
                   emailRecipients: fetched.emailRecipients ?? DEFAULT_INTEGRATION_SETTINGS.emailRecipients,
                 };
                 setIntegrationSettings(merged);
-                // Also mirror to localStorage for offline cache
-                if (merged.emailEnabled !== undefined) localStorage.setItem('petty_cash_email_enabled', String(merged.emailEnabled));
-                if (merged.msTenantId !== undefined) localStorage.setItem('ms_graph_tenant_id', merged.msTenantId);
-                if (merged.msClientId !== undefined) localStorage.setItem('ms_graph_client_id', merged.msClientId);
-                if (merged.msClientSecret !== undefined) localStorage.setItem('ms_graph_client_secret', merged.msClientSecret);
-                if (merged.msSenderEmail) localStorage.setItem('ms_graph_sender_email', merged.msSenderEmail);
-                if (merged.msSenderName) localStorage.setItem('ms_graph_sender_name', merged.msSenderName);
-                if (merged.emailRecipients) localStorage.setItem('petty_cash_email_recipients', merged.emailRecipients);
-                if (merged.emailSubjectNew) localStorage.setItem('petty_cash_email_subject_new', merged.emailSubjectNew);
-                if (merged.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', merged.emailBodyNew);
-                if (merged.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', merged.emailSubjectEdit);
-                if (merged.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', merged.emailBodyEdit);
-                if (merged.emailSubjectInward) localStorage.setItem('petty_cash_email_subject_inward', merged.emailSubjectInward);
-                if (merged.emailBodyInward) localStorage.setItem('petty_cash_email_body_inward', merged.emailBodyInward);
-                if (merged.emailSubjectRequestSubmitted) localStorage.setItem('petty_cash_email_subject_req_submitted', merged.emailSubjectRequestSubmitted);
-                if (merged.emailBodyRequestSubmitted) localStorage.setItem('petty_cash_email_body_req_submitted', merged.emailBodyRequestSubmitted);
-                if (merged.emailSubjectRequestApproved) localStorage.setItem('petty_cash_email_subject_req_approved', merged.emailSubjectRequestApproved);
-                if (merged.emailBodyRequestApproved) localStorage.setItem('petty_cash_email_body_req_approved', merged.emailBodyRequestApproved);
-                if (merged.emailSubjectRequestPaid) localStorage.setItem('petty_cash_email_subject_req_paid', merged.emailSubjectRequestPaid);
-                if (merged.emailBodyRequestPaid) localStorage.setItem('petty_cash_email_body_req_paid', merged.emailBodyRequestPaid);
-                if (merged.emailSubjectRequestRejected) localStorage.setItem('petty_cash_email_subject_req_rejected', merged.emailSubjectRequestRejected);
-                if (merged.emailBodyRequestRejected) localStorage.setItem('petty_cash_email_body_req_rejected', merged.emailBodyRequestRejected);
-                if (merged.cloudinaryEnabled !== undefined) localStorage.setItem('cloudinary_enabled', String(merged.cloudinaryEnabled));
-                if (merged.cloudinaryCloudName) localStorage.setItem('cloudinary_cloud_name', merged.cloudinaryCloudName);
-                if (merged.cloudinaryApiKey) localStorage.setItem('cloudinary_api_key', merged.cloudinaryApiKey);
-                if (merged.cloudinaryApiSecret) localStorage.setItem('cloudinary_api_secret', merged.cloudinaryApiSecret);
-                if (merged.cloudinaryUploadPreset) localStorage.setItem('cloudinary_upload_preset', merged.cloudinaryUploadPreset);
               }
             });
           }
         }, (err) => console.warn('Firestore settings sync notice:', err));
 
-        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings];
+        // 6. CRM Accounts Sync
+        const unsubCrmAccs = onSnapshot(collection(db, 'crm_accounts'), (snapshot) => {
+          if (snapshot.empty) {
+            setCrmAccounts(INITIAL_CRM_ACCOUNTS);
+          } else {
+            const list: CRMAccount[] = [];
+            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMAccount));
+            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setCrmAccounts(list);
+          }
+        }, (err) => console.warn('CRM accounts sync notice:', err));
+
+        // 7. CRM Contacts Sync
+        const unsubCrmCons = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
+          if (snapshot.empty) {
+            setCrmContacts(INITIAL_CRM_CONTACTS);
+          } else {
+            const list: CRMContact[] = [];
+            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMContact));
+            setCrmContacts(list);
+          }
+        }, (err) => console.warn('CRM contacts sync notice:', err));
+
+        // 8. CRM Opportunities Sync
+        const unsubCrmOpps = onSnapshot(collection(db, 'crm_opportunities'), (snapshot) => {
+          if (snapshot.empty) {
+            setCrmOpportunities(INITIAL_CRM_OPPORTUNITIES);
+          } else {
+            const list: CRMOpportunity[] = [];
+            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMOpportunity));
+            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setCrmOpportunities(list);
+          }
+        }, (err) => console.warn('CRM opportunities sync notice:', err));
+
+        // 9. CRM Settings Sync
+        const unsubCrmSettings = onSnapshot(collection(db, 'crm_settings'), (snapshot) => {
+          if (!snapshot.empty) {
+            snapshot.forEach(d => {
+              if (d.id === 'config') {
+                setCrmSettings({ ...DEFAULT_CRM_SETTINGS, ...d.data() } as CRMSettings);
+              }
+            });
+          }
+        }, (err) => console.warn('CRM settings sync notice:', err));
+
+        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings];
       } catch (err) {
         console.error('Firebase sync setup error:', err);
       }
@@ -369,7 +476,8 @@ export default function App() {
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
-    setActiveTab('DASHBOARD');
+    setActiveTab('CRM_DASHBOARD');
+    setOpenParentModule(null);
   };
 
   // Handler: Secure Logout
@@ -993,47 +1101,199 @@ export default function App() {
     }).length;
   }, [transactions, currentUser, users]);
 
-  // Dynamic Navigation Tabs per Role
-  const roleTabs = React.useMemo(() => {
-    if (!currentUser) return [];
+  // Dynamic Navigation Configuration
+  const isUserAdmin = currentUser?.role === 'ADMIN';
+  const isUserCustodian = currentUser?.role === 'CUSTODIAN';
+  const isManagerOrAdmin = Boolean(
+    isUserAdmin || 
+    isUserCustodian || 
+    currentUser?.isManager || 
+    (currentUser && users.some(u => 
+      u.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() || 
+      u.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase()
+    ))
+  );
 
-    const isUserAdmin = currentUser.role === 'ADMIN';
-    const isUserCustodian = currentUser.role === 'CUSTODIAN';
+  // CRM Sub Tabs
+  const crmSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
+    { id: 'CRM_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'CRM_ACCOUNTS', label: 'Accounts', icon: Building2, badge: crmAccounts.length },
+    { id: 'CRM_CONTACTS', label: 'Contacts', icon: UsersIcon, badge: crmContacts.length },
+    { id: 'CRM_OPPORTUNITIES', label: 'Opportunity', icon: Target, badge: crmOpportunities.length },
+    { id: 'CRM_SETTINGS', label: 'Settings', icon: Sliders }
+  ];
 
+  // Cash Book Sub Tabs
+  const cashBookSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = useMemo(() => {
     const tabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
-      { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard }
+      { id: 'CASHBOOK_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard }
     ];
 
-    // Inward (Deposit) is only shown for Admin & Custodian (Requirement #4)
     if (isUserAdmin || isUserCustodian) {
-      tabs.push({ id: 'INWARD', label: 'Deposit', icon: ArrowDownCircle });
+      tabs.push({ id: 'CASHBOOK_INWARD', label: 'Deposit', icon: ArrowDownCircle });
     }
 
-    // Outward (Expense) is shown for all users
-    tabs.push({ id: 'OUTWARD', label: 'Expense', icon: ArrowUpCircle });
-
-    // Approvals tab for Managers, Admins, Custodians or users with subordinates
-    const isManagerOrAdmin = isUserAdmin || isUserCustodian || currentUser.isManager || users.some(u => u.reportingTo?.toLowerCase() === currentUser.username.toLowerCase() || u.reportingTo?.toLowerCase() === currentUser.fullName.toLowerCase());
+    tabs.push({ id: 'CASHBOOK_OUTWARD', label: 'Expense', icon: ArrowUpCircle });
 
     if (isManagerOrAdmin) {
       tabs.push({ 
-        id: 'APPROVALS', 
+        id: 'CASHBOOK_APPROVALS', 
         label: 'Approvals', 
         icon: CheckCircle2,
         badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined
       });
     }
 
-    // Settings
-    tabs.push({ id: 'SETTINGS', label: 'Settings', icon: Settings });
-
-    // Admin Settings
-    if (isUserAdmin) {
-      tabs.push({ id: 'ADMIN_SETTINGS', label: 'Admin Settings', icon: ShieldAlert });
-    }
+    tabs.push({ id: 'CASHBOOK_SETTINGS', label: 'Settings', icon: Settings });
 
     return tabs;
-  }, [currentUser, users, pendingApprovalsCount]);
+  }, [isUserAdmin, isUserCustodian, isManagerOrAdmin, pendingApprovalsCount]);
+
+  // Admin sub-menu items configuration
+  const adminSubMenuItems = [
+    { id: 'APP_SETTINGS' as AdminTab, label: 'App Settings', icon: Sliders },
+    { id: 'USER_MGMT' as AdminTab, label: 'Users', icon: UsersIcon, badge: users.length },
+    { id: 'INTEGRATIONS' as AdminTab, label: 'Integrations', icon: Share2 },
+    { id: 'TEMPLATES' as AdminTab, label: 'Templates', icon: FileText, badge: 9 },
+    { id: 'SYSTEM_AUDIT' as AdminTab, label: 'Audit Trail', icon: History, badge: logs.length },
+    { id: 'SYSTEM_OPERATIONS' as AdminTab, label: 'System Ops', icon: Database },
+  ];
+
+  // ==================== CRM OPERATIONS ====================
+  const getNextCRMAccountId = () => {
+    const usedNums = new Set<number>();
+    crmAccounts.forEach(a => {
+      if (!a.id) return;
+      const match = a.id.match(/(?:ACC\s*[-_]?\s*)(\d+)/i);
+      if (match) {
+        usedNums.add(parseInt(match[1], 10));
+      }
+    });
+    let n = 1;
+    while (usedNums.has(n)) {
+      n++;
+    }
+    return `ACC - ${String(n).padStart(3, '0')}`;
+  };
+
+  const handleAddCRMAccount = async (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => {
+    try {
+      const id = (acc as any).id || getNextCRMAccountId();
+      const now = new Date().toISOString();
+      const statusLabel = acc.status === 'ACTIVE' ? 'Active Client' : acc.status === 'PROSPECT' ? 'Prospect / Lead' : 'Inactive';
+      const newAcc: CRMAccount = {
+        ...acc,
+        id,
+        createdAt: now,
+        editHistory: acc.editHistory || [
+          {
+            timestamp: now,
+            changedBy: currentUser?.fullName || currentUser?.username || 'Admin',
+            action: 'CREATED',
+            details: `Account created with status "${statusLabel}"`
+          }
+        ]
+      };
+      await setDoc(doc(db, 'crm_accounts', id), newAcc);
+      addLog('CREATE_ACCOUNT', `Created CRM Account: ${acc.name} (${id})`);
+    } catch (err) {
+      console.error('Error adding CRM account:', err);
+    }
+  };
+
+  const handleUpdateCRMAccount = async (acc: CRMAccount) => {
+    try {
+      await setDoc(doc(db, 'crm_accounts', acc.id), acc);
+      addLog('UPDATE_ACCOUNT', `Updated CRM Account: ${acc.name} (${acc.id})`);
+    } catch (err) {
+      console.error('Error updating CRM account:', err);
+    }
+  };
+
+  const handleDeleteCRMAccount = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'crm_accounts', id));
+      addLog('DELETE_ACCOUNT', `Deleted CRM Account: ${id}`);
+    } catch (err) {
+      console.error('Error deleting CRM account:', err);
+    }
+  };
+
+  const handleAddCRMContact = async (con: Omit<CRMContact, 'id' | 'createdAt'>) => {
+    try {
+      const id = `CON-${Date.now().toString().slice(-5)}`;
+      const newCon: CRMContact = {
+        ...con,
+        id,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'crm_contacts', id), newCon);
+      addLog('CREATE_CONTACT', `Added CRM Contact: ${con.firstName} ${con.lastName} (${id})`);
+    } catch (err) {
+      console.error('Error adding CRM contact:', err);
+    }
+  };
+
+  const handleUpdateCRMContact = async (con: CRMContact) => {
+    try {
+      await setDoc(doc(db, 'crm_contacts', con.id), con);
+      addLog('UPDATE_CONTACT', `Updated CRM Contact: ${con.firstName} ${con.lastName} (${con.id})`);
+    } catch (err) {
+      console.error('Error updating CRM contact:', err);
+    }
+  };
+
+  const handleDeleteCRMContact = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'crm_contacts', id));
+      addLog('DELETE_CONTACT', `Deleted CRM Contact: ${id}`);
+    } catch (err) {
+      console.error('Error deleting CRM contact:', err);
+    }
+  };
+
+  const handleAddCRMOpportunity = async (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => {
+    try {
+      const id = `DEAL-${Date.now().toString().slice(-5)}`;
+      const newOpp: CRMOpportunity = {
+        ...opp,
+        id,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'crm_opportunities', id), newOpp);
+      addLog('CREATE_OPPORTUNITY', `Created CRM Opportunity: ${opp.title} (${id})`);
+    } catch (err) {
+      console.error('Error adding CRM opportunity:', err);
+    }
+  };
+
+  const handleUpdateCRMOpportunity = async (opp: CRMOpportunity) => {
+    try {
+      await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
+      addLog('UPDATE_OPPORTUNITY', `Updated CRM Opportunity: ${opp.title} (${opp.id})`);
+    } catch (err) {
+      console.error('Error updating CRM opportunity:', err);
+    }
+  };
+
+  const handleDeleteCRMOpportunity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'crm_opportunities', id));
+      addLog('DELETE_OPPORTUNITY', `Deleted CRM Opportunity: ${id}`);
+    } catch (err) {
+      console.error('Error deleting CRM opportunity:', err);
+    }
+  };
+
+  const handleUpdateCRMSettings = async (newSettings: CRMSettings) => {
+    try {
+      await setDoc(doc(db, 'crm_settings', 'config'), newSettings);
+      setCrmSettings(newSettings);
+      addLog('UPDATE_CRM_SETTINGS', 'Updated CRM Master Settings');
+    } catch (err) {
+      console.error('Error updating CRM settings:', err);
+    }
+  };
 
   // Guard: Redirect to secure login
   if (!currentUser) {
@@ -1045,7 +1305,7 @@ export default function App() {
       
       {/* 1. SIDEBAR NAVIGATION - DESKTOP */}
       <aside className="hidden md:flex w-64 bg-slate-900 text-white flex-col justify-between shrink-0 border-r border-slate-800">
-        <div>
+        <div className="overflow-y-auto">
           {/* Main Logo Header Banner */}
           <div className="p-6 border-b border-slate-800 flex items-center gap-3">
             <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
@@ -1057,84 +1317,274 @@ export default function App() {
             </div>
           </div>
 
-          {/* Navigation Links */}
-          <nav className="p-4 space-y-1">
-            {roleTabs.map((tab) => {
-              const IconComponent = tab.icon;
-              return (
+          {/* Navigation Hierarchy */}
+          <nav className="p-4 space-y-2">
+            
+            {/* MODULE 1: CRM */}
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
+                  if (!activeTab.startsWith('CRM_')) {
+                    setActiveTab('CRM_DASHBOARD');
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                  activeTab.startsWith('CRM_')
+                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Briefcase className="w-4 h-4 text-[#f7b944] shrink-0" />
+                  <span className="tracking-wide">CRM</span>
+                </div>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CRM' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {openParentModule === 'CRM' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15, ease: 'easeInOut' }}
+                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                  >
+                    {crmSubTabs.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isSubActive = activeTab === sub.id;
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => setActiveTab(sub.id)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                            isSubActive
+                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{sub.label}</span>
+                          </div>
+                          {sub.badge !== undefined && sub.badge > 0 && (
+                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
+                              isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {sub.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* MODULE 2: HRMS */}
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setActiveTab('HRMS');
+                  setOpenParentModule('HRMS');
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                  activeTab === 'HRMS'
+                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Users2 className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span className="tracking-wide">HRMS</span>
+                </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
+                  Soon
+                </span>
+              </button>
+            </div>
+
+            {/* MODULE 3: Cash Book (formerly Petty Cash) */}
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
+                  if (!activeTab.startsWith('CASHBOOK_')) {
+                    setActiveTab('CASHBOOK_DASHBOARD');
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                  activeTab.startsWith('CASHBOOK_')
+                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <IndianRupee className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="tracking-wide">Cash Book</span>
+                </div>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CASH_BOOK' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {openParentModule === 'CASH_BOOK' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15, ease: 'easeInOut' }}
+                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                  >
+                    {cashBookSubTabs.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isSubActive = activeTab === sub.id;
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => setActiveTab(sub.id)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                            isSubActive
+                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{sub.label}</span>
+                          </div>
+                          {sub.badge !== undefined && sub.badge > 0 && (
+                            <span className="bg-amber-500 text-slate-950 font-black text-[9px] font-mono px-1.5 py-0.2 rounded-md shrink-0">
+                              {sub.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* MODULE 4: Admin Settings */}
+            {isUserAdmin && (
+              <div className="space-y-1 pt-1">
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
+                  onClick={() => {
+                    setActiveTab('ADMIN_SETTINGS');
+                    setOpenParentModule(prev => prev === 'ADMIN_SETTINGS' ? null : 'ADMIN_SETTINGS');
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab === 'ADMIN_SETTINGS'
+                      ? 'bg-[#f7b944] text-slate-950 font-extrabold shadow-md shadow-amber-950/20'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <IconComponent className="w-4 h-4 shrink-0" />
-                    <span>{tab.label}</span>
+                  <div className="flex items-center gap-2.5">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>Admin Settings</span>
                   </div>
-                  {tab.badge !== undefined && tab.badge > 0 && (
-                    <span className="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-xs">
-                      {tab.badge}
-                    </span>
-                  )}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'ADMIN_SETTINGS' ? 'rotate-180' : ''}`} />
                 </button>
-              );
-            })}
+
+                {/* Admin Dropdown Sub-menu */}
+                <AnimatePresence initial={false}>
+                  {openParentModule === 'ADMIN_SETTINGS' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15, ease: 'easeInOut' }}
+                      className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                    >
+                      {adminSubMenuItems.map((sub) => {
+                        const SubIcon = sub.icon;
+                        const isSubActive = activeTab === 'ADMIN_SETTINGS' && adminSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => {
+                              setActiveTab('ADMIN_SETTINGS');
+                              setAdminSubTab(sub.id);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                              isSubActive
+                                ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            {sub.badge !== undefined && (
+                              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
+                                isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {sub.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
           </nav>
         </div>
 
-        {/* Current Operator Profile & Terminate Session action combined */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/20 space-y-4">
-          <div className="flex items-center gap-3 px-2">
+        {/* User Session Info & Logout Control */}
+        <div className="p-4 border-t border-slate-800 bg-slate-950/40 space-y-3">
+          <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-[#f7b944]/20 border border-[#f7b944]/40 shrink-0 flex items-center justify-center font-bold text-xs text-[#f7b944]">
               {getInitials(currentUser.fullName)}
             </div>
             <div className="truncate">
-              <p className="font-bold text-xs text-slate-100 truncate leading-tight">{currentUser.fullName}</p>
-              <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono">
+              <p className="font-bold text-xs text-slate-100 truncate">{currentUser.fullName}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                {currentUser.role.charAt(0) + currentUser.role.slice(1).toLowerCase()}
-              </span>
+                <span className="text-[10px] text-slate-400 font-mono capitalize">{currentUser.role.toLowerCase()}</span>
+              </div>
             </div>
           </div>
-
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-400 hover:text-red-100 hover:bg-red-950/30 font-bold text-xs transition-all cursor-pointer text-left"
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-slate-800 hover:bg-red-950/40 hover:text-red-300 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer border border-slate-700/50"
           >
-            <LogOut className="w-4 h-4 shrink-0" />
-            Terminate Session
+            <LogOut className="w-3.5 h-3.5" />
+            Sign Out
           </button>
         </div>
       </aside>
 
-      {/* MOBILE HEADER BAR */}
-      <div className="md:hidden flex flex-col h-screen w-full overflow-hidden">
-        <header className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+      {/* MOBILE HEADER & DRAWER */}
+      <div className="flex-1 flex flex-col md:hidden overflow-hidden">
+        <header className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-              <Network className="w-4.5 h-4.5 stroke-[2.5]" />
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-[#f7b944] text-[#112231] font-bold text-xs">
+              <Network className="w-4 h-4 stroke-[2.5]" />
             </div>
             <div>
-              <h2 className="text-sm font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
-              <span className="text-[9px] text-[#f7b944] font-bold tracking-wide block mt-0.5">Ommax Electric Private Limited</span>
+              <h2 className="text-xs font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
+              <span className="text-[8px] text-[#f7b944] font-bold">Ommax Electric Private Limited</span>
             </div>
           </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="text-slate-400 hover:text-white transition-all cursor-pointer relative"
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-1.5 bg-slate-800 text-slate-200 rounded-xl hover:bg-slate-700 transition-colors"
           >
-            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            {pendingApprovalsCount > 0 && !isMobileMenuOpen && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping" />
-            )}
+            <Menu className="w-5 h-5" />
           </button>
         </header>
 
-        {/* MOBILE SLIDE-OVER LEFT DRAWER & BACKDROP */}
+        {/* Mobile Navigation Drawer */}
         <AnimatePresence>
           {isMobileMenuOpen && (
             <>
-              {/* Overlay Backdrop */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1144,16 +1594,14 @@ export default function App() {
                 className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 md:hidden"
               />
 
-              {/* Slide-over Left Drawer Panel */}
               <motion.div
                 initial={{ x: '-100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="fixed top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-slate-900 border-r border-slate-800 z-50 md:hidden flex flex-col justify-between shadow-2xl"
+                className="fixed top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-slate-900 border-r border-slate-800 z-50 md:hidden flex flex-col justify-between shadow-2xl overflow-y-auto"
               >
                 <div>
-                  {/* Drawer Header */}
                   <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
@@ -1172,32 +1620,127 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Drawer Navigation Links */}
-                  <nav className="p-4 space-y-1.5">
-                    {roleTabs.map((tab) => {
-                      const IconComponent = tab.icon;
-                      return (
+                  <nav className="p-4 space-y-2">
+                    
+                    {/* Mobile CRM */}
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => {
+                          setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
+                          if (!activeTab.startsWith('CRM_')) setActiveTab('CRM_DASHBOARD');
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="w-4 h-4 text-[#f7b944]" />
+                          <span>CRM</span>
+                        </div>
+                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CRM' ? 'rotate-180' : ''}`} />
+                      </button>
+                      {openParentModule === 'CRM' && (
+                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                          {crmSubTabs.map(sub => (
+                            <button
+                              key={sub.id}
+                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                              }`}
+                            >
+                              {sub.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Mobile HRMS */}
+                    <button
+                      onClick={() => { setActiveTab('HRMS'); setOpenParentModule('HRMS'); setIsMobileMenuOpen(false); }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Users2 className="w-4 h-4 text-indigo-400" />
+                        <span>HRMS</span>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
+                        Soon
+                      </span>
+                    </button>
+
+                    {/* Mobile Cash Book */}
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => {
+                          setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
+                          if (!activeTab.startsWith('CASHBOOK_')) setActiveTab('CASHBOOK_DASHBOARD');
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <IndianRupee className="w-4 h-4 text-emerald-400" />
+                          <span>Cash Book</span>
+                        </div>
+                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CASH_BOOK' ? 'rotate-180' : ''}`} />
+                      </button>
+                      {openParentModule === 'CASH_BOOK' && (
+                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                          {cashBookSubTabs.map(sub => (
+                            <button
+                              key={sub.id}
+                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                              }`}
+                            >
+                              {sub.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Mobile Admin */}
+                    {isUserAdmin && (
+                      <div className="space-y-1">
                         <button
-                          key={tab.id}
-                          onClick={() => { setActiveTab(tab.id); setIsMobileMenuOpen(false); }}
-                          className={`w-full flex items-center justify-between py-3 px-4 rounded-xl text-xs font-bold transition-all text-left ${activeTab === tab.id ? getActiveTabClass(tab.id) : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'}`}
+                          onClick={() => {
+                            setActiveTab('ADMIN_SETTINGS');
+                            setOpenParentModule(prev => prev === 'ADMIN_SETTINGS' ? null : 'ADMIN_SETTINGS');
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
                         >
-                          <div className="flex items-center gap-3">
-                            <IconComponent className="w-4.5 h-4.5 shrink-0" />
-                            <span>{tab.label}</span>
+                          <div className="flex items-center gap-2">
+                            <ShieldAlert className="w-4 h-4 text-[#f7b944]" />
+                            <span>Admin Settings</span>
                           </div>
-                          {tab.badge !== undefined && tab.badge > 0 && (
-                            <span className="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-xs">
-                              {tab.badge}
-                            </span>
-                          )}
+                          <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'ADMIN_SETTINGS' ? 'rotate-180' : ''}`} />
                         </button>
-                      );
-                    })}
+                        {openParentModule === 'ADMIN_SETTINGS' && (
+                          <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                            {adminSubMenuItems.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => { 
+                                  setActiveTab('ADMIN_SETTINGS'); 
+                                  setAdminSubTab(sub.id); 
+                                  setIsMobileMenuOpen(false); 
+                                }}
+                                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                  activeTab === 'ADMIN_SETTINGS' && adminSubTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                                }`}
+                              >
+                                {sub.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   </nav>
                 </div>
 
-                {/* Drawer Footer - User Profile & Logout */}
                 <div className="p-4 border-t border-slate-800 bg-slate-950/30 space-y-3.5">
                   <div className="flex items-center gap-3 px-2">
                     <div className="w-8 h-8 rounded-full bg-[#f7b944]/20 border border-[#f7b944]/40 shrink-0 flex items-center justify-center font-bold text-xs text-[#f7b944]">
@@ -1206,7 +1749,6 @@ export default function App() {
                     <div className="truncate">
                       <p className="font-bold text-xs text-slate-100 truncate leading-tight">{currentUser.fullName}</p>
                       <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                         {currentUser.role.charAt(0) + currentUser.role.slice(1).toLowerCase()}
                       </span>
                     </div>
@@ -1224,95 +1766,227 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* MOBILE VIEW SCROLLING PORT */}
-        <div className="flex-1 overflow-y-auto p-4 pb-12 sm:pb-16 md:hidden">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.15 }}
-              className="h-full"
-            >
-              {activeTab === 'DASHBOARD' && (
-                <DashboardView 
-                  transactions={transactions} 
-                  categories={categories} 
-                  currentUser={currentUser}
-                  onNavigateToRegister={() => setActiveTab('OUTWARD')}
-                  appSettings={appSettings}
-                />
-              )}
-              {activeTab === 'INWARD' && (
-                <RegisterView 
-                  transactions={transactions} 
-                  categories={categories} 
-                  currentUser={currentUser}
-                  onAddTransaction={handleAddTransaction}
-                  onUpdateStatus={handleUpdateStatus}
-                  onUpdateTransaction={handleUpdateTransaction}
-                  onDeleteTransaction={handleDeleteTransaction}
-                  forceType="IN"
-                  appSettings={appSettings}
-                  integrationSettings={integrationSettings}
-                />
-              )}
-              {activeTab === 'OUTWARD' && (
-                <RegisterView 
-                  transactions={transactions} 
-                  categories={categories} 
-                  currentUser={currentUser}
-                  onAddTransaction={handleAddTransaction}
-                  onUpdateStatus={handleUpdateStatus}
-                  onUpdateTransaction={handleUpdateTransaction}
-                  onDeleteTransaction={handleDeleteTransaction}
-                  forceType="OUT"
-                  appSettings={appSettings}
-                  integrationSettings={integrationSettings}
-                />
-              )}
-              {activeTab === 'APPROVALS' && (
-                <ApprovalsView 
-                  transactions={transactions}
-                  categories={categories}
-                  currentUser={currentUser}
-                  users={users}
-                  onApproveRequest={handleApproveRequest}
-                  onPayRequest={handlePayRequest}
-                  onRejectRequest={handleRejectRequest}
-                  onReRouteRequest={handleReRouteRequest}
-                  appSettings={appSettings}
-                />
-              )}
-              {activeTab === 'SETTINGS' && (
-                <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
-              )}
+        {/* Mobile Page Title Header */}
+        <div className="bg-white border-b border-slate-200/80 px-4 py-3 shrink-0 shadow-2xs">
+          <div className="flex items-center gap-2">
+            {/* CRM Icons */}
+            {activeTab === 'CRM_DASHBOARD' && <LayoutDashboard className="w-4 h-4 text-[#f7b944]" />}
+            {activeTab === 'CRM_ACCOUNTS' && <Building2 className="w-4 h-4 text-blue-600" />}
+            {activeTab === 'CRM_CONTACTS' && <UsersIcon className="w-4 h-4 text-indigo-600" />}
+            {activeTab === 'CRM_OPPORTUNITIES' && <Target className="w-4 h-4 text-amber-600" />}
+            {activeTab === 'CRM_SETTINGS' && <Sliders className="w-4 h-4 text-slate-600" />}
+            
+            {/* HRMS Icon */}
+            {activeTab === 'HRMS' && <Users2 className="w-4 h-4 text-indigo-600" />}
+
+            {/* Cash Book Icons */}
+            {activeTab === 'CASHBOOK_DASHBOARD' && <LayoutDashboard className="w-4 h-4 text-sky-600" />}
+            {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-4 h-4 text-emerald-600" />}
+            {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-4 h-4 text-rose-600" />}
+            {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-4 h-4 text-amber-600" />}
+            {activeTab === 'CASHBOOK_SETTINGS' && <Settings className="w-4 h-4 text-slate-600" />}
+
+            {/* Admin Icon */}
+            {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-4 h-4 text-[#f7b944]" />}
+            
+            <h1 className="text-sm font-extrabold tracking-tight text-slate-900 truncate">
+              {/* CRM Headers */}
+              {activeTab === 'CRM_DASHBOARD' && 'CRM Dashboard'}
+              {activeTab === 'CRM_ACCOUNTS' && 'Accounts & Client Directory'}
+              {activeTab === 'CRM_CONTACTS' && 'Contacts'}
+              {activeTab === 'CRM_OPPORTUNITIES' && 'Sales Pipeline & Opportunities'}
+              {activeTab === 'CRM_SETTINGS' && 'CRM Module Settings'}
+
+              {/* HRMS Header */}
+              {activeTab === 'HRMS' && 'Human Resources Management System'}
+
+              {/* Cash Book Headers */}
+              {activeTab === 'CASHBOOK_DASHBOARD' && 'Financial Overview'}
+              {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
+              {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
+              {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
+              {activeTab === 'CASHBOOK_SETTINGS' && 'User Settings & Security'}
+
+              {/* Admin Header */}
               {activeTab === 'ADMIN_SETTINGS' && (
-                <AdminSettingsView 
-                  currentUser={currentUser}
-                  appSettings={appSettings}
-                  onUpdateAppSettings={handleUpdateAppSettings}
-                  integrationSettings={integrationSettings}
-                  onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
-                  users={users}
-                  onAddUser={handleAddUser}
-                  onUpdateUser={handleUpdateUser}
-                  onDeleteUser={handleDeleteUser}
-                  categories={categories}
-                  onAddCategory={handleAddCategory}
-                  onUpdateCategory={handleUpdateCategory}
-                  onDeleteCategory={handleDeleteCategory}
-                  logs={logs}
-                  transactions={transactions}
-                  onUpdateTransaction={handleUpdateTransaction}
-                  onBackupData={handleBackupData}
-                  onRestoreData={handleRestoreData}
-                  onWipeAllData={handleWipeAllData}
-                />
+                adminSubTab === 'APP_SETTINGS' ? 'App Settings & Configuration' :
+                adminSubTab === 'USER_MGMT' ? 'User Management & Access Roles' :
+                adminSubTab === 'INTEGRATIONS' ? 'Integrations & Webhook Endpoints' :
+                adminSubTab === 'TEMPLATES' ? 'Notification & Email Templates' :
+                adminSubTab === 'SYSTEM_AUDIT' ? 'Audit Trail & Activity Log' :
+                'System Operations & Database'
               )}
-            </motion.div>
-          </AnimatePresence>
+            </h1>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-0.5 font-medium leading-normal">
+            {/* CRM Descriptions */}
+            {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of your business, sales, and daily activities'}
+            {activeTab === 'CRM_ACCOUNTS' && 'Manage customer companies, business details and account relationships'}
+            {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
+            {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
+            {activeTab === 'CRM_SETTINGS' && 'Manage CRM preferences and configurations'}
+
+            {/* HRMS Description */}
+            {activeTab === 'HRMS' && 'Employee directory, attendance logging, leave approval workflows, and payroll integration.'}
+
+            {/* Cash Book Descriptions */}
+            {activeTab === 'CASHBOOK_DASHBOARD' && 'Overview of inflows, record disbursements, and monitor petty cash balances.'}
+            {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
+            {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
+            {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
+            {activeTab === 'CASHBOOK_SETTINGS' && 'Manage password credentials and workspace preferences.'}
+
+            {/* Admin Descriptions */}
+            {activeTab === 'ADMIN_SETTINGS' && (
+              adminSubTab === 'APP_SETTINGS' ? 'Configure currency, date formats, voucher numbering, approval policies, and module settings.' :
+              adminSubTab === 'USER_MGMT' ? 'Add, modify, and manage user credentials, roles, and reporting hierarchy.' :
+              adminSubTab === 'INTEGRATIONS' ? 'Manage Microsoft Power Automate Webhook connectors, sender config, and Cloudinary attachments.' :
+              adminSubTab === 'TEMPLATES' ? 'Customize and preview notification email templates for disbursements, deposits, and approvals.' :
+              adminSubTab === 'SYSTEM_AUDIT' ? 'Complete chronological immutable audit logs of transactions, user access, and system events.' :
+              'Export JSON backups, restore workspace states, and manage category limits.'
+            )}
+          </p>
+        </div>
+
+        {/* Mobile Main Content */}
+        <div className="flex-1 overflow-y-auto p-4 pb-12 bg-slate-50">
+          {activeTab === 'CRM_DASHBOARD' && (
+            <CRMDashboardView 
+              accounts={crmAccounts}
+              contacts={crmContacts}
+              opportunities={crmOpportunities}
+              crmSettings={crmSettings}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onNavigateToAccounts={() => setActiveTab('CRM_ACCOUNTS')}
+              onNavigateToContacts={() => setActiveTab('CRM_CONTACTS')}
+              onNavigateToOpportunities={() => setActiveTab('CRM_OPPORTUNITIES')}
+            />
+          )}
+          {activeTab === 'CRM_ACCOUNTS' && (
+            <CRMAccountsView
+              accounts={crmAccounts}
+              crmSettings={crmSettings}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onAddAccount={handleAddCRMAccount}
+              onUpdateAccount={handleUpdateCRMAccount}
+              onDeleteAccount={handleDeleteCRMAccount}
+            />
+          )}
+          {activeTab === 'CRM_CONTACTS' && (
+            <CRMContactsView
+              contacts={crmContacts}
+              accounts={crmAccounts}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onAddContact={handleAddCRMContact}
+              onUpdateContact={handleUpdateCRMContact}
+              onDeleteContact={handleDeleteCRMContact}
+            />
+          )}
+          {activeTab === 'CRM_OPPORTUNITIES' && (
+            <CRMOpportunitiesView
+              opportunities={crmOpportunities}
+              accounts={crmAccounts}
+              contacts={crmContacts}
+              crmSettings={crmSettings}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onAddOpportunity={handleAddCRMOpportunity}
+              onUpdateOpportunity={handleUpdateCRMOpportunity}
+              onDeleteOpportunity={handleDeleteCRMOpportunity}
+            />
+          )}
+          {activeTab === 'CRM_SETTINGS' && (
+            <CRMSettingsView
+              crmSettings={crmSettings}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onUpdateCRMSettings={handleUpdateCRMSettings}
+            />
+          )}
+          {activeTab === 'HRMS' && (
+            <HRMSPlaceholderView />
+          )}
+          {activeTab === 'CASHBOOK_DASHBOARD' && (
+            <DashboardView 
+              transactions={transactions} 
+              categories={categories} 
+              currentUser={currentUser}
+              onNavigateToRegister={() => setActiveTab('CASHBOOK_OUTWARD')}
+              appSettings={appSettings}
+            />
+          )}
+          {activeTab === 'CASHBOOK_INWARD' && (
+            <RegisterView 
+              transactions={transactions} 
+              categories={categories} 
+              currentUser={currentUser}
+              onAddTransaction={handleAddTransaction}
+              onUpdateStatus={handleUpdateStatus}
+              onUpdateTransaction={handleUpdateTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+              forceType="IN"
+              appSettings={appSettings}
+              integrationSettings={integrationSettings}
+            />
+          )}
+          {activeTab === 'CASHBOOK_OUTWARD' && (
+            <RegisterView 
+              transactions={transactions} 
+              categories={categories} 
+              currentUser={currentUser}
+              onAddTransaction={handleAddTransaction}
+              onUpdateStatus={handleUpdateStatus}
+              onUpdateTransaction={handleUpdateTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+              forceType="OUT"
+              appSettings={appSettings}
+              integrationSettings={integrationSettings}
+            />
+          )}
+          {activeTab === 'CASHBOOK_APPROVALS' && (
+            <ApprovalsView 
+              transactions={transactions}
+              categories={categories}
+              currentUser={currentUser}
+              users={users}
+              onApproveRequest={handleApproveRequest}
+              onPayRequest={handlePayRequest}
+              onRejectRequest={handleRejectRequest}
+              onReRouteRequest={handleReRouteRequest}
+              appSettings={appSettings}
+            />
+          )}
+          {activeTab === 'CASHBOOK_SETTINGS' && (
+            <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
+          )}
+          {activeTab === 'ADMIN_SETTINGS' && (
+            <AdminSettingsView 
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onUpdateAppSettings={handleUpdateAppSettings}
+              integrationSettings={integrationSettings}
+              onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
+              users={users}
+              onAddUser={handleAddUser}
+              onUpdateUser={handleUpdateUser}
+              onDeleteUser={handleDeleteUser}
+              categories={categories}
+              onAddCategory={handleAddCategory}
+              onUpdateCategory={handleUpdateCategory}
+              onDeleteCategory={handleDeleteCategory}
+              logs={logs}
+              transactions={transactions}
+              onUpdateTransaction={handleUpdateTransaction}
+              onBackupData={handleBackupData}
+              onRestoreData={handleRestoreData}
+              onWipeAllData={handleWipeAllData}
+              activeSubTab={adminSubTab}
+              onSubTabChange={setAdminSubTab}
+            />
+          )}
         </div>
       </div>
 
@@ -1323,28 +1997,82 @@ export default function App() {
         <header className="bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between shadow-xs shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              {activeTab === 'DASHBOARD' && <LayoutDashboard className="w-5 h-5 text-sky-600" />}
-              {activeTab === 'INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
-              {activeTab === 'OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
-              {activeTab === 'APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
-              {activeTab === 'SETTINGS' && <Settings className="w-5 h-5 text-slate-600" />}
+              {/* CRM Icons */}
+              {activeTab === 'CRM_DASHBOARD' && <LayoutDashboard className="w-5 h-5 text-[#f7b944]" />}
+              {activeTab === 'CRM_ACCOUNTS' && <Building2 className="w-5 h-5 text-blue-600" />}
+              {activeTab === 'CRM_CONTACTS' && <UsersIcon className="w-5 h-5 text-indigo-600" />}
+              {activeTab === 'CRM_OPPORTUNITIES' && <Target className="w-5 h-5 text-amber-600" />}
+              {activeTab === 'CRM_SETTINGS' && <Sliders className="w-5 h-5 text-slate-600" />}
+              
+              {/* HRMS Icon */}
+              {activeTab === 'HRMS' && <Users2 className="w-5 h-5 text-indigo-600" />}
+
+              {/* Cash Book Icons */}
+              {activeTab === 'CASHBOOK_DASHBOARD' && <LayoutDashboard className="w-5 h-5 text-sky-600" />}
+              {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
+              {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
+              {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
+              {activeTab === 'CASHBOOK_SETTINGS' && <Settings className="w-5 h-5 text-slate-600" />}
+
+              {/* Admin Icon */}
               {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-5 h-5 text-[#f7b944]" />}
+              
               <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
-                {activeTab === 'DASHBOARD' && 'Financial Overview'}
-                {activeTab === 'INWARD' && 'Deposit Cash Registry'}
-                {activeTab === 'OUTWARD' && 'Expense Registry'}
-                {activeTab === 'APPROVALS' && 'Petty Cash Approvals Console'}
-                {activeTab === 'SETTINGS' && 'User Settings & Security'}
-                {activeTab === 'ADMIN_SETTINGS' && 'Administrator Control Node'}
+                {/* CRM Headers */}
+                {activeTab === 'CRM_DASHBOARD' && 'CRM Dashboard'}
+                {activeTab === 'CRM_ACCOUNTS' && 'Accounts & Client Directory'}
+                {activeTab === 'CRM_CONTACTS' && 'Contacts'}
+                {activeTab === 'CRM_OPPORTUNITIES' && 'Sales Pipeline & Opportunities'}
+                {activeTab === 'CRM_SETTINGS' && 'CRM Module Settings'}
+
+                {/* HRMS Header */}
+                {activeTab === 'HRMS' && 'Human Resources Management System'}
+
+                {/* Cash Book Headers */}
+                {activeTab === 'CASHBOOK_DASHBOARD' && 'Financial Overview'}
+                {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
+                {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
+                {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
+                {activeTab === 'CASHBOOK_SETTINGS' && 'User Settings & Security'}
+
+                {/* Admin Header */}
+                {activeTab === 'ADMIN_SETTINGS' && (
+                  adminSubTab === 'APP_SETTINGS' ? 'App Settings & Configuration' :
+                  adminSubTab === 'USER_MGMT' ? 'User Management & Access Roles' :
+                  adminSubTab === 'INTEGRATIONS' ? 'Integrations & Webhook Endpoints' :
+                  adminSubTab === 'TEMPLATES' ? 'Notification & Email Templates' :
+                  adminSubTab === 'SYSTEM_AUDIT' ? 'Audit Trail & Activity Log' :
+                  'System Operations & Database'
+                )}
               </h1>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 font-medium">
-              {activeTab === 'DASHBOARD' && 'Overview of inflows, record disbursements, and monitor petty cash balances.'}
-              {activeTab === 'INWARD' && 'Log and record of deposits.'}
-              {activeTab === 'OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
-              {activeTab === 'APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
-              {activeTab === 'SETTINGS' && 'Manage password credentials, workspace preferences'}
-              {activeTab === 'ADMIN_SETTINGS' && 'Configure app settings, user credentials, system audit timeline, and data operations.'}
+              {/* CRM Descriptions */}
+              {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of your business, sales, and daily activities'}
+              {activeTab === 'CRM_ACCOUNTS' && 'Manage customer companies, business details and account relationships'}
+              {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
+              {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
+              {activeTab === 'CRM_SETTINGS' && 'Manage CRM preferences and configurations'}
+
+              {/* HRMS Description */}
+              {activeTab === 'HRMS' && 'Employee directory, attendance logging, leave approval workflows, and payroll integration.'}
+
+              {/* Cash Book Descriptions */}
+              {activeTab === 'CASHBOOK_DASHBOARD' && 'Overview of inflows, record disbursements, and monitor petty cash balances.'}
+              {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
+              {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
+              {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
+              {activeTab === 'CASHBOOK_SETTINGS' && 'Manage password credentials and workspace preferences.'}
+
+              {/* Admin Descriptions */}
+              {activeTab === 'ADMIN_SETTINGS' && (
+                adminSubTab === 'APP_SETTINGS' ? 'Configure currency, date formats, voucher numbering, approval policies, and module settings.' :
+                adminSubTab === 'USER_MGMT' ? 'Add, modify, and manage user credentials, roles, and reporting hierarchy.' :
+                adminSubTab === 'INTEGRATIONS' ? 'Manage Microsoft Power Automate Webhook connectors, sender config, and Cloudinary attachments.' :
+                adminSubTab === 'TEMPLATES' ? 'Customize and preview notification email templates for disbursements, deposits, and approvals.' :
+                adminSubTab === 'SYSTEM_AUDIT' ? 'Complete chronological immutable audit logs of transactions, user access, and system events.' :
+                'Export JSON backups, restore workspace states, and manage category limits.'
+              )}
             </p>
           </div>
         </header>
@@ -1360,16 +2088,80 @@ export default function App() {
               transition={{ duration: 0.2, ease: 'easeOut' }}
               className="h-full"
             >
-              {activeTab === 'DASHBOARD' && (
+              {/* CRM VIEWS */}
+              {activeTab === 'CRM_DASHBOARD' && (
+                <CRMDashboardView 
+                  accounts={crmAccounts}
+                  contacts={crmContacts}
+                  opportunities={crmOpportunities}
+                  crmSettings={crmSettings}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onNavigateToAccounts={() => setActiveTab('CRM_ACCOUNTS')}
+                  onNavigateToContacts={() => setActiveTab('CRM_CONTACTS')}
+                  onNavigateToOpportunities={() => setActiveTab('CRM_OPPORTUNITIES')}
+                />
+              )}
+              {activeTab === 'CRM_ACCOUNTS' && (
+                <CRMAccountsView
+                  accounts={crmAccounts}
+                  crmSettings={crmSettings}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onAddAccount={handleAddCRMAccount}
+                  onUpdateAccount={handleUpdateCRMAccount}
+                  onDeleteAccount={handleDeleteCRMAccount}
+                />
+              )}
+              {activeTab === 'CRM_CONTACTS' && (
+                <CRMContactsView
+                  contacts={crmContacts}
+                  accounts={crmAccounts}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onAddContact={handleAddCRMContact}
+                  onUpdateContact={handleUpdateCRMContact}
+                  onDeleteContact={handleDeleteCRMContact}
+                />
+              )}
+              {activeTab === 'CRM_OPPORTUNITIES' && (
+                <CRMOpportunitiesView
+                  opportunities={crmOpportunities}
+                  accounts={crmAccounts}
+                  contacts={crmContacts}
+                  crmSettings={crmSettings}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onAddOpportunity={handleAddCRMOpportunity}
+                  onUpdateOpportunity={handleUpdateCRMOpportunity}
+                  onDeleteOpportunity={handleDeleteCRMOpportunity}
+                />
+              )}
+              {activeTab === 'CRM_SETTINGS' && (
+                <CRMSettingsView
+                  crmSettings={crmSettings}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onUpdateCRMSettings={handleUpdateCRMSettings}
+                />
+              )}
+
+              {/* HRMS VIEW */}
+              {activeTab === 'HRMS' && (
+                <HRMSPlaceholderView />
+              )}
+
+              {/* CASH BOOK (PETTY CASH) VIEWS */}
+              {activeTab === 'CASHBOOK_DASHBOARD' && (
                 <DashboardView 
                   transactions={transactions} 
                   categories={categories} 
                   currentUser={currentUser}
-                  onNavigateToRegister={() => setActiveTab('OUTWARD')}
+                  onNavigateToRegister={() => setActiveTab('CASHBOOK_OUTWARD')}
                   appSettings={appSettings}
                 />
               )}
-              {activeTab === 'INWARD' && (
+              {activeTab === 'CASHBOOK_INWARD' && (
                 <RegisterView 
                   transactions={transactions} 
                   categories={categories} 
@@ -1383,7 +2175,7 @@ export default function App() {
                   integrationSettings={integrationSettings}
                 />
               )}
-              {activeTab === 'OUTWARD' && (
+              {activeTab === 'CASHBOOK_OUTWARD' && (
                 <RegisterView 
                   transactions={transactions} 
                   categories={categories} 
@@ -1397,7 +2189,7 @@ export default function App() {
                   integrationSettings={integrationSettings}
                 />
               )}
-              {activeTab === 'APPROVALS' && (
+              {activeTab === 'CASHBOOK_APPROVALS' && (
                 <ApprovalsView 
                   transactions={transactions}
                   categories={categories}
@@ -1410,9 +2202,11 @@ export default function App() {
                   appSettings={appSettings}
                 />
               )}
-              {activeTab === 'SETTINGS' && (
+              {activeTab === 'CASHBOOK_SETTINGS' && (
                 <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
               )}
+
+              {/* ADMIN SETTINGS VIEW */}
               {activeTab === 'ADMIN_SETTINGS' && (
                 <AdminSettingsView 
                   currentUser={currentUser}
@@ -1420,6 +2214,8 @@ export default function App() {
                   onUpdateAppSettings={handleUpdateAppSettings}
                   integrationSettings={integrationSettings}
                   onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
+                  crmSettings={crmSettings}
+                  onUpdateCRMSettings={handleUpdateCRMSettings}
                   users={users}
                   onAddUser={handleAddUser}
                   onUpdateUser={handleUpdateUser}
@@ -1434,6 +2230,8 @@ export default function App() {
                   onBackupData={handleBackupData}
                   onRestoreData={handleRestoreData}
                   onWipeAllData={handleWipeAllData}
+                  activeSubTab={adminSubTab}
+                  onSubTabChange={setAdminSubTab}
                 />
               )}
             </motion.div>

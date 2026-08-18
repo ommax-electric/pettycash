@@ -1608,7 +1608,9 @@ export default function RegisterView({
               font-size: 11px;
               font-weight: 700;
               color: #1e40af;
-              margin-top: calc(2mm + 1.5px);
+              position: relative;
+              top: 3px;
+              margin-top: 2mm;
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
@@ -1736,7 +1738,7 @@ export default function RegisterView({
 
               <!-- Bottom Signature & Recd Area -->
               <div class="bottom-area">
-                <div class="recd-row" style="margin-bottom: ${isVoided ? '3mm' : '14mm'};">
+                <div class="recd-row" style="margin-bottom: ${isVoided ? 'calc(3mm - 3px)' : 'calc(14mm - 3px)'};">
                   Recd. above sum of Rs. <span class="recd-blank"></span>
                 </div>
 
@@ -1860,7 +1862,7 @@ export default function RegisterView({
 
             <!-- Bottom Signature -->
             <div class="bottom-area">
-              <div class="recd-row" style="margin-bottom: ${isVoided ? '2.5mm' : '12mm'};">
+              <div class="recd-row" style="margin-bottom: ${isVoided ? 'calc(2.5mm - 3px)' : 'calc(12mm - 3px)'};">
                 Recd. above sum of Rs. <span class="recd-blank"></span>
               </div>
 
@@ -2128,7 +2130,9 @@ export default function RegisterView({
               font-size: 10.5px;
               font-weight: 700;
               color: #1e40af;
-              margin-top: calc(1.5mm + 1.5px);
+              position: relative;
+              top: 3px;
+              margin-top: 1.5mm;
             }
             .recd-blank {
               border-bottom: 1.5px solid #2563eb;
@@ -4264,17 +4268,32 @@ export default function RegisterView({
                       <td className="py-4 px-6 text-center">
                         <div className="flex items-center justify-center gap-2">
                           {/* Attachment / Receipt view button */}
-                          <button
-                            onClick={() => setViewingAttachment(txn)}
-                            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                              txn.receiptUrl || txn.receiptName
-                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 shadow-2xs border border-indigo-200/80'
-                                : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'
-                            }`}
-                            title={txn.receiptUrl || txn.receiptName ? 'View Attached Receipt Document' : 'View Voucher & Details'}
-                          >
-                            <Paperclip className="w-3.5 h-3.5" />
-                          </button>
+                          {(() => {
+                            const hasAttachment = Boolean(txn.receiptUrl || txn.receiptName);
+                            return (
+                              <div className="relative group/att inline-flex">
+                                <button
+                                  type="button"
+                                  disabled={!hasAttachment}
+                                  onClick={() => hasAttachment && setViewingAttachment(txn)}
+                                  className={`p-1.5 rounded-lg transition-all ${
+                                    hasAttachment
+                                      ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 shadow-2xs border border-indigo-200/80 cursor-pointer'
+                                      : 'text-slate-300 bg-slate-50/60 border border-slate-100 cursor-not-allowed opacity-50'
+                                  }`}
+                                  aria-label={hasAttachment ? 'View Attached Receipt Document' : 'This voucher has no attachment'}
+                                >
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                </button>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover/att:flex flex-col items-center pointer-events-none z-30">
+                                  <div className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-lg whitespace-nowrap border border-slate-800 tracking-wide">
+                                    {hasAttachment ? 'View Attached Receipt Document' : 'This voucher has no attachment'}
+                                  </div>
+                                  <div className="w-1.5 h-1.5 bg-slate-900 rotate-45 -mt-0.5 border-r border-b border-slate-800"></div>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Print action (accessible to all, including auditors) */}
                           <button
