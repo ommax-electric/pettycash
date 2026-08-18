@@ -570,17 +570,16 @@ export default function CRMAccountsView({
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-          {/* Export Report Dropdown (Styled like Expense module in Cash Book) */}
+          {/* Export Report Dropdown */}
           <div className="relative">
             <button 
               type="button"
               onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-              style={{ backgroundColor: '#f7b944' }}
-              className="py-2.5 px-3.5 hover:opacity-90 text-amber-950 rounded-xl border border-amber-300/30 transition-all text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+              className="py-2.5 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl border border-slate-200 transition-all text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
             >
-              <FileSpreadsheet className="w-4 h-4 text-amber-900" />
-              Export Report
-              <ChevronDown className="w-3.5 h-3.5 text-amber-900 ml-0.5" />
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Export Report</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500 ml-0.5" />
             </button>
             {isExportDropdownOpen && (
               <>
@@ -727,8 +726,10 @@ export default function CRMAccountsView({
 
       {/* 3. ACCOUNTS DATA TABLE (List View with Max 10 per page) */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700 min-w-[760px]">
+        
+        {/* Desktop Table View (Hidden on mobile) */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left text-xs text-slate-700">
             <thead className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="py-3 px-4 w-28">ID</th>
@@ -871,6 +872,135 @@ export default function CRMAccountsView({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Responsive Cards View (Visible on mobile screens, no horizontal scroll) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {paginatedAccounts.length > 0 ? (
+            paginatedAccounts.map(account => (
+              <div key={account.id} className="p-4 space-y-3 hover:bg-slate-50/50 transition-colors">
+                {/* Top Row: Account ID & Status Selector */}
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewingAccount(account)}
+                    className="font-mono font-extrabold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg text-xs border border-blue-100 cursor-pointer flex items-center gap-1 shadow-2xs"
+                    title="Click to view details"
+                  >
+                    <span>{account.id}</span>
+                  </button>
+
+                  <div className="relative inline-block">
+                    <select
+                      value={account.status}
+                      onChange={e => handleStatusSelect(account, e.target.value as any)}
+                      className={`appearance-none pl-2.5 pr-6 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer focus:outline-none ${
+                        account.status === 'ACTIVE'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : account.status === 'PROSPECT'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      <option value="ACTIVE">Active Client</option>
+                      <option value="PROSPECT">Prospect / Lead</option>
+                      <option value="INACTIVE">Inactive</option>
+                    </select>
+                    <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
+                  </div>
+                </div>
+
+                {/* Company Name & Business Category */}
+                <div>
+                  <h4 
+                    onClick={() => setViewingAccount(account)}
+                    className="font-extrabold text-slate-900 text-sm cursor-pointer hover:text-blue-600 transition-colors"
+                  >
+                    {account.name}
+                  </h4>
+                  {account.businessCategory && (
+                    <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">
+                      {account.businessCategory}
+                    </span>
+                  )}
+                </div>
+
+                {/* Info Grid: Industry, Phone, Location */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
+                  <div className="flex items-center gap-1.5 text-slate-600">
+                    <Briefcase className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{account.industry || '—'}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-slate-600">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    {account.phone ? (
+                      <a href={`tel:${account.phone}`} className="hover:underline text-slate-700 font-medium truncate">
+                        {account.phone}
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-slate-600 sm:col-span-2">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">
+                      {account.billingCity ? `${account.billingCity}${account.billingState ? `, ${account.billingState}` : ''}` : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bottom Row: Assigned Owner & Action Buttons */}
+                <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                  <div className="text-[10px] text-slate-400">
+                    Owner: <span className="font-semibold text-slate-600">{account.assignedTo || 'Unassigned'}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setViewingAccount(account)}
+                      className="inline-flex items-center gap-1 py-1 px-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                    >
+                      <Eye className="w-3 h-3 text-slate-600" />
+                      <span>Details</span>
+                    </button>
+
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(account)}
+                        className="inline-flex items-center gap-1 py-1 px-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                      >
+                        <Pencil className="w-3 h-3 text-amber-600" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => setDeletingAccountId(account.id)}
+                        className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-xs font-bold transition-all cursor-pointer h-7"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-500" />
+                        <span>Delete</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="py-12 text-center text-slate-400 p-4">
+              <Building2 className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+              <p className="font-semibold text-slate-600 text-sm">No matching accounts found</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {isFilterActive ? 'Try adjusting your filter criteria.' : 'Click "New Account" to add your first customer company.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* PAGINATION CONTROLS (Max 10 per page) */}
@@ -1135,52 +1265,60 @@ export default function CRMAccountsView({
                   </div>
                 )}
 
-                {/* 6. EDIT HISTORY & AUDIT TRAIL AT THE BOTTOM */}
-                <div className="space-y-2.5 pt-2 border-t border-slate-200">
+                {/* 6. EDIT HISTORY & AUDIT TRAIL AT THE BOTTOM (Matching Expense Module in Cash Book) */}
+                <div className="border-t border-slate-100 pt-5 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
-                      <History className="w-3.5 h-3.5 text-amber-600" />
-                      Edit & Activity History
-                    </h4>
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <History className="w-4 h-4 text-amber-500" />
+                      <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
+                        Account Edit & Activity History
+                      </span>
+                    </div>
                     <span className="text-[10px] text-slate-400 font-medium">All timestamps in IST</span>
                   </div>
 
-                  <div className="border border-slate-100 rounded-2xl bg-slate-50/50 p-3 max-h-48 overflow-y-auto space-y-2.5">
-                    {viewingAccount.editHistory && viewingAccount.editHistory.length > 0 ? (
-                      viewingAccount.editHistory.map((item, idx) => (
-                        <div key={idx} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                                item.action === 'CREATED'
+                  {!viewingAccount.editHistory || viewingAccount.editHistory.length === 0 ? (
+                    <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
+                      <span className="text-[11px] font-medium italic">
+                        Original account entry created on {formatCRMIDateTime(viewingAccount.createdAt)} by {viewingAccount.assignedTo || 'Admin'}. No edits or status changes have been performed yet.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-h-[240px] overflow-y-auto pr-1">
+                      {viewingAccount.editHistory.map((entry, eIdx) => (
+                        <div key={eIdx} className="relative pl-5 border-l-2 border-indigo-100 py-0.5 text-[11px] sm:text-xs">
+                          {/* Timeline dot */}
+                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-500 border border-white"></div>
+                          
+                          {/* Log Header */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
+                            <span className="font-bold text-slate-800">
+                              <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                                entry.action === 'CREATED'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : item.action === 'STATUS_CHANGED'
+                                  : entry.action === 'STATUS_CHANGED'
                                   ? 'bg-amber-50 text-amber-700 border border-amber-200'
                                   : 'bg-blue-50 text-blue-700 border border-blue-200'
                               }`}>
-                                {item.action.replace('_', ' ')}
+                                {entry.action.replace('_', ' ')}
                               </span>
-                              <span className="font-bold text-slate-800 text-[11px] truncate">
-                                {item.details || 'Account details modified'}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              By: <span className="font-semibold text-slate-600">{item.changedBy}</span>
-                            </div>
+                              by <span className="text-indigo-600 font-semibold">{entry.changedBy}</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                              {formatCRMIDateTime(entry.timestamp)}
+                            </span>
                           </div>
 
-                          <div className="text-[10px] font-mono text-slate-500 sm:text-right shrink-0">
-                            {formatCRMIDateTime(item.timestamp)}
+                          {/* Details Box */}
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                            <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                              {entry.details || 'Account details or status modified'}
+                            </p>
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-center py-4 text-slate-400 text-xs">
-                        <Clock className="w-5 h-5 mx-auto mb-1 opacity-50" />
-                        <span>Created on {formatCRMIDateTime(viewingAccount.createdAt)} by {viewingAccount.assignedTo || 'Admin'}</span>
-                      </div>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
               </div>
