@@ -86,22 +86,33 @@ export const formatCRMIDate = (isoString?: string | null): string => {
   }
 };
 
+export type ContactStatus = 'ACTIVE' | 'INACTIVE' | 'LEFT_COMPANY' | 'DO_NOT_CONTACT';
+
 export interface CRMContact {
   id: string;
   accountId?: string;
   accountName?: string;
-  firstName: string;
-  lastName: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone?: string;
   mobile?: string;
+  altMobile?: string;
   designation?: string;
   department?: string;
   isPrimary?: boolean;
-  status: 'ACTIVE' | 'INACTIVE';
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+  status: ContactStatus | 'ACTIVE' | 'INACTIVE';
+  assignedTo?: string;
   createdAt: string;
   updatedAt?: string;
   notes?: string;
+  editHistory?: AccountEditHistoryEntry[];
 }
 
 export type OpportunityStage = 
@@ -254,11 +265,12 @@ export const INITIAL_CRM_ACCOUNTS: CRMAccount[] = [
 
 export const INITIAL_CRM_CONTACTS: CRMContact[] = [
   {
-    id: 'CON-2001',
+    id: 'CON - 001',
     accountId: 'ACC - 001',
     accountName: 'Tata Power Solar Systems Ltd',
     firstName: 'Rajesh',
     lastName: 'Sharma',
+    name: 'Rajesh Sharma',
     email: 'rajesh.sharma@tatapower.com',
     phone: '+91 98201 12345',
     mobile: '+91 98201 12345',
@@ -266,15 +278,25 @@ export const INITIAL_CRM_CONTACTS: CRMContact[] = [
     department: 'Procurement & Vendor Mgmt',
     isPrimary: true,
     status: 'ACTIVE',
+    assignedTo: 'Admin Operator',
     createdAt: new Date().toISOString(),
-    notes: 'Main point of contact for solar project transformer bidding.'
+    notes: 'Main point of contact for solar project transformer bidding.',
+    editHistory: [
+      {
+        timestamp: new Date().toISOString(),
+        changedBy: 'Admin Operator',
+        action: 'CREATED',
+        details: 'Contact created with status Active'
+      }
+    ]
   },
   {
-    id: 'CON-2002',
+    id: 'CON - 002',
     accountId: 'ACC - 002',
     accountName: 'Larsen & Toubro Ltd (ECC Div)',
     firstName: 'Priya',
     lastName: 'Narayanan',
+    name: 'Priya Narayanan',
     email: 'p.narayanan@lntecc.com',
     phone: '+91 94440 98765',
     mobile: '+91 94440 98765',
@@ -282,15 +304,25 @@ export const INITIAL_CRM_CONTACTS: CRMContact[] = [
     department: 'Substation Projects',
     isPrimary: true,
     status: 'ACTIVE',
+    assignedTo: 'Admin Operator',
     createdAt: new Date().toISOString(),
-    notes: 'Handles technical vendor approvals and drawing sign-offs.'
+    notes: 'Handles technical vendor approvals and drawing sign-offs.',
+    editHistory: [
+      {
+        timestamp: new Date().toISOString(),
+        changedBy: 'Admin Operator',
+        action: 'CREATED',
+        details: 'Contact created with status Active'
+      }
+    ]
   },
   {
-    id: 'CON-2003',
+    id: 'CON - 003',
     accountId: 'ACC - 003',
     accountName: 'Schneider Electric India Pvt Ltd',
     firstName: 'Amit',
     lastName: 'Deshmukh',
+    name: 'Amit Deshmukh',
     email: 'amit.deshmukh@se.com',
     phone: '+91 98110 54321',
     mobile: '+91 98110 54321',
@@ -298,8 +330,17 @@ export const INITIAL_CRM_CONTACTS: CRMContact[] = [
     department: 'Supply Chain',
     isPrimary: true,
     status: 'ACTIVE',
+    assignedTo: 'Admin Operator',
     createdAt: new Date().toISOString(),
-    notes: 'Initiated preliminary OEM pricing discussions.'
+    notes: 'Initiated preliminary OEM pricing discussions.',
+    editHistory: [
+      {
+        timestamp: new Date().toISOString(),
+        changedBy: 'Admin Operator',
+        action: 'CREATED',
+        details: 'Contact created with status Active'
+      }
+    ]
   }
 ];
 

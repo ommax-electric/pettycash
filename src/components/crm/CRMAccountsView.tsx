@@ -89,6 +89,7 @@ export default function CRMAccountsView({
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [viewingAccount, setViewingAccount] = useState<CRMAccount | null>(null);
+  const [showAccountHistory, setShowAccountHistory] = useState(false);
   const [editingAccount, setEditingAccount] = useState<CRMAccount | null>(null);
   const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
   const [statusChangePrompt, setStatusChangePrompt] = useState<{
@@ -792,7 +793,10 @@ export default function CRMAccountsView({
                     <td className="py-3 px-4 whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => setViewingAccount(account)}
+                        onClick={() => {
+                          setViewingAccount(account);
+                          setShowAccountHistory(true);
+                        }}
                         className="font-mono font-extrabold text-blue-600 hover:text-blue-800 hover:underline text-[11px] cursor-pointer text-left focus:outline-none"
                         title="Click to view full details & edit history"
                       >
@@ -870,9 +874,12 @@ export default function CRMAccountsView({
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1">
                         <button
-                          onClick={() => setViewingAccount(account)}
+                          onClick={() => {
+                            setViewingAccount(account);
+                            setShowAccountHistory(false);
+                          }}
                           className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                          title="View Details & History"
+                          title="View Details"
                         >
                           <Eye className="w-4 h-4 text-slate-600" />
                         </button>
@@ -926,9 +933,12 @@ export default function CRMAccountsView({
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    onClick={() => setViewingAccount(account)}
+                    onClick={() => {
+                      setViewingAccount(account);
+                      setShowAccountHistory(true);
+                    }}
                     className="font-mono font-extrabold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg text-xs border border-blue-100 cursor-pointer flex items-center gap-1 shadow-2xs"
-                    title="Click to view details"
+                    title="Click to view full details & edit history"
                   >
                     <span>{account.id}</span>
                   </button>
@@ -956,7 +966,10 @@ export default function CRMAccountsView({
                 {/* Company Name & Business Category */}
                 <div>
                   <h4 
-                    onClick={() => setViewingAccount(account)}
+                    onClick={() => {
+                      setViewingAccount(account);
+                      setShowAccountHistory(false);
+                    }}
                     className="font-extrabold text-slate-900 text-sm cursor-pointer hover:text-blue-600 transition-colors"
                   >
                     {account.name}
@@ -1003,7 +1016,10 @@ export default function CRMAccountsView({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setViewingAccount(account)}
+                      onClick={() => {
+                        setViewingAccount(account);
+                        setShowAccountHistory(false);
+                      }}
                       className="p-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
                       title="View Details"
                     >
@@ -1308,61 +1324,63 @@ export default function CRMAccountsView({
                   </div>
                 )}
 
-                {/* 6. EDIT HISTORY & AUDIT TRAIL AT THE BOTTOM (Matching Expense Module in Cash Book) */}
-                <div className="border-t border-slate-100 pt-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-amber-600">
-                      <History className="w-4 h-4 text-amber-500" />
-                      <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                        Account Edit & Activity History
-                      </span>
+                {/* 6. EDIT HISTORY & AUDIT TRAIL AT THE BOTTOM (Only shown when ID is clicked) */}
+                {showAccountHistory && (
+                  <div className="border-t border-slate-100 pt-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-amber-600">
+                        <History className="w-4 h-4 text-amber-500" />
+                        <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
+                          Account Edit & Activity History
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium">All timestamps in IST</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-medium">All timestamps in IST</span>
-                  </div>
 
-                  {!viewingAccount.editHistory || viewingAccount.editHistory.length === 0 ? (
-                    <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
-                      <span className="text-[11px] font-medium italic">
-                        Original account entry created on {formatCRMIDateTime(viewingAccount.createdAt)} by {viewingAccount.assignedTo || 'Admin'}. No edits or status changes have been performed yet.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 max-h-[240px] overflow-y-auto pr-1">
-                      {viewingAccount.editHistory.map((entry, eIdx) => (
-                        <div key={eIdx} className="relative pl-5 border-l-2 border-indigo-100 py-0.5 text-[11px] sm:text-xs">
-                          {/* Timeline dot */}
-                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-500 border border-white"></div>
-                          
-                          {/* Log Header */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
-                            <span className="font-bold text-slate-800">
-                              <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                                entry.action === 'CREATED'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : entry.action === 'STATUS_CHANGED'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
-                              }`}>
-                                {entry.action.replace('_', ' ')}
+                    {!viewingAccount.editHistory || viewingAccount.editHistory.length === 0 ? (
+                      <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
+                        <span className="text-[11px] font-medium italic">
+                          Original account entry created on {formatCRMIDateTime(viewingAccount.createdAt)} by {viewingAccount.assignedTo || 'Admin'}. No edits or status changes have been performed yet.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 max-h-[240px] overflow-y-auto pr-1">
+                        {viewingAccount.editHistory.map((entry, eIdx) => (
+                          <div key={eIdx} className="relative pl-5 border-l-2 border-indigo-100 py-0.5 text-[11px] sm:text-xs">
+                            {/* Timeline dot */}
+                            <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-500 border border-white"></div>
+                            
+                            {/* Log Header */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
+                              <span className="font-bold text-slate-800">
+                                <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                                  entry.action === 'CREATED'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : entry.action === 'STATUS_CHANGED'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                }`}>
+                                  {entry.action.replace('_', ' ')}
+                                </span>
+                                by <span className="text-indigo-600 font-semibold">{entry.changedBy}</span>
                               </span>
-                              by <span className="text-indigo-600 font-semibold">{entry.changedBy}</span>
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono font-semibold">
-                              {formatCRMIDateTime(entry.timestamp)}
-                            </span>
-                          </div>
+                              <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                                {formatCRMIDateTime(entry.timestamp)}
+                              </span>
+                            </div>
 
-                          {/* Details Box */}
-                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
-                            <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
-                              {entry.details || 'Account details or status modified'}
-                            </p>
+                            {/* Details Box */}
+                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                                {entry.details || 'Account details or status modified'}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
               </div>
 

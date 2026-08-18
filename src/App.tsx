@@ -1176,24 +1176,41 @@ export default function App() {
     return `ACC - ${String(n).padStart(3, '0')}`;
   };
 
+  const getNextCRMContactId = () => {
+    const usedNums = new Set<number>();
+    crmContacts.forEach(c => {
+      if (!c.id) return;
+      const match = c.id.match(/(?:CON\s*[-_]?\s*)(\d+)/i);
+      if (match) {
+        usedNums.add(parseInt(match[1], 10));
+      }
+    });
+    let n = 1;
+    while (usedNums.has(n)) {
+      n++;
+    }
+    return `CON - ${String(n).padStart(3, '0')}`;
+  };
+
   const handleAddCRMAccount = async (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => {
+    const id = (acc as any).id || getNextCRMAccountId();
+    const now = new Date().toISOString();
+    const statusLabel = acc.status === 'ACTIVE' ? 'Active Client' : acc.status === 'PROSPECT' ? 'Prospect / Lead' : 'Inactive';
+    const newAcc: CRMAccount = {
+      ...acc,
+      id,
+      createdAt: now,
+      editHistory: acc.editHistory || [
+        {
+          timestamp: now,
+          changedBy: currentUser?.fullName || currentUser?.username || 'Admin',
+          action: 'CREATED',
+          details: `Account created with status "${statusLabel}"`
+        }
+      ]
+    };
+    setCrmAccounts(prev => [newAcc, ...prev.filter(a => a.id !== id)]);
     try {
-      const id = (acc as any).id || getNextCRMAccountId();
-      const now = new Date().toISOString();
-      const statusLabel = acc.status === 'ACTIVE' ? 'Active Client' : acc.status === 'PROSPECT' ? 'Prospect / Lead' : 'Inactive';
-      const newAcc: CRMAccount = {
-        ...acc,
-        id,
-        createdAt: now,
-        editHistory: acc.editHistory || [
-          {
-            timestamp: now,
-            changedBy: currentUser?.fullName || currentUser?.username || 'Admin',
-            action: 'CREATED',
-            details: `Account created with status "${statusLabel}"`
-          }
-        ]
-      };
       await setDoc(doc(db, 'crm_accounts', id), newAcc);
       addLog('CREATE_ACCOUNT', `Created CRM Account: ${acc.name} (${id})`);
     } catch (err) {
@@ -1202,6 +1219,7 @@ export default function App() {
   };
 
   const handleUpdateCRMAccount = async (acc: CRMAccount) => {
+    setCrmAccounts(prev => prev.map(a => a.id === acc.id ? acc : a));
     try {
       await setDoc(doc(db, 'crm_accounts', acc.id), acc);
       addLog('UPDATE_ACCOUNT', `Updated CRM Account: ${acc.name} (${acc.id})`);
@@ -1211,6 +1229,7 @@ export default function App() {
   };
 
   const handleDeleteCRMAccount = async (id: string) => {
+    setCrmAccounts(prev => prev.filter(a => a.id !== id));
     try {
       await deleteDoc(doc(db, 'crm_accounts', id));
       addLog('DELETE_ACCOUNT', `Deleted CRM Account: ${id}`);
@@ -1220,30 +1239,44 @@ export default function App() {
   };
 
   const handleAddCRMContact = async (con: Omit<CRMContact, 'id' | 'createdAt'>) => {
+    const id = (con as any).id || getNextCRMContactId();
+    const now = new Date().toISOString();
+    const statusLabel = con.status === 'ACTIVE' ? 'Active' : con.status === 'INACTIVE' ? 'Inactive' : con.status === 'LEFT_COMPANY' ? 'Left Company' : 'Do Not Contact';
+    const newCon: CRMContact = {
+      ...con,
+      id,
+      createdAt: now,
+      editHistory: con.editHistory || [
+        {
+          timestamp: now,
+          changedBy: currentUser?.fullName || currentUser?.username || 'Admin',
+          action: 'CREATED',
+          details: `Contact created with status "${statusLabel}"`
+        }
+      ]
+    };
+    setCrmContacts(prev => [newCon, ...prev.filter(c => c.id !== id)]);
     try {
-      const id = `CON-${Date.now().toString().slice(-5)}`;
-      const newCon: CRMContact = {
-        ...con,
-        id,
-        createdAt: new Date().toISOString()
-      };
       await setDoc(doc(db, 'crm_contacts', id), newCon);
-      addLog('CREATE_CONTACT', `Added CRM Contact: ${con.firstName} ${con.lastName} (${id})`);
+      const contactDisplayName = con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || 'Contact';
+      addLog('CREATE_CONTACT', `Added CRM Contact: ${contactDisplayName} (${id})`);
     } catch (err) {
       console.error('Error adding CRM contact:', err);
     }
   };
 
   const handleUpdateCRMContact = async (con: CRMContact) => {
+    setCrmContacts(prev => prev.map(c => c.id === con.id ? con : c));
     try {
       await setDoc(doc(db, 'crm_contacts', con.id), con);
-      addLog('UPDATE_CONTACT', `Updated CRM Contact: ${con.firstName} ${con.lastName} (${con.id})`);
+      addLog('UPDATE_CONTACT', `Updated CRM Contact: ${con.firstName || con.name} ${con.lastName || ''} (${con.id})`);
     } catch (err) {
       console.error('Error updating CRM contact:', err);
     }
   };
 
   const handleDeleteCRMContact = async (id: string) => {
+    setCrmContacts(prev => prev.filter(c => c.id !== id));
     try {
       await deleteDoc(doc(db, 'crm_contacts', id));
       addLog('DELETE_CONTACT', `Deleted CRM Contact: ${id}`);
@@ -1253,13 +1286,14 @@ export default function App() {
   };
 
   const handleAddCRMOpportunity = async (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => {
+    const id = `DEAL-${Date.now().toString().slice(-5)}`;
+    const newOpp: CRMOpportunity = {
+      ...opp,
+      id,
+      createdAt: new Date().toISOString()
+    };
+    setCrmOpportunities(prev => [newOpp, ...prev.filter(o => o.id !== id)]);
     try {
-      const id = `DEAL-${Date.now().toString().slice(-5)}`;
-      const newOpp: CRMOpportunity = {
-        ...opp,
-        id,
-        createdAt: new Date().toISOString()
-      };
       await setDoc(doc(db, 'crm_opportunities', id), newOpp);
       addLog('CREATE_OPPORTUNITY', `Created CRM Opportunity: ${opp.title} (${id})`);
     } catch (err) {
@@ -1268,6 +1302,7 @@ export default function App() {
   };
 
   const handleUpdateCRMOpportunity = async (opp: CRMOpportunity) => {
+    setCrmOpportunities(prev => prev.map(o => o.id === opp.id ? opp : o));
     try {
       await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
       addLog('UPDATE_OPPORTUNITY', `Updated CRM Opportunity: ${opp.title} (${opp.id})`);
@@ -1277,6 +1312,7 @@ export default function App() {
   };
 
   const handleDeleteCRMOpportunity = async (id: string) => {
+    setCrmOpportunities(prev => prev.filter(o => o.id !== id));
     try {
       await deleteDoc(doc(db, 'crm_opportunities', id));
       addLog('DELETE_OPPORTUNITY', `Deleted CRM Opportunity: ${id}`);
@@ -1868,6 +1904,7 @@ export default function App() {
               accounts={crmAccounts}
               crmSettings={crmSettings}
               currentUser={currentUser}
+              users={users}
               appSettings={appSettings}
               onAddAccount={handleAddCRMAccount}
               onUpdateAccount={handleUpdateCRMAccount}
@@ -1879,6 +1916,7 @@ export default function App() {
               contacts={crmContacts}
               accounts={crmAccounts}
               currentUser={currentUser}
+              users={users}
               appSettings={appSettings}
               onAddContact={handleAddCRMContact}
               onUpdateContact={handleUpdateCRMContact}
@@ -2119,6 +2157,7 @@ export default function App() {
                   contacts={crmContacts}
                   accounts={crmAccounts}
                   currentUser={currentUser}
+                  users={users}
                   appSettings={appSettings}
                   onAddContact={handleAddCRMContact}
                   onUpdateContact={handleUpdateCRMContact}
