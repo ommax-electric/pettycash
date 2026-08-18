@@ -1441,11 +1441,11 @@ export default function CRMAccountsView({
                 
                 {/* Company Name */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Company / Organization Name *</label>
+                  <label className="block font-bold text-slate-700 mb-1">Company Name *</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Tata Power Solar Systems Ltd"
+                    placeholder="e.g. Ommax Electric Private Limited"
                     value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1492,7 +1492,7 @@ export default function CRMAccountsView({
                     <input
                       type="tel"
                       required
-                      placeholder="+91 22 6665 8282"
+                      placeholder="+91 90259 76761"
                       value={formData.phone}
                       onChange={e => setFormData({ ...formData, phone: e.target.value })}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1502,7 +1502,7 @@ export default function CRMAccountsView({
                     <label className="block font-bold text-slate-700 mb-1">Alternative Phone</label>
                     <input
                       type="tel"
-                      placeholder="+91 22 6665 8200"
+                      placeholder="+91 4329 220075"
                       value={formData.altPhone}
                       onChange={e => setFormData({ ...formData, altPhone: e.target.value })}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1516,7 +1516,7 @@ export default function CRMAccountsView({
                     <label className="block font-bold text-slate-700 mb-1">Official Email</label>
                     <input
                       type="email"
-                      placeholder="procurement@tatapower.com"
+                      placeholder="hello@oepl.com"
                       value={formData.email}
                       onChange={e => setFormData({ ...formData, email: e.target.value })}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1554,7 +1554,7 @@ export default function CRMAccountsView({
                     <input
                       type="text"
                       required
-                      placeholder="Mumbai"
+                      placeholder="Ariyalur"
                       value={formData.billingCity}
                       onChange={e => setFormData({ ...formData, billingCity: e.target.value })}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1565,7 +1565,7 @@ export default function CRMAccountsView({
                     <input
                       type="text"
                       required
-                      placeholder="Maharashtra"
+                      placeholder="Tamil Nadu"
                       value={formData.billingState}
                       onChange={e => setFormData({ ...formData, billingState: e.target.value })}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
@@ -1576,7 +1576,7 @@ export default function CRMAccountsView({
                     <input
                       type="text"
                       required
-                      placeholder="400001"
+                      placeholder="621704"
                       value={formData.pincode}
                       onChange={e => setFormData({ ...formData, pincode: e.target.value })}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
