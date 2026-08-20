@@ -47,10 +47,12 @@ import {
   Cloud,
   Briefcase,
   Building2,
-  FileText
+  FileText,
+  Phone,
+  Star
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
-import { CRMSettings, DEFAULT_CRM_SETTINGS } from '../crm/types';
+import { CRMSettings, DEFAULT_CRM_SETTINGS, STANDARD_COUNTRY_CODES, getCountryFromCode, getAllCountryCodes, CountryCodeConfig } from '../crm/types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendEmailNotification, calculateCashBalance } from '../services/notificationService';
 import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
@@ -193,6 +195,23 @@ export default function AdminSettingsView({
   const [bizCatNameInput, setBizCatNameInput] = useState('');
   const [bizCatError, setBizCatError] = useState('');
   const [deleteConfirmBizCat, setDeleteConfirmBizCat] = useState<string | null>(null);
+
+  // CRM Lead Sources State
+  const [isLeadSourceModalOpen, setIsLeadSourceModalOpen] = useState(false);
+  const [editingLeadSource, setEditingLeadSource] = useState<string | null>(null);
+  const [leadSourceNameInput, setLeadSourceNameInput] = useState('');
+  const [leadSourceError, setLeadSourceError] = useState('');
+  const [deleteConfirmLeadSource, setDeleteConfirmLeadSource] = useState<string | null>(null);
+
+  // CRM Country Dialling Codes State
+  const [isCountryCodeModalOpen, setIsCountryCodeModalOpen] = useState(false);
+  const [countryCodeInput, setCountryCodeInput] = useState('');
+  const [countryNameInput, setCountryNameInput] = useState('');
+  const [countryFlagInput, setCountryFlagInput] = useState('');
+  const [countryDigitLengthInput, setCountryDigitLengthInput] = useState<number>(10);
+  const [countryCodeError, setCountryCodeError] = useState('');
+  const [deleteConfirmCountryCode, setDeleteConfirmCountryCode] = useState<CountryCodeConfig | null>(null);
+  const [countryCodeDeleteError, setCountryCodeDeleteError] = useState('');
 
   // --- 2. User Management State ---
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -1048,6 +1067,194 @@ export default function AdminSettingsView({
     setDeleteConfirmBizCat(null);
   };
 
+  const handleUpdateDefaultCountryCode = async (code: string) => {
+    if (onUpdateCRMSettings) {
+      const currentAllowed = currentCrmSettings.allowedCountryCodes || ['+91'];
+      const allowedSet = new Set(currentAllowed);
+      allowedSet.add(code);
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        defaultCountryCode: code,
+        allowedCountryCodes: Array.from(allowedSet)
+      });
+    }
+  };
+
+  const handleToggleAllowedCountryCode = async (code: string) => {
+    if (onUpdateCRMSettings) {
+      const currentAllowed = currentCrmSettings.allowedCountryCodes || ['+91'];
+      let updated: string[];
+      if (currentAllowed.includes(code)) {
+        // Default country code cannot be unselected
+        if (code === (currentCrmSettings.defaultCountryCode || '+91')) {
+          return;
+        }
+        updated = currentAllowed.filter(c => c !== code);
+      } else {
+        updated = [...currentAllowed, code];
+      }
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        allowedCountryCodes: updated
+      });
+    }
+  };
+
+  const openAddCountryCodeModal = () => {
+    setCountryCodeInput('+');
+    setCountryNameInput('');
+    setCountryFlagInput('');
+    setCountryDigitLengthInput(10);
+    setCountryCodeError('');
+    setIsCountryCodeModalOpen(true);
+  };
+
+  const handleSaveCountryCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let code = countryCodeInput.trim();
+    if (!code.startsWith('+')) {
+      code = '+' + code;
+    }
+    const cleanDigits = code.slice(1).replace(/\D/g, '');
+    if (!cleanDigits) {
+      setCountryCodeError('Please enter a valid dialling code (e.g. +353, +234).');
+      return;
+    }
+    code = '+' + cleanDigits;
+
+    const name = countryNameInput.trim();
+    if (!name) {
+      setCountryCodeError('Country name is required.');
+      return;
+    }
+
+    const flag = countryFlagInput.trim() || '🌐';
+    const digitLength = Number(countryDigitLengthInput) || 10;
+
+    const allExisting = getAllCountryCodes(currentCrmSettings);
+    if (allExisting.some(c => c.code === code)) {
+      setCountryCodeError(`Country dialling code ${code} already exists.`);
+      return;
+    }
+
+    const newConfig: CountryCodeConfig = {
+      code,
+      name,
+      flag,
+      digitLength,
+      isCustom: true
+    };
+
+    const currentCustom = currentCrmSettings.customCountryCodes || [];
+    const currentAllowed = currentCrmSettings.allowedCountryCodes || ['+91'];
+    const currentRemoved = currentCrmSettings.removedCountryCodes || [];
+
+    const updatedCustom = [...currentCustom.filter(c => c.code !== code), newConfig];
+    const updatedAllowed = Array.from(new Set([...currentAllowed, code]));
+    const updatedRemoved = currentRemoved.filter(c => c !== code);
+
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        customCountryCodes: updatedCustom,
+        allowedCountryCodes: updatedAllowed,
+        removedCountryCodes: updatedRemoved
+      });
+    }
+
+    setIsCountryCodeModalOpen(false);
+  };
+
+  const handleDeleteCountryCodeDirect = async (country: CountryCodeConfig) => {
+    if (country.code === (currentCrmSettings.defaultCountryCode || '+91')) {
+      setCountryCodeDeleteError('The default company country code cannot be removed. Please select a different default country code first.');
+      return;
+    }
+
+    const currentCustom = currentCrmSettings.customCountryCodes || [];
+    const currentAllowed = currentCrmSettings.allowedCountryCodes || ['+91'];
+    const currentRemoved = currentCrmSettings.removedCountryCodes || [];
+
+    const updatedCustom = currentCustom.filter(c => c.code !== country.code);
+    const updatedAllowed = currentAllowed.filter(c => c !== country.code);
+    const updatedRemoved = Array.from(new Set([...currentRemoved, country.code]));
+
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        customCountryCodes: updatedCustom,
+        allowedCountryCodes: updatedAllowed,
+        removedCountryCodes: updatedRemoved
+      });
+    }
+    setDeleteConfirmCountryCode(null);
+    setCountryCodeDeleteError('');
+  };
+
+  // Handlers for Pipeline Stages & Lead Sources
+  const handleUpdateStageProbability = async (stageId: string, prob: number) => {
+    if (onUpdateCRMSettings) {
+      const currentStages = currentCrmSettings.pipelineStages || DEFAULT_CRM_SETTINGS.pipelineStages;
+      const updated = currentStages.map(s => s.id === stageId ? { ...s, probability: prob } : s);
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        pipelineStages: updated
+      });
+    }
+  };
+
+  const openAddLeadSourceModal = () => {
+    setEditingLeadSource(null);
+    setLeadSourceNameInput('');
+    setLeadSourceError('');
+    setIsLeadSourceModalOpen(true);
+  };
+
+  const openEditLeadSourceModal = (src: string) => {
+    setEditingLeadSource(src);
+    setLeadSourceNameInput(src);
+    setLeadSourceError('');
+    setIsLeadSourceModalOpen(true);
+  };
+
+  const handleSaveLeadSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = leadSourceNameInput.trim();
+    if (!trimmed) {
+      setLeadSourceError('Lead source channel name is required.');
+      return;
+    }
+    const currentSources = currentCrmSettings.leadSources || DEFAULT_CRM_SETTINGS.leadSources;
+    let updatedSources: string[];
+    if (editingLeadSource) {
+      updatedSources = currentSources.map(s => s === editingLeadSource ? trimmed : s);
+    } else {
+      if (currentSources.some(s => s.toLowerCase() === trimmed.toLowerCase())) {
+        setLeadSourceError('Lead source channel already exists.');
+        return;
+      }
+      updatedSources = [...currentSources, trimmed];
+    }
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        leadSources: updatedSources
+      });
+    }
+    setIsLeadSourceModalOpen(false);
+  };
+
+  const handleDeleteLeadSourceDirect = async (src: string) => {
+    if (onUpdateCRMSettings) {
+      const currentSources = currentCrmSettings.leadSources || DEFAULT_CRM_SETTINGS.leadSources;
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        leadSources: currentSources.filter(s => s !== src)
+      });
+    }
+    setDeleteConfirmLeadSource(null);
+  };
+
   // ----------------------------------------------------
   // Handlers for User Management
   // ----------------------------------------------------
@@ -1255,7 +1462,6 @@ export default function AdminSettingsView({
                 >
                   <Sliders className="w-4 h-4 text-[#f7b944] shrink-0" />
                   <span>Petty Cash Settings</span>
-                  <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">Active</span>
                 </button>
 
                 <button
@@ -1269,7 +1475,6 @@ export default function AdminSettingsView({
                 >
                   <Briefcase className="w-4 h-4 text-[#f7b944] shrink-0" />
                   <span>CRM Settings</span>
-                  <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">Active</span>
                 </button>
 
                 <button
@@ -1757,7 +1962,7 @@ export default function AdminSettingsView({
               {/* SUBTAB 1.2: CRM MODULE SETTINGS */}
               {appSettingsSubTab === 'CRM' && (
                 <div className="space-y-6 animate-in fade-in duration-150">
-                  {/* Industry Categories */}
+                  {/* 1. Industry Classifications */}
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
@@ -1779,12 +1984,12 @@ export default function AdminSettingsView({
                       </button>
                     </div>
 
-                    {/* Industries Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {/* Industries 3-Column Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
                       {(currentCrmSettings.industries || []).map((ind, idx) => (
-                        <div key={idx} className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="w-3.5 h-3.5 rounded-full shrink-0 bg-amber-500"></span>
+                        <div key={idx} className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-amber-500"></span>
                             <div className="min-w-0">
                               <span className="font-bold text-xs text-slate-800 truncate block">{ind}</span>
                               <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-amber-100 text-amber-800 font-mono">
@@ -1814,7 +2019,7 @@ export default function AdminSettingsView({
                     </div>
                   </div>
 
-                  {/* Business Categories */}
+                  {/* 2. Business Categories */}
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
@@ -1836,12 +2041,12 @@ export default function AdminSettingsView({
                       </button>
                     </div>
 
-                    {/* Business Categories Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {/* Business Categories 3-Column Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
                       {(currentCrmSettings.businessCategories || []).map((cat, idx) => (
-                        <div key={idx} className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="w-3.5 h-3.5 rounded-full shrink-0 bg-blue-500"></span>
+                        <div key={idx} className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-blue-500"></span>
                             <div className="min-w-0">
                               <span className="font-bold text-xs text-slate-800 truncate block">{cat}</span>
                               <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-blue-100 text-blue-800 font-mono">
@@ -1869,6 +2074,282 @@ export default function AdminSettingsView({
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  {/* 3. Lead Source Channels */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                          <Tag className="w-5 h-5 text-[#f7b944]" />
+                          Lead Source Channels
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Origination channels and referral sources used across sales leads and business opportunities.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={openAddLeadSourceModal}
+                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Lead Source
+                      </button>
+                    </div>
+
+                    {/* Lead Sources 3-Column Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+                      {(currentCrmSettings.leadSources || DEFAULT_CRM_SETTINGS.leadSources).map((source, idx) => (
+                        <div
+                          key={idx}
+                          className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500"></span>
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs text-slate-800 truncate block">{source}</span>
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-emerald-100 text-emerald-800 font-mono">
+                                SOURCE
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              onClick={() => openEditLeadSourceModal(source)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Lead Source"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirmLeadSource(source)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Lead Source"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 4. Pipeline Stages & Win Probability */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                          <Layers className="w-5 h-5 text-[#f7b944]" />
+                          Pipeline Stages & Win Probability
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Configure default probability percentages used for weighted forecasting and sales opportunity pipeline values.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Pipeline Stages 3-Column Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+                      {(currentCrmSettings.pipelineStages || DEFAULT_CRM_SETTINGS.pipelineStages).map((stage) => (
+                        <div 
+                          key={stage.id}
+                          className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span 
+                              className="w-3 h-3 rounded-full shrink-0 shadow-2xs" 
+                              style={{ backgroundColor: stage.color }}
+                            />
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs text-slate-800 truncate block">{stage.label}</span>
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-slate-200/70 text-slate-600 font-mono">
+                                {stage.id}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase font-mono mr-0.5">Prob:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={stage.probability}
+                              onChange={e => {
+                                const val = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                                handleUpdateStageProbability(stage.id, val);
+                              }}
+                              className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-center font-bold text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                            />
+                            <span className="font-bold text-xs text-slate-600">%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 5. Country Dialling Codes */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                          <Phone className="w-5 h-5 text-[#f7b944]" />
+                          Country Dialling Codes
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Configure default dialling codes and manage available international country codes for CRM accounts and contacts.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1.5 font-mono">
+                          <Globe className="w-3.5 h-3.5" />
+                          DEFAULT: {currentCrmSettings.defaultCountryCode || '+91'}
+                        </span>
+                        <button
+                          onClick={openAddCountryCodeModal}
+                          className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Country Code
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Manage All Country Codes (3 Columns Grid) */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-800">
+                            Available Dialling Codes
+                          </h4>
+                          <p className="text-[11px] text-slate-400">
+                            Click the star to set a primary default country code. Toggle checkboxes to control visibility in CRM phone dropdowns.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+                        {getAllCountryCodes(currentCrmSettings).map((country) => {
+                          const isAllowed = (currentCrmSettings.allowedCountryCodes || ['+91', '+971', '+1', '+44', '+65', '+49', '+966', '+60', '+61']).includes(country.code);
+                          const isDefault = (currentCrmSettings.defaultCountryCode || '+91') === country.code;
+
+                          return (
+                            <div
+                              key={`manage-${country.code}`}
+                              className={`p-3 rounded-xl border transition-all flex items-center justify-between min-w-0 ${
+                                isDefault
+                                  ? 'bg-slate-900 border-amber-500/80 text-white shadow-xs ring-1 ring-amber-400/40'
+                                  : isAllowed
+                                    ? 'bg-slate-900 border-slate-800 text-white'
+                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                              }`}
+                            >
+                              <div 
+                                onClick={() => handleToggleAllowedCountryCode(country.code)}
+                                className="flex items-center gap-2 min-w-0 cursor-pointer flex-1"
+                              >
+                                <span className="text-base shrink-0 leading-none">{country.flag}</span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-xs font-bold font-mono">{country.code}</span>
+                                    {isDefault && (
+                                      <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono">
+                                        DEFAULT
+                                      </span>
+                                    )}
+                                    {country.isCustom && (
+                                      <span className="text-[8px] font-bold px-1.5 py-0.2 rounded bg-purple-200 text-purple-900 font-mono">
+                                        CUSTOM
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className={`text-[10px] truncate block ${isAllowed || isDefault ? 'text-slate-300' : 'text-slate-400'}`}>
+                                    {country.name}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                {/* Star button to set default */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateDefaultCountryCode(country.code)}
+                                  className={`p-1 rounded-lg transition-all cursor-pointer ${
+                                    isDefault
+                                      ? 'text-amber-400 hover:text-amber-300 hover:bg-slate-800'
+                                      : isAllowed
+                                        ? 'text-slate-500 hover:text-amber-400 hover:bg-slate-800'
+                                        : 'text-slate-300 hover:text-amber-500 hover:bg-slate-100'
+                                  }`}
+                                  title={isDefault ? 'Current Default Country Code' : `Set ${country.name} (${country.code}) as Default`}
+                                >
+                                  <Star 
+                                    className={`w-3.5 h-3.5 ${
+                                      isDefault 
+                                        ? 'fill-amber-400 text-amber-400' 
+                                        : 'hover:fill-amber-400/40'
+                                    }`} 
+                                  />
+                                </button>
+
+                                {/* Checkbox for enabled / disabled in dropdown */}
+                                <input
+                                  type="checkbox"
+                                  checked={isAllowed}
+                                  disabled={isDefault}
+                                  onChange={() => handleToggleAllowedCountryCode(country.code)}
+                                  className="w-3.5 h-3.5 accent-[#f7b944] rounded cursor-pointer shrink-0"
+                                  title={isDefault ? 'Default code cannot be disabled' : (isAllowed ? 'Disable code in dropdown' : 'Enable code in dropdown')}
+                                />
+
+                                {/* Delete country code */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCountryCodeDeleteError('');
+                                    setDeleteConfirmCountryCode(country);
+                                  }}
+                                  className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                                    isAllowed || isDefault
+                                      ? 'text-slate-400 hover:text-rose-400 hover:bg-slate-800' 
+                                      : 'text-slate-400 hover:text-rose-600 hover:bg-slate-100'
+                                  }`}
+                                  title="Remove Country Code"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Recently Used Country Codes */}
+                    {currentCrmSettings.recentCountryCodes && currentCrmSettings.recentCountryCodes.length > 0 && (
+                      <div className="pt-2 border-t border-slate-100">
+                        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 font-mono">
+                          Recently Used Country Codes (System Auto-tracked)
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          {currentCrmSettings.recentCountryCodes.map((code) => {
+                            const c = getCountryFromCode(code, currentCrmSettings);
+                            return (
+                              <span
+                                key={code}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 font-mono"
+                              >
+                                <span>{c.flag}</span>
+                                <span>{c.code}</span>
+                                <span className="text-slate-400 font-normal">({c.name})</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -4449,6 +4930,274 @@ export default function AdminSettingsView({
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Confirm Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CRM LEAD SOURCE CHANNEL                */}
+      {/* ======================================================== */}
+      {isLeadSourceModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-800">
+                {editingLeadSource ? 'Edit Lead Source Channel' : 'Add New Lead Source Channel'}
+              </h3>
+              <button
+                onClick={() => setIsLeadSourceModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLeadSource} className="space-y-4">
+              {leadSourceError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {leadSourceError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Lead Source Channel Name</label>
+                <input
+                  type="text"
+                  value={leadSourceNameInput}
+                  onChange={(e) => setLeadSourceNameInput(e.target.value)}
+                  placeholder="e.g. LinkedIn Campaign, Trade Expo, Direct Referral"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLeadSourceModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Lead Source
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM LEAD SOURCE CHANNEL            */}
+      {/* ======================================================== */}
+      {deleteConfirmLeadSource && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Lead Source Deletion</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to delete the lead source channel <span className="font-bold text-slate-800">"{deleteConfirmLeadSource}"</span>?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmLeadSource(null)}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteLeadSourceDirect(deleteConfirmLeadSource)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD CUSTOM CRM COUNTRY DIALLING CODE              */}
+      {/* ======================================================== */}
+      {isCountryCodeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center">
+                  <Phone className="w-4 h-4 text-amber-700" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-800">
+                  Add Country Dialling Code
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsCountryCodeModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCountryCode} className="space-y-4">
+              {countryCodeError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {countryCodeError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Dialling Code <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={countryCodeInput}
+                    onChange={(e) => setCountryCodeInput(e.target.value)}
+                    placeholder="e.g. +353"
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono font-bold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Flag Emoji
+                  </label>
+                  <input
+                    type="text"
+                    value={countryFlagInput}
+                    onChange={(e) => setCountryFlagInput(e.target.value)}
+                    placeholder="e.g. 🇮🇪 (default: 🌐)"
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs text-center"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Country Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={countryNameInput}
+                  onChange={(e) => setCountryNameInput(e.target.value)}
+                  placeholder="e.g. Ireland"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Standard Local Phone Digit Length
+                </label>
+                <input
+                  type="number"
+                  min={6}
+                  max={15}
+                  value={countryDigitLengthInput}
+                  onChange={(e) => setCountryDigitLengthInput(Number(e.target.value))}
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Typical digit length for local mobile numbers (e.g. 10 for India/USA, 9 for UAE, 8 for Singapore).
+                </span>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCountryCodeModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Country Code
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM COUNTRY CODE                   */}
+      {/* ======================================================== */}
+      {deleteConfirmCountryCode && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Country Code Removal</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to remove the dialling code <span className="font-bold text-slate-800 font-mono">{deleteConfirmCountryCode.flag} {deleteConfirmCountryCode.code} ({deleteConfirmCountryCode.name})</span> from CRM settings?
+              </p>
+            </div>
+
+            {countryCodeDeleteError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium text-left">
+                <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                {countryCodeDeleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmCountryCode(null);
+                  setCountryCodeDeleteError('');
+                }}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteCountryCodeDirect(deleteConfirmCountryCode)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Removal
               </button>
             </div>
           </motion.div>

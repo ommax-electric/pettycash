@@ -50,13 +50,12 @@ import CRMDashboardView from './components/crm/CRMDashboardView';
 import CRMAccountsView from './components/crm/CRMAccountsView';
 import CRMContactsView from './components/crm/CRMContactsView';
 import CRMOpportunitiesView from './components/crm/CRMOpportunitiesView';
-import CRMSettingsView from './components/crm/CRMSettingsView';
 
 // HRMS Subcomponent
 import HRMSPlaceholderView from './components/hrms/HRMSPlaceholderView';
 
-export type ParentModule = 'CRM' | 'HRMS' | 'CASH_BOOK' | 'ADMIN_SETTINGS';
-export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS' | 'SETTINGS';
+export type ParentModule = 'CRM' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
+export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS';
 
 type NavigationTab = 
   | 'CRM_DASHBOARD'
@@ -70,6 +69,7 @@ type NavigationTab =
   | 'CASHBOOK_OUTWARD'
   | 'CASHBOOK_APPROVALS'
   | 'CASHBOOK_SETTINGS'
+  | 'SETTINGS'
   | 'ADMIN_SETTINGS';
 
 const getInitials = (name: string) => {
@@ -107,7 +107,8 @@ const getActiveTabClass = (tabId: NavigationTab) => {
     case 'CASHBOOK_APPROVALS':
       return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
     case 'CASHBOOK_SETTINGS':
-      return 'bg-slate-600 text-white shadow-md shadow-slate-950/20';
+    case 'SETTINGS':
+      return 'bg-slate-700 text-white shadow-md shadow-slate-950/20';
 
     // Admin
     case 'ADMIN_SETTINGS':
@@ -1119,8 +1120,7 @@ export default function App() {
     { id: 'CRM_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'CRM_ACCOUNTS', label: 'Accounts', icon: Building2, badge: crmAccounts.length },
     { id: 'CRM_CONTACTS', label: 'Contacts', icon: UsersIcon, badge: crmContacts.length },
-    { id: 'CRM_OPPORTUNITIES', label: 'Opportunity', icon: Target, badge: crmOpportunities.length },
-    { id: 'CRM_SETTINGS', label: 'Settings', icon: Sliders }
+    { id: 'CRM_OPPORTUNITIES', label: 'Opportunity', icon: Target, badge: crmOpportunities.length }
   ];
 
   // Cash Book Sub Tabs
@@ -1143,8 +1143,6 @@ export default function App() {
         badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined
       });
     }
-
-    tabs.push({ id: 'CASHBOOK_SETTINGS', label: 'Settings', icon: Settings });
 
     return tabs;
   }, [isUserAdmin, isUserCustodian, isManagerOrAdmin, pendingApprovalsCount]);
@@ -1503,7 +1501,27 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {/* MODULE 4: Admin Settings */}
+            {/* MODULE 4: Settings (Top-level Parent Module) */}
+            <div className="pt-1">
+              <button
+                onClick={() => {
+                  setActiveTab('SETTINGS');
+                  setOpenParentModule('SETTINGS');
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                  activeTab === 'SETTINGS'
+                    ? 'bg-slate-700 text-white font-extrabold shadow-md shadow-slate-950/20'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Settings className="w-4 h-4 text-slate-300 shrink-0" />
+                  <span className="tracking-wide">Settings</span>
+                </div>
+              </button>
+            </div>
+
+            {/* MODULE 5: Admin Settings */}
             {isUserAdmin && (
               <div className="space-y-1 pt-1">
                 <button
@@ -1736,6 +1754,27 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* Mobile Settings (Parent Module) */}
+                    <div>
+                      <button
+                        onClick={() => {
+                          setActiveTab('SETTINGS');
+                          setOpenParentModule('SETTINGS');
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold ${
+                          activeTab === 'SETTINGS'
+                            ? 'bg-slate-800 text-white'
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Settings className="w-4 h-4 text-slate-400" />
+                          <span>Settings</span>
+                        </div>
+                      </button>
+                    </div>
+
                     {/* Mobile Admin */}
                     {isUserAdmin && (
                       <div className="space-y-1">
@@ -1810,7 +1849,6 @@ export default function App() {
             {activeTab === 'CRM_ACCOUNTS' && <Building2 className="w-4 h-4 text-blue-600" />}
             {activeTab === 'CRM_CONTACTS' && <UsersIcon className="w-4 h-4 text-indigo-600" />}
             {activeTab === 'CRM_OPPORTUNITIES' && <Target className="w-4 h-4 text-amber-600" />}
-            {activeTab === 'CRM_SETTINGS' && <Sliders className="w-4 h-4 text-slate-600" />}
             
             {/* HRMS Icon */}
             {activeTab === 'HRMS' && <Users2 className="w-4 h-4 text-indigo-600" />}
@@ -1820,7 +1858,7 @@ export default function App() {
             {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-4 h-4 text-emerald-600" />}
             {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-4 h-4 text-rose-600" />}
             {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-4 h-4 text-amber-600" />}
-            {activeTab === 'CASHBOOK_SETTINGS' && <Settings className="w-4 h-4 text-slate-600" />}
+            {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && <Settings className="w-4 h-4 text-slate-600" />}
 
             {/* Admin Icon */}
             {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-4 h-4 text-[#f7b944]" />}
@@ -1831,7 +1869,6 @@ export default function App() {
               {activeTab === 'CRM_ACCOUNTS' && 'Accounts & Client Directory'}
               {activeTab === 'CRM_CONTACTS' && 'Contacts'}
               {activeTab === 'CRM_OPPORTUNITIES' && 'Sales Pipeline & Opportunities'}
-              {activeTab === 'CRM_SETTINGS' && 'CRM Module Settings'}
 
               {/* HRMS Header */}
               {activeTab === 'HRMS' && 'Human Resources Management System'}
@@ -1841,7 +1878,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
               {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
               {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
-              {activeTab === 'CASHBOOK_SETTINGS' && 'User Settings & Security'}
+              {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Settings & Personal Preferences'}
 
               {/* Admin Header */}
               {activeTab === 'ADMIN_SETTINGS' && (
@@ -1870,7 +1907,7 @@ export default function App() {
             {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
             {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
             {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
-            {activeTab === 'CASHBOOK_SETTINGS' && 'Manage password credentials and workspace preferences.'}
+            {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Manage password credentials, phone dialing defaults, and workspace preferences.'}
 
             {/* Admin Descriptions */}
             {activeTab === 'ADMIN_SETTINGS' && (
@@ -1936,14 +1973,6 @@ export default function App() {
               onDeleteOpportunity={handleDeleteCRMOpportunity}
             />
           )}
-          {activeTab === 'CRM_SETTINGS' && (
-            <CRMSettingsView
-              crmSettings={crmSettings}
-              currentUser={currentUser}
-              appSettings={appSettings}
-              onUpdateCRMSettings={handleUpdateCRMSettings}
-            />
-          )}
           {activeTab === 'HRMS' && (
             <HRMSPlaceholderView />
           )}
@@ -1997,8 +2026,12 @@ export default function App() {
               appSettings={appSettings}
             />
           )}
-          {activeTab === 'CASHBOOK_SETTINGS' && (
-            <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
+          {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && (
+            <SettingsView 
+              currentUser={currentUser} 
+              onUpdateUser={handleUpdateUser} 
+              crmSettings={crmSettings}
+            />
           )}
           {activeTab === 'ADMIN_SETTINGS' && (
             <AdminSettingsView 
@@ -2007,6 +2040,8 @@ export default function App() {
               onUpdateAppSettings={handleUpdateAppSettings}
               integrationSettings={integrationSettings}
               onUpdateIntegrationSettings={handleUpdateIntegrationSettings}
+              crmSettings={crmSettings}
+              onUpdateCRMSettings={handleUpdateCRMSettings}
               users={users}
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
@@ -2050,7 +2085,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
               {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
               {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
-              {activeTab === 'CASHBOOK_SETTINGS' && <Settings className="w-5 h-5 text-slate-600" />}
+              {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && <Settings className="w-5 h-5 text-slate-600" />}
 
               {/* Admin Icon */}
               {activeTab === 'ADMIN_SETTINGS' && <ShieldAlert className="w-5 h-5 text-[#f7b944]" />}
@@ -2071,7 +2106,7 @@ export default function App() {
                 {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
                 {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
                 {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
-                {activeTab === 'CASHBOOK_SETTINGS' && 'User Settings & Security'}
+                {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Settings & Personal Preferences'}
 
                 {/* Admin Header */}
                 {activeTab === 'ADMIN_SETTINGS' && (
@@ -2100,7 +2135,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
               {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
               {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
-              {activeTab === 'CASHBOOK_SETTINGS' && 'Manage password credentials and workspace preferences.'}
+              {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Manage password credentials, phone dialing defaults, and workspace preferences.'}
 
               {/* Admin Descriptions */}
               {activeTab === 'ADMIN_SETTINGS' && (
@@ -2177,14 +2212,6 @@ export default function App() {
                   onDeleteOpportunity={handleDeleteCRMOpportunity}
                 />
               )}
-              {activeTab === 'CRM_SETTINGS' && (
-                <CRMSettingsView
-                  crmSettings={crmSettings}
-                  currentUser={currentUser}
-                  appSettings={appSettings}
-                  onUpdateCRMSettings={handleUpdateCRMSettings}
-                />
-              )}
 
               {/* HRMS VIEW */}
               {activeTab === 'HRMS' && (
@@ -2242,8 +2269,12 @@ export default function App() {
                   appSettings={appSettings}
                 />
               )}
-              {activeTab === 'CASHBOOK_SETTINGS' && (
-                <SettingsView currentUser={currentUser} onUpdateUser={handleUpdateUser} />
+              {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && (
+                <SettingsView 
+                  currentUser={currentUser} 
+                  onUpdateUser={handleUpdateUser} 
+                  crmSettings={crmSettings}
+                />
               )}
 
               {/* ADMIN SETTINGS VIEW */}

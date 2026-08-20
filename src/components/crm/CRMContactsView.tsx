@@ -28,17 +28,21 @@ import {
 import { 
   CRMContact, 
   CRMAccount, 
+  CRMSettings,
   ContactStatus,
   AccountEditHistoryEntry,
   formatCRMIDate,
-  formatCRMIDateTime 
+  formatCRMIDateTime,
+  normalizePhoneNumber
 } from '../../crm/types';
 import { User, AppSettings } from '../../types';
 import { MOCK_USERS } from '../../data';
+import CountryPhoneInput from './CountryPhoneInput';
 
 interface CRMContactsViewProps {
   contacts: CRMContact[];
   accounts: CRMAccount[];
+  crmSettings?: CRMSettings;
   currentUser: User;
   users?: User[];
   appSettings?: AppSettings;
@@ -50,6 +54,7 @@ interface CRMContactsViewProps {
 export default function CRMContactsView({
   contacts,
   accounts,
+  crmSettings,
   currentUser,
   users = [],
   appSettings,
@@ -116,6 +121,7 @@ export default function CRMContactsView({
     designation: '',
     department: '',
     isPrimary: false,
+    hasAlternativeAddress: false,
     address: '',
     city: '',
     state: '',
@@ -125,6 +131,52 @@ export default function CRMContactsView({
     assignedTo: currentUser.fullName || currentUser.username,
     notes: ''
   });
+
+  // Deduplication state
+  const [dismissDuplicateContactWarning, setDismissDuplicateContactWarning] = useState(false);
+
+  // Smart Contact Deduplication (10-Digit Phone Normalization + Email + Account Name checks)
+  const duplicateContactMatches = useMemo(() => {
+    const inputMobileNorm = normalizePhoneNumber(formData.mobile);
+    const inputEmailNorm = formData.email.trim().toLowerCase();
+    const inputNameNorm = formData.name.trim().toLowerCase();
+    const currentAccId = formData.accountId;
+
+    if (!inputMobileNorm && !inputEmailNorm && inputNameNorm.length < 3) return [];
+
+    const matches: { contact: CRMContact; matchReason: string }[] = [];
+
+    contacts.forEach(c => {
+      if (editingContact && c.id === editingContact.id) return;
+
+      // 1. Primary Check: 10-Digit Normalization Check on Mobile / Alt Mobile
+      if (inputMobileNorm && inputMobileNorm.length >= 10) {
+        const cMobileNorm = normalizePhoneNumber(c.mobile || c.phone);
+        const cAltNorm = normalizePhoneNumber(c.altMobile);
+        if ((cMobileNorm && cMobileNorm === inputMobileNorm) || (cAltNorm && cAltNorm === inputMobileNorm)) {
+          matches.push({ contact: c, matchReason: `Same mobile number (${c.mobile || c.phone})` });
+          return;
+        }
+      }
+
+      // 2. Email Address Check
+      if (inputEmailNorm && c.email && c.email.trim().toLowerCase() === inputEmailNorm) {
+        matches.push({ contact: c, matchReason: `Same email address (${c.email})` });
+        return;
+      }
+
+      // 3. Name + Same Account Check
+      if (inputNameNorm && inputNameNorm.length >= 3 && currentAccId) {
+        const cNameNorm = (c.name || [c.firstName, c.lastName].filter(Boolean).join(' ')).trim().toLowerCase();
+        if (cNameNorm === inputNameNorm && c.accountId === currentAccId) {
+          matches.push({ contact: c, matchReason: `Same name in this account (${c.accountName || 'Account'})` });
+          return;
+        }
+      }
+    });
+
+    return matches;
+  }, [formData.mobile, formData.email, formData.name, formData.accountId, contacts, editingContact]);
 
   // Helpers
   const getContactName = (con: CRMContact) => {
@@ -140,15 +192,46 @@ export default function CRMContactsView({
     return name.slice(0, 2).toUpperCase() || 'CT';
   };
 
-  const getContactLocation = (con: CRMContact) => {
-    if (con.city && con.city.trim()) {
-      return [con.city.trim(), con.state?.trim()].filter(Boolean).join(', ');
+  const getContactResolvedAddress = (con: CRMContact) => {
+    const isIndependent = !con.accountId || con.accountId === 'INDEPENDENT';
+    if (isIndependent || con.hasAlternativeAddress) {
+      return {
+        address: con.address || '',
+        city: con.city || '',
+        state: con.state || '',
+        pincode: con.pincode || '',
+        country: con.country || 'India',
+        isFromAccount: false,
+        accountName: ''
+      };
     }
-    if (con.accountId && con.accountId !== 'INDEPENDENT') {
-      const acc = accounts.find(a => a.id === con.accountId);
-      if (acc?.billingCity && acc.billingCity.trim()) {
-        return [acc.billingCity.trim(), acc.billingState?.trim()].filter(Boolean).join(', ');
-      }
+    const acc = accounts.find(a => a.id === con.accountId);
+    if (acc) {
+      return {
+        address: acc.address || '',
+        city: acc.billingCity || '',
+        state: acc.billingState || '',
+        pincode: acc.pincode || '',
+        country: acc.country || acc.billingCountry || 'India',
+        isFromAccount: true,
+        accountName: acc.name
+      };
+    }
+    return {
+      address: con.address || '',
+      city: con.city || '',
+      state: con.state || '',
+      pincode: con.pincode || '',
+      country: con.country || 'India',
+      isFromAccount: false,
+      accountName: ''
+    };
+  };
+
+  const getContactLocation = (con: CRMContact) => {
+    const resolved = getContactResolvedAddress(con);
+    if (resolved.city && resolved.city.trim()) {
+      return [resolved.city.trim(), resolved.state?.trim()].filter(Boolean).join(', ');
     }
     return '—';
   };
@@ -297,6 +380,7 @@ export default function CRMContactsView({
       designation: '',
       department: '',
       isPrimary: false,
+      hasAlternativeAddress: false,
       address: '',
       city: '',
       state: '',
@@ -307,6 +391,7 @@ export default function CRMContactsView({
       notes: ''
     });
     setEditingContact(null);
+    setDismissDuplicateContactWarning(false);
   };
 
   const handleOpenAdd = () => {
@@ -317,8 +402,11 @@ export default function CRMContactsView({
   const handleOpenEdit = (con: CRMContact) => {
     if (!canEdit) return;
     setEditingContact(con);
+    setDismissDuplicateContactWarning(false);
     const resolvedName = getContactName(con);
     const currentAccId = con.accountId && con.accountId !== 'INDEPENDENT' ? con.accountId : 'INDEPENDENT';
+    const isIndep = currentAccId === 'INDEPENDENT';
+    const hasAltAddr = !isIndep && Boolean(con.hasAlternativeAddress);
     setFormData({
       name: resolvedName,
       email: con.email || '',
@@ -329,6 +417,7 @@ export default function CRMContactsView({
       designation: con.designation || '',
       department: con.department || '',
       isPrimary: !!con.isPrimary,
+      hasAlternativeAddress: hasAltAddr,
       address: con.address || '',
       city: con.city || '',
       state: con.state || '',
@@ -366,7 +455,10 @@ export default function CRMContactsView({
         action: 'STATUS_CHANGED',
         oldStatus,
         newStatus,
-        details: `Changed contact status from "${oldStatusLabel}" to "${newStatusLabel}"`
+        details: `Changed contact status from "${oldStatusLabel}" to "${newStatusLabel}"`,
+        changes: [
+          { field: 'Contact Status', oldValue: oldStatusLabel, newValue: newStatusLabel }
+        ]
       };
 
       const updatedHistory = contact.editHistory ? [newHistoryEntry, ...contact.editHistory] : [newHistoryEntry];
@@ -420,6 +512,7 @@ export default function CRMContactsView({
       const isIndependent = accountId === 'INDEPENDENT' || !accountId;
       const selectedAcc = isIndependent ? null : accounts.find(a => a.id === accountId);
       const accName = selectedAcc ? selectedAcc.name : '';
+      const hasAlt = !isIndependent && Boolean(formData.hasAlternativeAddress);
 
       const payload = {
         ...formData,
@@ -428,11 +521,12 @@ export default function CRMContactsView({
         lastName: '',
         accountId: isIndependent ? 'INDEPENDENT' : accountId,
         accountName: accName,
-        address: isIndependent ? formData.address : '',
-        city: isIndependent ? formData.city : '',
-        state: isIndependent ? formData.state : '',
-        pincode: isIndependent ? formData.pincode : '',
-        country: isIndependent ? formData.country : 'India',
+        address: isIndependent || hasAlt ? formData.address : '',
+        city: isIndependent || hasAlt ? formData.city : '',
+        state: isIndependent || hasAlt ? formData.state : '',
+        pincode: isIndependent || hasAlt ? formData.pincode : '',
+        country: isIndependent || hasAlt ? (formData.country || 'India') : 'India',
+        hasAlternativeAddress: hasAlt,
         isPrimary: isIndependent ? false : formData.isPrimary,
         assignedTo: payloadOwner
       };
@@ -441,11 +535,93 @@ export default function CRMContactsView({
       const actor = currentUser.fullName || currentUser.username || 'User';
 
       if (editingContact) {
+        const changes: { field: string; oldValue: string; newValue: string }[] = [];
+
+        const oldName = getContactName(editingContact).trim();
+        const newName = contactName;
+        if (oldName !== newName) {
+          changes.push({ field: 'Full Name', oldValue: oldName || '(Blank)', newValue: newName });
+        }
+
+        const oldAccDisplay = editingContact.accountName || (editingContact.accountId === 'INDEPENDENT' || !editingContact.accountId ? 'Independent' : editingContact.accountId);
+        const newAccDisplay = isIndependent ? 'Independent' : (accName || accountId);
+        if (oldAccDisplay !== newAccDisplay) {
+          changes.push({ field: 'Associated Account', oldValue: oldAccDisplay, newValue: newAccDisplay });
+        }
+
+        if ((editingContact.status || 'ACTIVE') !== formData.status) {
+          changes.push({ field: 'Contact Status', oldValue: getStatusDisplay(editingContact.status || 'ACTIVE'), newValue: getStatusDisplay(formData.status) });
+        }
+
+        if ((editingContact.email || '').trim() !== formData.email.trim()) {
+          changes.push({ field: 'Official Email', oldValue: editingContact.email || '(Blank)', newValue: formData.email.trim() || '(Blank)' });
+        }
+
+        const oldMobile = (editingContact.mobile || editingContact.phone || '').trim();
+        if (oldMobile !== mobile) {
+          changes.push({ field: 'Mobile Number', oldValue: oldMobile || '(Blank)', newValue: mobile });
+        }
+
+        if ((editingContact.altMobile || '').trim() !== formData.altMobile.trim()) {
+          changes.push({ field: 'Alternative Mobile', oldValue: editingContact.altMobile || '(Blank)', newValue: formData.altMobile.trim() || '(Blank)' });
+        }
+
+        if ((editingContact.assignedTo || '').trim() !== (payloadOwner || '').trim()) {
+          changes.push({ field: 'Contact Owner', oldValue: editingContact.assignedTo || '(Blank)', newValue: payloadOwner || '(Blank)' });
+        }
+
+        if ((editingContact.department || '').trim() !== formData.department.trim()) {
+          changes.push({ field: 'Department', oldValue: editingContact.department || '(Blank)', newValue: formData.department.trim() || '(Blank)' });
+        }
+
+        if ((editingContact.designation || '').trim() !== formData.designation.trim()) {
+          changes.push({ field: 'Job Designation', oldValue: editingContact.designation || '(Blank)', newValue: formData.designation.trim() || '(Blank)' });
+        }
+
+        const oldIsPrimary = Boolean(editingContact.isPrimary);
+        const newIsPrimary = Boolean(payload.isPrimary);
+        if (oldIsPrimary !== newIsPrimary) {
+          changes.push({ field: 'Primary Key Contact', oldValue: oldIsPrimary ? 'Yes' : 'No', newValue: newIsPrimary ? 'Yes' : 'No' });
+        }
+
+        const oldHasAlt = Boolean(editingContact.hasAlternativeAddress);
+        const newHasAlt = Boolean(payload.hasAlternativeAddress);
+        if (oldHasAlt !== newHasAlt && !isIndependent) {
+          changes.push({ field: 'Alternative Address', oldValue: oldHasAlt ? 'Enabled' : 'Disabled', newValue: newHasAlt ? 'Enabled' : 'Disabled' });
+        }
+
+        if (isIndependent || hasAlt || oldHasAlt) {
+          if ((editingContact.address || '').trim() !== (payload.address || '').trim()) {
+            changes.push({ field: 'Street Address', oldValue: editingContact.address || '(Blank)', newValue: payload.address || '(Blank)' });
+          }
+          if ((editingContact.city || '').trim() !== (payload.city || '').trim()) {
+            changes.push({ field: 'City', oldValue: editingContact.city || '(Blank)', newValue: payload.city || '(Blank)' });
+          }
+          if ((editingContact.state || '').trim() !== (payload.state || '').trim()) {
+            changes.push({ field: 'State', oldValue: editingContact.state || '(Blank)', newValue: payload.state || '(Blank)' });
+          }
+          if ((editingContact.pincode || '').trim() !== (payload.pincode || '').trim()) {
+            changes.push({ field: 'Pin Code', oldValue: editingContact.pincode || '(Blank)', newValue: payload.pincode || '(Blank)' });
+          }
+          if ((editingContact.country || 'India').trim() !== (payload.country || 'India').trim()) {
+            changes.push({ field: 'Country', oldValue: editingContact.country || 'India', newValue: payload.country || 'India' });
+          }
+        }
+
+        if ((editingContact.notes || '').trim() !== formData.notes.trim()) {
+          changes.push({ field: 'Notes', oldValue: editingContact.notes || '(Blank)', newValue: formData.notes.trim() || '(Blank)' });
+        }
+
+        const detailsText = changes.length > 0
+          ? `Updated ${changes.length} field${changes.length > 1 ? 's' : ''}: ${changes.map(c => c.field).join(', ')}`
+          : 'Contact profile saved without modifications';
+
         const newHistoryEntry: AccountEditHistoryEntry = {
           timestamp: now,
           changedBy: actor,
           action: 'UPDATED',
-          details: 'Contact profile and stakeholder details updated'
+          details: detailsText,
+          changes: changes.length > 0 ? changes : undefined
         };
         const updatedHistory = editingContact.editHistory ? [newHistoryEntry, ...editingContact.editHistory] : [newHistoryEntry];
 
@@ -522,26 +698,29 @@ export default function CRMContactsView({
       'Notes'
     ];
 
-    const rows = filteredContacts.map(c => [
-      `"${c.id}"`,
-      `"${getContactName(c).replace(/"/g, '""')}"`,
-      `"${(c.accountName || (c.accountId === 'INDEPENDENT' ? 'Independent' : '')).replace(/"/g, '""')}"`,
-      `"${(c.mobile || c.phone || '').replace(/"/g, '""')}"`,
-      `"${(c.altMobile || '').replace(/"/g, '""')}"`,
-      `"${(c.email || '').replace(/"/g, '""')}"`,
-      `"${getContactLocation(c).replace(/"/g, '""')}"`,
-      `"${(c.state || '').replace(/"/g, '""')}"`,
-      `"${(c.country || 'India').replace(/"/g, '""')}"`,
-      `"${(c.address || '').replace(/"/g, '""')}"`,
-      `"${(c.pincode || '').replace(/"/g, '""')}"`,
-      `"${getStatusDisplay(c.status)}"`,
-      `"${(c.assignedTo || '—').replace(/"/g, '""')}"`,
-      `"${(c.designation || '').replace(/"/g, '""')}"`,
-      `"${(c.department || '').replace(/"/g, '""')}"`,
-      `"${c.isPrimary ? 'Yes' : 'No'}"`,
-      `"${formatCRMIDate(c.createdAt)}"`,
-      `"${(c.notes || '').replace(/"/g, '""')}"`
-    ]);
+    const rows = filteredContacts.map(c => {
+      const resolvedAddr = getContactResolvedAddress(c);
+      return [
+        `"${c.id}"`,
+        `"${getContactName(c).replace(/"/g, '""')}"`,
+        `"${(c.accountName || (c.accountId === 'INDEPENDENT' ? 'Independent' : '')).replace(/"/g, '""')}"`,
+        `"${(c.mobile || c.phone || '').replace(/"/g, '""')}"`,
+        `"${(c.altMobile || '').replace(/"/g, '""')}"`,
+        `"${(c.email || '').replace(/"/g, '""')}"`,
+        `"${getContactLocation(c).replace(/"/g, '""')}"`,
+        `"${(resolvedAddr.state || '').replace(/"/g, '""')}"`,
+        `"${(resolvedAddr.country || 'India').replace(/"/g, '""')}"`,
+        `"${(resolvedAddr.address || '').replace(/"/g, '""')}"`,
+        `"${(resolvedAddr.pincode || '').replace(/"/g, '""')}"`,
+        `"${getStatusDisplay(c.status)}"`,
+        `"${(c.assignedTo || '—').replace(/"/g, '""')}"`,
+        `"${(c.designation || '').replace(/"/g, '""')}"`,
+        `"${(c.department || '').replace(/"/g, '""')}"`,
+        `"${c.isPrimary ? 'Yes' : 'No'}"`,
+        `"${formatCRMIDate(c.createdAt)}"`,
+        `"${(c.notes || '').replace(/"/g, '""')}"`
+      ];
+    });
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -555,7 +734,9 @@ export default function CRMContactsView({
   };
 
   const handleExportXLSX = () => {
-    const rowsHTML = filteredContacts.map(c => `
+    const rowsHTML = filteredContacts.map(c => {
+      const resolvedAddr = getContactResolvedAddress(c);
+      return `
       <tr>
         <td style="font-family: monospace; font-weight: bold;">${c.id}</td>
         <td style="font-weight: bold;">${getContactName(c)}</td>
@@ -564,10 +745,10 @@ export default function CRMContactsView({
         <td>${c.altMobile || ''}</td>
         <td>${c.email || ''}</td>
         <td>${getContactLocation(c)}</td>
-        <td>${c.state || ''}</td>
-        <td>${c.country || 'India'}</td>
-        <td>${c.address || ''}</td>
-        <td>${c.pincode || ''}</td>
+        <td>${resolvedAddr.state || ''}</td>
+        <td>${resolvedAddr.country || 'India'}</td>
+        <td>${resolvedAddr.address || ''}</td>
+        <td>${resolvedAddr.pincode || ''}</td>
         <td style="font-weight: bold;">${getStatusDisplay(c.status)}</td>
         <td>${c.assignedTo || '—'}</td>
         <td>${c.designation || ''}</td>
@@ -576,7 +757,8 @@ export default function CRMContactsView({
         <td>${formatCRMIDate(c.createdAt)}</td>
         <td>${(c.notes || '').replace(/</g, '&lt;')}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     const xlsContent = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -656,7 +838,7 @@ export default function CRMContactsView({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>CRM Contacts & Stakeholder Directory Report</title>
+          <title>CRM Contact Directory Report</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #1e293b; }
             table { width: 100%; border-collapse: collapse; margin-top: 15px; }
@@ -670,7 +852,7 @@ export default function CRMContactsView({
         <body>
           <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f7b944; padding-bottom: 12px;">
             <div>
-              <h2 style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 800;">CRM Contacts & Stakeholder Directory Report</h2>
+              <h2 style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 800;">CRM Contact Directory Report</h2>
               <p style="margin: 3px 0 0 0; font-size: 11px; color: #64748b;">Generated on: ${nowIST} (IST) | Total Filtered Contacts: <strong>${filteredContacts.length}</strong></p>
             </div>
             <div style="text-align: right;">
@@ -730,7 +912,7 @@ export default function CRMContactsView({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-extrabold text-slate-900 leading-tight">
-                Contacts & Stakeholder Directory
+                Contact Directory
               </h2>
               <span className="text-xs text-slate-500 font-medium">
                 Showing {filteredContacts.length} of {contacts.length} registered contacts
@@ -1788,24 +1970,48 @@ export default function CRMContactsView({
                 </div>
 
                 {/* 4. Address & Location */}
-                <div className="border border-slate-200/80 rounded-2xl p-4 space-y-2.5">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                    Address & Location
-                  </span>
-                  <div className="space-y-1.5">
-                    {viewingContact.address && (
-                      <p className="text-slate-800 font-medium text-xs">
-                        {viewingContact.address}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 text-xs">
-                      <span><strong>City:</strong> {viewingContact.city || '—'}</span>
-                      <span><strong>State:</strong> {viewingContact.state || '—'}</span>
-                      <span><strong>Pin code:</strong> {viewingContact.pincode || '—'}</span>
-                      <span><strong>Country:</strong> {viewingContact.country || 'India'}</span>
+                {(() => {
+                  const resolved = getContactResolvedAddress(viewingContact);
+                  return (
+                    <div className="border border-slate-200/80 rounded-2xl p-4 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                          Address & Location
+                        </span>
+                        {viewingContact.hasAlternativeAddress ? (
+                          <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md font-bold">
+                            Alternative Contact Address
+                          </span>
+                        ) : resolved.isFromAccount ? (
+                          <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200/80 px-2 py-0.5 rounded-md font-bold">
+                            Account Default Address ({resolved.accountName || 'Account'})
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md font-bold">
+                            Independent Address
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        {resolved.address ? (
+                          <p className="text-slate-800 font-medium text-xs">
+                            {resolved.address}
+                          </p>
+                        ) : (
+                          <p className="text-slate-400 font-medium text-xs italic">
+                            No street address recorded
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600 text-xs">
+                          <span><strong>City:</strong> {resolved.city || '—'}</span>
+                          <span><strong>State:</strong> {resolved.state || '—'}</span>
+                          <span><strong>Pin code:</strong> {resolved.pincode || '—'}</span>
+                          <span><strong>Country:</strong> {resolved.country || 'India'}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* 5. Contact Owner & Updates */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -1880,12 +2086,37 @@ export default function CRMContactsView({
                               </span>
                             </div>
 
-                            {/* Details Box */}
-                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
-                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
-                                {entry.details || 'Contact details or status modified'}
-                              </p>
-                            </div>
+                            {/* Details Box / Granular Changes (Matching Expense Module RegisterView) */}
+                            {entry.changes && entry.changes.length > 0 ? (
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                                {entry.changes.map((change, cIdx) => {
+                                  const displayOld = (!change.oldValue || change.oldValue === 'None') ? '(Blank)' : change.oldValue;
+                                  const displayNew = (!change.newValue || change.newValue === 'None') ? '(Blank)' : change.newValue;
+                                  return (
+                                    <div key={cIdx} className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                                      <span className="font-bold text-slate-400 text-[10px] uppercase tracking-wider truncate">
+                                        {change.field}
+                                      </span>
+                                      <span className="sm:col-span-2 text-slate-700 flex flex-wrap items-center gap-1.5 break-all">
+                                        <span className="font-medium bg-red-50 text-red-700 px-1.5 py-0.5 rounded-md text-[10px] line-through decoration-red-400">
+                                          {displayOld}
+                                        </span>
+                                        <span className="text-slate-400 text-[10px] font-bold">→</span>
+                                        <span className="font-extrabold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md text-[10px]">
+                                          {displayNew}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                                <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                                  {entry.details || 'Contact details or status modified'}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2030,33 +2261,80 @@ export default function CRMContactsView({
                       type="email"
                       placeholder="hello@oepl.com"
                       value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
+                      onChange={e => {
+                        setFormData({ ...formData, email: e.target.value });
+                        setDismissDuplicateContactWarning(false);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     />
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Mobile Number *</label>
-                    <input
-                      type="tel"
+                    <CountryPhoneInput
+                      id="con-mobile-number"
                       required
-                      placeholder="+91 90259 76761"
                       value={formData.mobile}
-                      onChange={e => setFormData({ ...formData, mobile: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      onChange={val => {
+                        setFormData({ ...formData, mobile: val });
+                        setDismissDuplicateContactWarning(false);
+                      }}
+                      placeholder="90259 76761"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
                     />
                   </div>
                 </div>
+
+                {/* Soft Warning Banner for Duplicate Contact Detection (10-digit / Email / Name) */}
+                {!dismissDuplicateContactWarning && duplicateContactMatches.length > 0 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start justify-between gap-2.5 text-xs">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="font-extrabold text-amber-900 text-xs">Potential Duplicate Contact Detected</p>
+                        <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                          A contact <strong className="font-bold text-amber-950">"{getContactName(duplicateContactMatches[0].contact)}"</strong> ({duplicateContactMatches[0].contact.id} • {duplicateContactMatches[0].contact.accountName || 'Independent'} • {duplicateContactMatches[0].contact.mobile || duplicateContactMatches[0].contact.phone}) already exists with {duplicateContactMatches[0].matchReason.toLowerCase()}.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViewingContact(duplicateContactMatches[0].contact);
+                          setIsAddModalOpen(false);
+                        }}
+                        className="px-2.5 py-1 bg-amber-200/80 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-[10px] transition-colors cursor-pointer"
+                      >
+                        View Contact
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDismissDuplicateContactWarning(true)}
+                        className="p-1 text-amber-700 hover:text-amber-950 rounded-md cursor-pointer"
+                        title="Dismiss warning"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* 4. Alternative Mobile Number & Contact Owner * (Next to each other) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Alternative Mobile Number</label>
-                    <input
-                      type="tel"
-                      placeholder="+91 4329 220075"
+                    <CountryPhoneInput
+                      id="con-alt-mobile-number"
                       value={formData.altMobile}
-                      onChange={e => setFormData({ ...formData, altMobile: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      onChange={val => setFormData({ ...formData, altMobile: val })}
+                      placeholder="4329 220075"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
                     />
                   </div>
                   <div>
@@ -2121,22 +2399,130 @@ export default function CRMContactsView({
                   </div>
                 </div>
 
-                {/* 6. Primary Key Contact for this Account Checkbox (Below Department and Job Designation) */}
-                <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl flex items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    id="primaryKeyContactCheckbox"
-                    checked={formData.isPrimary}
-                    onChange={e => setFormData({ ...formData, isPrimary: e.target.checked })}
-                    className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600"
-                  />
-                  <label htmlFor="primaryKeyContactCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
-                    <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                    <span>Primary Key Contact for this Account</span>
-                  </label>
-                </div>
+                {/* 6. Primary Key Contact & Optional Alternative Address Option */}
+                {formData.accountId && formData.accountId !== 'INDEPENDENT' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Primary Key Contact for this Account */}
+                    <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="primaryKeyContactCheckbox"
+                        checked={formData.isPrimary}
+                        onChange={e => setFormData({ ...formData, isPrimary: e.target.checked })}
+                        className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                      />
+                      <label htmlFor="primaryKeyContactCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                        <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                        <span>Primary Key Contact for this Account</span>
+                      </label>
+                    </div>
 
-                {/* 7. Dynamic Address Fields (Visible & Fully REQUIRED ONLY when Independent is selected) */}
+                    {/* Do you require alternative address for this contact? */}
+                    <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center gap-2.5 hover:bg-slate-100/60 transition-colors">
+                      <input
+                        type="checkbox"
+                        id="requireAltAddressCheckbox"
+                        checked={formData.hasAlternativeAddress}
+                        onChange={e => setFormData({ ...formData, hasAlternativeAddress: e.target.checked })}
+                        className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                      />
+                      <label htmlFor="requireAltAddressCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                        <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span>Do you require alternative address for this contact?</span>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      id="primaryKeyContactCheckbox"
+                      checked={formData.isPrimary}
+                      onChange={e => setFormData({ ...formData, isPrimary: e.target.checked })}
+                      className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                    />
+                    <label htmlFor="primaryKeyContactCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                      <span>Primary Key Contact for this Account</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* 7. Dynamic Optional Alternative Address Fields (When Alternative Address is checked for an Account) */}
+                {formData.accountId && formData.accountId !== 'INDEPENDENT' && formData.hasAlternativeAddress && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Alternative / Specific Contact Address</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium">Optional address specific to this contact</span>
+                    </div>
+
+                    {/* Street Address */}
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Street Address</label>
+                      <input
+                        type="text"
+                        placeholder="Specific Office, Branch, Site, Floor No, Street Address"
+                        value={formData.address}
+                        onChange={e => setFormData({ ...formData, address: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                      />
+                    </div>
+
+                    {/* City, State, Pin code, Country */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">City</label>
+                        <input
+                          type="text"
+                          placeholder="City / Location"
+                          value={formData.city}
+                          onChange={e => setFormData({ ...formData, city: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">State</label>
+                        <input
+                          type="text"
+                          placeholder="State"
+                          value={formData.state}
+                          onChange={e => setFormData({ ...formData, state: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Pin code</label>
+                        <input
+                          type="text"
+                          placeholder="Pin code"
+                          value={formData.pincode}
+                          onChange={e => setFormData({ ...formData, pincode: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Country</label>
+                        <input
+                          type="text"
+                          placeholder="India"
+                          value={formData.country}
+                          onChange={e => setFormData({ ...formData, country: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* 8. Dynamic Address Fields (Visible & Fully REQUIRED ONLY when Independent is selected) */}
                 {formData.accountId === 'INDEPENDENT' && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }}

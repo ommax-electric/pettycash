@@ -7,6 +7,11 @@ export interface AccountEditHistoryEntry {
   details?: string;
   oldStatus?: string;
   newStatus?: string;
+  changes?: {
+    field: string;
+    oldValue: string;
+    newValue: string;
+  }[];
 }
 
 export interface CRMAccount {
@@ -102,6 +107,7 @@ export interface CRMContact {
   designation?: string;
   department?: string;
   isPrimary?: boolean;
+  hasAlternativeAddress?: boolean;
   address?: string;
   city?: string;
   state?: string;
@@ -142,6 +148,157 @@ export interface CRMOpportunity {
   lostReason?: string;
 }
 
+export interface CountryCodeConfig {
+  code: string;       // e.g. '+91'
+  name: string;       // e.g. 'India'
+  flag: string;       // e.g. '🇮🇳'
+  digitLength?: number; // e.g. 10
+  isCustom?: boolean;
+}
+
+export const STANDARD_COUNTRY_CODES: CountryCodeConfig[] = [
+  { code: '+91', name: 'India', flag: '🇮🇳', digitLength: 10 },
+  { code: '+971', name: 'United Arab Emirates', flag: '🇦🇪', digitLength: 9 },
+  { code: '+1', name: 'United States / Canada', flag: '🇺🇸', digitLength: 10 },
+  { code: '+44', name: 'United Kingdom', flag: '🇬🇧', digitLength: 10 },
+  { code: '+65', name: 'Singapore', flag: '🇸🇬', digitLength: 8 },
+  { code: '+49', name: 'Germany', flag: '🇩🇪', digitLength: 10 },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦', digitLength: 9 },
+  { code: '+60', name: 'Malaysia', flag: '🇲🇾', digitLength: 9 },
+  { code: '+61', name: 'Australia', flag: '🇦🇺', digitLength: 9 },
+  { code: '+81', name: 'Japan', flag: '🇯🇵', digitLength: 10 },
+  { code: '+86', name: 'China', flag: '🇨🇳', digitLength: 11 },
+  { code: '+33', name: 'France', flag: '🇫🇷', digitLength: 9 },
+  { code: '+39', name: 'Italy', flag: '🇮🇹', digitLength: 10 },
+  { code: '+31', name: 'Netherlands', flag: '🇳🇱', digitLength: 9 },
+  { code: '+974', name: 'Qatar', flag: '🇶🇦', digitLength: 8 },
+  { code: '+968', name: 'Oman', flag: '🇴🇲', digitLength: 8 },
+  { code: '+973', name: 'Bahrain', flag: '🇧🇭', digitLength: 8 },
+  { code: '+965', name: 'Kuwait', flag: '🇰🇼', digitLength: 8 },
+  { code: '+880', name: 'Bangladesh', flag: '🇧🇩', digitLength: 10 },
+  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰', digitLength: 9 },
+  { code: '+977', name: 'Nepal', flag: '🇳🇵', digitLength: 10 }
+];
+
+export const getAllCountryCodes = (settings?: { customCountryCodes?: CountryCodeConfig[]; removedCountryCodes?: string[] }): CountryCodeConfig[] => {
+  const removedSet = new Set(settings?.removedCountryCodes || []);
+  const standard = STANDARD_COUNTRY_CODES.filter(c => !removedSet.has(c.code));
+  const custom = (settings?.customCountryCodes || []).filter(c => !removedSet.has(c.code));
+  
+  // Merge, prioritizing custom if code conflicts
+  const map = new Map<string, CountryCodeConfig>();
+  standard.forEach(c => map.set(c.code, c));
+  custom.forEach(c => map.set(c.code, { ...c, isCustom: true }));
+  return Array.from(map.values());
+};
+
+export const getCountryFromCode = (code: string, settings?: { customCountryCodes?: CountryCodeConfig[]; removedCountryCodes?: string[] } | CountryCodeConfig[]): CountryCodeConfig => {
+  let list: CountryCodeConfig[];
+  if (Array.isArray(settings)) {
+    list = settings;
+  } else if (settings) {
+    list = getAllCountryCodes(settings);
+  } else {
+    list = STANDARD_COUNTRY_CODES;
+  }
+  const found = list.find(c => c.code === code);
+  return found || { code, name: code, flag: '🌐', digitLength: 10 };
+};
+
+/**
+ * Normalizes a phone number to its last 10 digits (or clean digits if fewer).
+ * Strips all spaces, brackets, hyphens, and leading country codes / zeros.
+ */
+export const normalizePhoneNumber = (rawPhone?: string | null): string => {
+  if (!rawPhone) return '';
+  const digits = rawPhone.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return digits.slice(-10);
+  }
+  return digits;
+};
+
+/**
+ * Normalizes a company / account name by stripping common corporate suffixes,
+ * punctuation, and whitespace so "DHL Limited", "DHL Private Limited", and "DHL Pvt Ltd"
+ * all normalize to the base keyword "dhl".
+ */
+export const normalizeCompanyName = (rawName?: string | null): string => {
+  if (!rawName) return '';
+  let cleaned = rawName.toLowerCase().trim();
+  
+  // Replace punctuation with spaces
+  cleaned = cleaned.replace(/[\.\,\-\_\&\/\(\)\'\"]/g, ' ');
+  
+  // Common corporate suffixes to strip
+  const suffixes = [
+    'private limited',
+    'pvt limited',
+    'pvt ltd',
+    'pvt. ltd.',
+    'pvt.ltd',
+    'pvtltd',
+    'private ltd',
+    'limited',
+    'ltd',
+    'llp',
+    'inc',
+    'incorporated',
+    'corp',
+    'corporation',
+    'co',
+    'company',
+    'enterprises',
+    'enterprise',
+    'industries',
+    'industry',
+    'technologies',
+    'tech',
+    'solutions',
+    'services',
+    'holdings',
+    'group',
+    'intl',
+    'international'
+  ];
+
+  // Tokenize and clean
+  for (const suffix of suffixes) {
+    const regex = new RegExp(`\\b${suffix}\\b`, 'gi');
+    cleaned = cleaned.replace(regex, ' ');
+  }
+
+  // Collapse multiple spaces
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
+};
+
+/**
+ * Parses a combined phone string like "+91 94426 20075" or "9442620075"
+ * into countryCode and localNumber.
+ */
+export const parsePhoneNumber = (fullPhone?: string | null, defaultCode = '+91'): { countryCode: string; localNumber: string } => {
+  if (!fullPhone) return { countryCode: defaultCode, localNumber: '' };
+  const trimmed = fullPhone.trim();
+  
+  // Check if starts with a known country code
+  for (const c of STANDARD_COUNTRY_CODES) {
+    if (trimmed.startsWith(c.code)) {
+      const rest = trimmed.slice(c.code.length).trim();
+      return { countryCode: c.code, localNumber: rest };
+    }
+  }
+
+  if (trimmed.startsWith('+')) {
+    const spaceIndex = trimmed.indexOf(' ');
+    if (spaceIndex !== -1) {
+      return { countryCode: trimmed.slice(0, spaceIndex), localNumber: trimmed.slice(spaceIndex + 1).trim() };
+    }
+  }
+
+  return { countryCode: defaultCode, localNumber: trimmed };
+};
+
 export interface CRMSettings {
   pipelineStages: {
     id: OpportunityStage;
@@ -153,6 +310,11 @@ export interface CRMSettings {
   industries: string[];
   businessCategories: string[];
   defaultCurrency: string;
+  defaultCountryCode?: string;
+  allowedCountryCodes?: string[];
+  recentCountryCodes?: string[];
+  customCountryCodes?: CountryCodeConfig[];
+  removedCountryCodes?: string[];
 }
 
 export const DEFAULT_CRM_SETTINGS: CRMSettings = {
@@ -168,6 +330,11 @@ export const DEFAULT_CRM_SETTINGS: CRMSettings = {
   industries: ['Electrical & Power', 'Manufacturing', 'Construction & Infra', 'Renewable Energy', 'Automotive', 'Technology', 'Trading & Distribution', 'Other'],
   businessCategories: ['Enterprise / Corporate', 'SME / MSME', 'Government / PSU', 'EPC Contractor', 'Retail / Dealer', 'Consultant', 'Other'],
   defaultCurrency: '₹',
+  defaultCountryCode: '+91',
+  allowedCountryCodes: ['+91', '+971', '+1', '+44', '+65', '+49', '+966', '+60', '+61'],
+  recentCountryCodes: ['+91'],
+  customCountryCodes: [],
+  removedCountryCodes: []
 };
 
 export const INITIAL_CRM_ACCOUNTS: CRMAccount[] = [

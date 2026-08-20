@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { 
   KeyRound, 
@@ -11,16 +11,24 @@ import {
   AlertCircle, 
   Sliders, 
   Check,
-  Lock
+  Lock,
+  Globe
 } from 'lucide-react';
 import { User as UserType } from '../types';
+import { 
+  CountryCodeConfig, 
+  CRMSettings, 
+  DEFAULT_CRM_SETTINGS, 
+  getAllCountryCodes 
+} from '../crm/types';
 
 interface SettingsViewProps {
   currentUser: UserType;
   onUpdateUser?: (updatedUser: UserType) => void;
+  crmSettings?: CRMSettings;
 }
 
-export default function SettingsView({ currentUser, onUpdateUser }: SettingsViewProps) {
+export default function SettingsView({ currentUser, onUpdateUser, crmSettings }: SettingsViewProps) {
   // Password Change State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -43,19 +51,43 @@ export default function SettingsView({ currentUser, onUpdateUser }: SettingsView
   const [defaultDateFilter, setDefaultDateFilter] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL'>(() => {
     return (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
   });
+  const [defaultCountryCode, setDefaultCountryCode] = useState<string>(() => {
+    return localStorage.getItem('ommax_pref_country_code') || crmSettings?.defaultCountryCode || '+91';
+  });
 
   const [prefSuccess, setPrefSuccess] = useState(false);
 
-  // Sync preferences on mount or when returning to tab
+  // Available Country Codes derived dynamically from Admin App Settings
+  const availableCountryCodes = useMemo(() => {
+    const all = getAllCountryCodes(crmSettings);
+    const allowedList = crmSettings?.allowedCountryCodes && crmSettings.allowedCountryCodes.length > 0
+      ? crmSettings.allowedCountryCodes
+      : (DEFAULT_CRM_SETTINGS.allowedCountryCodes || ['+91', '+971', '+1', '+44', '+65', '+49', '+966', '+60', '+61']);
+    
+    const allowedSet = new Set(allowedList);
+    if (crmSettings?.defaultCountryCode) {
+      allowedSet.add(crmSettings.defaultCountryCode);
+    }
+    
+    return all.filter(c => allowedSet.has(c.code));
+  }, [crmSettings]);
+
+  // Sync preferences on mount or when returning to tab or when crmSettings changes
   useEffect(() => {
     const savedPaymentMode = localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE';
     const savedExportFormat = localStorage.getItem('ommax_pref_export_format') as 'EXCEL' | 'CSV' | 'PDF';
     const savedDateFilter = localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL';
+    const savedCountryCode = localStorage.getItem('ommax_pref_country_code');
 
     if (savedPaymentMode) setDefaultPaymentMode(savedPaymentMode);
     if (savedExportFormat) setDefaultExportFormat(savedExportFormat);
     if (savedDateFilter) setDefaultDateFilter(savedDateFilter);
-  }, []);
+    if (savedCountryCode) {
+      setDefaultCountryCode(savedCountryCode);
+    } else if (crmSettings?.defaultCountryCode) {
+      setDefaultCountryCode(crmSettings.defaultCountryCode);
+    }
+  }, [crmSettings?.defaultCountryCode]);
 
   // Handle Change Password Form Submit
   const handleChangePassword = (e: React.FormEvent) => {
@@ -141,6 +173,7 @@ export default function SettingsView({ currentUser, onUpdateUser }: SettingsView
     localStorage.setItem('ommax_pref_payment_mode', defaultPaymentMode);
     localStorage.setItem('ommax_pref_export_format', defaultExportFormat);
     localStorage.setItem('ommax_pref_date_filter', defaultDateFilter);
+    localStorage.setItem('ommax_pref_country_code', defaultCountryCode);
 
     setPrefSuccess(true);
 
@@ -355,18 +388,35 @@ export default function SettingsView({ currentUser, onUpdateUser }: SettingsView
                 </div>
               </div>
 
-              {/* Default Date Filter Range */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Register Date Filter</label>
-                <select
-                  value={defaultDateFilter}
-                  onChange={(e) => setDefaultDateFilter(e.target.value as 'THIS_MONTH' | 'LAST_30' | 'ALL')}
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
-                >
-                  <option value="THIS_MONTH">Current Month</option>
-                  <option value="LAST_30">Last 30 Days</option>
-                  <option value="ALL">All Recorded Dates</option>
-                </select>
+              {/* Default Date Filter Range & Default Country Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Register Date Filter</label>
+                  <select
+                    value={defaultDateFilter}
+                    onChange={(e) => setDefaultDateFilter(e.target.value as 'THIS_MONTH' | 'LAST_30' | 'ALL')}
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
+                  >
+                    <option value="THIS_MONTH">Current Month</option>
+                    <option value="LAST_30">Last 30 Days</option>
+                    <option value="ALL">All Recorded Dates</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Phone Country Code</label>
+                  <select
+                    value={defaultCountryCode}
+                    onChange={(e) => setDefaultCountryCode(e.target.value)}
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
+                  >
+                    {availableCountryCodes.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.flag} {c.code} - {c.name} {c.isCustom ? '(Custom)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="pt-3 flex items-center justify-end">

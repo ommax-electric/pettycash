@@ -32,10 +32,13 @@ import {
   DEFAULT_CRM_SETTINGS, 
   AccountEditHistoryEntry,
   formatCRMIDate,
-  formatCRMIDateTime
+  formatCRMIDateTime,
+  normalizeCompanyName,
+  normalizePhoneNumber
 } from '../../crm/types';
 import { User, AppSettings } from '../../types';
 import { MOCK_USERS } from '../../data';
+import CountryPhoneInput from './CountryPhoneInput';
 
 interface CRMAccountsViewProps {
   accounts: CRMAccount[];
@@ -72,12 +75,21 @@ export default function CRMAccountsView({
   const canEdit = isAdmin || isManager;
   const canDelete = isAdmin;
 
-  // Filter states
-  const [selectedIndustry, setSelectedIndustry] = useState<string>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
-  const [selectedOwner, setSelectedOwner] = useState<string>('ALL');
+  // Multi-Select Filter states (Industry, Status, Category, Location, Account Owner)
+  const [filterIndustry, setFilterIndustry] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+  const [filterCategory, setFilterCategory] = useState<string[]>([]);
+  const [filterLocation, setFilterLocation] = useState<string[]>([]);
+  const [filterOwner, setFilterOwner] = useState<string[]>([]);
+
+  // Popover open state
+  const [openFilter, setOpenFilter] = useState<'industry' | 'status' | 'category' | 'location' | 'owner' | null>(null);
+
+  // Search terms inside filter dropdowns
+  const [searchIndustryFilter, setSearchIndustryFilter] = useState('');
+  const [searchCategoryFilter, setSearchCategoryFilter] = useState('');
+  const [searchLocationFilter, setSearchLocationFilter] = useState('');
+  const [searchOwnerFilter, setSearchOwnerFilter] = useState('');
 
   // Export dropdown state
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
@@ -118,6 +130,44 @@ export default function CRMAccountsView({
     notes: ''
   });
 
+  // Deduplication state
+  const [dismissDuplicateWarning, setDismissDuplicateWarning] = useState(false);
+  const [showTypeaheadSuggestions, setShowTypeaheadSuggestions] = useState(true);
+
+  // 1. Live 3-character matching suggestion list
+  const liveTypeaheadMatches = useMemo(() => {
+    const term = formData.name.trim().toLowerCase();
+    if (term.length < 3) return [];
+    return accounts.filter(acc => {
+      if (editingAccount && acc.id === editingAccount.id) return false;
+      const accName = (acc.name || '').toLowerCase();
+      const accId = (acc.id || '').toLowerCase();
+      return accName.includes(term) || accId.includes(term);
+    }).slice(0, 5);
+  }, [formData.name, accounts, editingAccount]);
+
+  // 2. Smart Suffix Deduplication matching (e.g. DHL Ltd vs DHL Private Limited)
+  const duplicateAccountMatches = useMemo(() => {
+    if (!formData.name || formData.name.trim().length < 2) return [];
+    const normalizedInput = normalizeCompanyName(formData.name);
+    if (!normalizedInput || normalizedInput.length < 2) return [];
+
+    return accounts.filter(acc => {
+      if (editingAccount && acc.id === editingAccount.id) return false;
+      const accNorm = normalizeCompanyName(acc.name);
+      if (!accNorm) return false;
+
+      // Exact normalized match or strong prefix/token match
+      if (accNorm === normalizedInput) return true;
+      if (accNorm.length >= 3 && normalizedInput.length >= 3) {
+        if (accNorm === normalizedInput || accNorm.startsWith(normalizedInput) || normalizedInput.startsWith(accNorm)) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [formData.name, accounts, editingAccount]);
+
   const resetForm = () => {
     setFormData({
       name: '',
@@ -137,6 +187,8 @@ export default function CRMAccountsView({
       notes: ''
     });
     setEditingAccount(null);
+    setDismissDuplicateWarning(false);
+    setShowTypeaheadSuggestions(true);
   };
 
   const handleOpenAdd = () => {
@@ -192,11 +244,65 @@ export default function CRMAccountsView({
     setIsSaving(true);
     try {
       if (editingAccount) {
+        const changes: { field: string; oldValue: string; newValue: string }[] = [];
+
+        if ((editingAccount.name || '').trim() !== formData.name.trim()) {
+          changes.push({ field: 'Company Name', oldValue: editingAccount.name || '(Blank)', newValue: formData.name.trim() });
+        }
+        if ((editingAccount.businessCategory || '').trim() !== formData.businessCategory.trim()) {
+          changes.push({ field: 'Business Category', oldValue: editingAccount.businessCategory || '(Blank)', newValue: formData.businessCategory.trim() });
+        }
+        if ((editingAccount.industry || '').trim() !== formData.industry.trim()) {
+          changes.push({ field: 'Industry', oldValue: editingAccount.industry || '(Blank)', newValue: formData.industry.trim() });
+        }
+        if ((editingAccount.status || 'ACTIVE') !== payloadStatus) {
+          changes.push({ field: 'Account Status', oldValue: getStatusDisplay(editingAccount.status || 'ACTIVE'), newValue: getStatusDisplay(payloadStatus) });
+        }
+        if ((editingAccount.phone || '').trim() !== formData.phone.trim()) {
+          changes.push({ field: 'Office Phone', oldValue: editingAccount.phone || '(Blank)', newValue: formData.phone.trim() || '(Blank)' });
+        }
+        if ((editingAccount.altPhone || '').trim() !== formData.altPhone.trim()) {
+          changes.push({ field: 'Alternative Phone', oldValue: editingAccount.altPhone || '(Blank)', newValue: formData.altPhone.trim() || '(Blank)' });
+        }
+        if ((editingAccount.email || '').trim() !== formData.email.trim()) {
+          changes.push({ field: 'Official Email', oldValue: editingAccount.email || '(Blank)', newValue: formData.email.trim() || '(Blank)' });
+        }
+        if ((editingAccount.website || '').trim() !== formData.website.trim()) {
+          changes.push({ field: 'Website', oldValue: editingAccount.website || '(Blank)', newValue: formData.website.trim() || '(Blank)' });
+        }
+        if ((editingAccount.assignedTo || '').trim() !== (payloadOwner || '').trim()) {
+          changes.push({ field: 'Account Owner', oldValue: editingAccount.assignedTo || '(Blank)', newValue: payloadOwner || '(Blank)' });
+        }
+        if ((editingAccount.address || '').trim() !== formData.address.trim()) {
+          changes.push({ field: 'Street Address', oldValue: editingAccount.address || '(Blank)', newValue: formData.address.trim() || '(Blank)' });
+        }
+        if ((editingAccount.billingCity || '').trim() !== formData.billingCity.trim()) {
+          changes.push({ field: 'City', oldValue: editingAccount.billingCity || '(Blank)', newValue: formData.billingCity.trim() || '(Blank)' });
+        }
+        if ((editingAccount.billingState || '').trim() !== formData.billingState.trim()) {
+          changes.push({ field: 'State', oldValue: editingAccount.billingState || '(Blank)', newValue: formData.billingState.trim() || '(Blank)' });
+        }
+        if ((editingAccount.pincode || '').trim() !== formData.pincode.trim()) {
+          changes.push({ field: 'Pin Code', oldValue: editingAccount.pincode || '(Blank)', newValue: formData.pincode.trim() || '(Blank)' });
+        }
+        const oldCountry = editingAccount.country || editingAccount.billingCountry || 'India';
+        if (oldCountry.trim() !== (formData.country || 'India').trim()) {
+          changes.push({ field: 'Country', oldValue: oldCountry, newValue: formData.country || 'India' });
+        }
+        if ((editingAccount.notes || '').trim() !== formData.notes.trim()) {
+          changes.push({ field: 'Notes', oldValue: editingAccount.notes || '(Blank)', newValue: formData.notes.trim() || '(Blank)' });
+        }
+
+        const detailsText = changes.length > 0
+          ? `Updated ${changes.length} field${changes.length > 1 ? 's' : ''}: ${changes.map(c => c.field).join(', ')}`
+          : 'Account profile saved without modifications';
+
         const historyEntry: AccountEditHistoryEntry = {
           timestamp: now,
           changedBy: actor,
           action: 'UPDATED',
-          details: 'Account profile and contact details updated'
+          details: detailsText,
+          changes: changes.length > 0 ? changes : undefined
         };
         const updatedHistory = editingAccount.editHistory ? [historyEntry, ...editingAccount.editHistory] : [historyEntry];
 
@@ -273,7 +379,10 @@ export default function CRMAccountsView({
         action: 'STATUS_CHANGED',
         oldStatus,
         newStatus,
-        details: `Changed account status from "${oldStatusLabel}" to "${newStatusLabel}"`
+        details: `Changed account status from "${oldStatusLabel}" to "${newStatusLabel}"`,
+        changes: [
+          { field: 'Account Status', oldValue: oldStatusLabel, newValue: newStatusLabel }
+        ]
       };
 
       const updatedHistory = account.editHistory ? [newHistoryEntry, ...account.editHistory] : [newHistoryEntry];
@@ -303,6 +412,12 @@ export default function CRMAccountsView({
     }
   };
 
+  const availableStatuses = [
+    { value: 'ACTIVE', label: 'Active Client' },
+    { value: 'PROSPECT', label: 'Prospect / Lead' },
+    { value: 'INACTIVE', label: 'Inactive' }
+  ];
+
   // Distinct locations list for filter dropdown
   const uniqueLocations = useMemo(() => {
     const locSet = new Set<string>();
@@ -322,29 +437,62 @@ export default function CRMAccountsView({
         ownerSet.add(a.assignedTo.trim());
       }
     });
+    availableUsersList.forEach(u => {
+      const name = u.fullName || u.username;
+      if (name && name.trim()) {
+        ownerSet.add(name.trim());
+      }
+    });
     return Array.from(ownerSet).sort();
-  }, [accounts]);
+  }, [accounts, availableUsersList]);
 
   // Filtering calculation
   const filteredAccounts = useMemo(() => {
     return accounts.filter(acc => {
-      if (selectedIndustry !== 'ALL' && acc.industry !== selectedIndustry) return false;
-      if (selectedStatus !== 'ALL' && acc.status !== selectedStatus) return false;
-      if (selectedCategory !== 'ALL' && acc.businessCategory !== selectedCategory) return false;
-      if (selectedLocation !== 'ALL' && acc.billingCity !== selectedLocation) return false;
-      if (selectedOwner !== 'ALL' && acc.assignedTo !== selectedOwner) return false;
+      // 1. Industry filter
+      if (filterIndustry.length > 0) {
+        if (!acc.industry || !filterIndustry.includes(acc.industry)) return false;
+      }
+      // 2. Status filter
+      if (filterStatus.length > 0) {
+        const st = acc.status || 'ACTIVE';
+        if (!filterStatus.includes(st)) return false;
+      }
+      // 3. Category filter
+      if (filterCategory.length > 0) {
+        if (!acc.businessCategory || !filterCategory.includes(acc.businessCategory)) return false;
+      }
+      // 4. Location filter
+      if (filterLocation.length > 0) {
+        const loc = acc.billingCity?.trim() || '';
+        if (!loc || !filterLocation.includes(loc)) return false;
+      }
+      // 5. Owner filter
+      if (filterOwner.length > 0) {
+        const owner = acc.assignedTo?.trim() || 'Admin Operator';
+        if (!filterOwner.includes(owner)) return false;
+      }
       return true;
     });
-  }, [accounts, selectedIndustry, selectedStatus, selectedCategory, selectedLocation, selectedOwner]);
+  }, [accounts, filterIndustry, filterStatus, filterCategory, filterLocation, filterOwner]);
 
-  const isFilterActive = selectedIndustry !== 'ALL' || selectedStatus !== 'ALL' || selectedCategory !== 'ALL' || selectedLocation !== 'ALL' || selectedOwner !== 'ALL';
+  const isFilterActive = 
+    filterIndustry.length > 0 || 
+    filterStatus.length > 0 || 
+    filterCategory.length > 0 || 
+    filterLocation.length > 0 || 
+    filterOwner.length > 0;
 
   const handleResetFilters = () => {
-    setSelectedIndustry('ALL');
-    setSelectedStatus('ALL');
-    setSelectedCategory('ALL');
-    setSelectedLocation('ALL');
-    setSelectedOwner('ALL');
+    setFilterIndustry([]);
+    setFilterStatus([]);
+    setFilterCategory([]);
+    setFilterLocation([]);
+    setFilterOwner([]);
+    setSearchIndustryFilter('');
+    setSearchCategoryFilter('');
+    setSearchLocationFilter('');
+    setSearchOwnerFilter('');
     setCurrentPage(1);
   };
 
@@ -660,7 +808,7 @@ export default function CRMAccountsView({
         </div>
       </div>
 
-      {/* 2. FILTERS TOOLBAR (Industry, Status, Category, Location, Account Owner) */}
+      {/* 2. FILTERS TOOLBAR (Multi-Select: Industry, Status, Category, Location, Account Owner) */}
       <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 shrink-0">
@@ -669,89 +817,408 @@ export default function CRMAccountsView({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 w-full flex-1">
-            {/* Industry Filter */}
-            <div>
-              <select
-                value={selectedIndustry}
-                onChange={e => {
-                  setSelectedIndustry(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+            {/* Filter 1: Industry */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'industry' ? null : 'industry')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterIndustry.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                <option value="ALL">All Industries</option>
-                {industriesList.map(ind => (
-                  <option key={ind} value={ind}>{ind}</option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {filterIndustry.length === 0
+                    ? 'All Industries'
+                    : filterIndustry.length === 1
+                    ? filterIndustry[0]
+                    : `${filterIndustry.length} Industries`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'industry' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Industry</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterIndustry([...industriesList])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterIndustry([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search industries..."
+                      value={searchIndustryFilter}
+                      onChange={e => setSearchIndustryFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {industriesList
+                        .filter(ind => ind.toLowerCase().includes(searchIndustryFilter.toLowerCase()))
+                        .map(ind => {
+                          const isChecked = filterIndustry.includes(ind);
+                          return (
+                            <label
+                              key={ind}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterIndustry(prev => 
+                                    prev.includes(ind) ? prev.filter(x => x !== ind) : [...prev, ind]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{ind}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Status Filter */}
-            <div>
-              <select
-                value={selectedStatus}
-                onChange={e => {
-                  setSelectedStatus(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+            {/* Filter 2: Status */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'status' ? null : 'status')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterStatus.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                <option value="ALL">All Statuses</option>
-                <option value="ACTIVE">Active Client</option>
-                <option value="PROSPECT">Prospect / Lead</option>
-                <option value="INACTIVE">Inactive</option>
-              </select>
+                <span className="truncate">
+                  {filterStatus.length === 0
+                    ? 'All Statuses'
+                    : filterStatus.length === 1
+                    ? availableStatuses.find(s => s.value === filterStatus[0])?.label || filterStatus[0]
+                    : `${filterStatus.length} Statuses`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'status' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Status</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterStatus(availableStatuses.map(s => s.value))}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterStatus([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-0.5">
+                      {availableStatuses.map(st => {
+                        const isChecked = filterStatus.includes(st.value);
+                        return (
+                          <label
+                            key={st.value}
+                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                setFilterStatus(prev => 
+                                  prev.includes(st.value) ? prev.filter(x => x !== st.value) : [...prev, st.value]
+                                );
+                                setCurrentPage(1);
+                              }}
+                              className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                            />
+                            <span className="truncate">{st.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Category Filter */}
-            <div>
-              <select
-                value={selectedCategory}
-                onChange={e => {
-                  setSelectedCategory(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+            {/* Filter 3: Category */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'category' ? null : 'category')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterCategory.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                <option value="ALL">All Categories</option>
-                {businessCategoriesList.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {filterCategory.length === 0
+                    ? 'All Categories'
+                    : filterCategory.length === 1
+                    ? filterCategory[0]
+                    : `${filterCategory.length} Categories`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'category' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Category</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterCategory([...businessCategoriesList])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterCategory([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search categories..."
+                      value={searchCategoryFilter}
+                      onChange={e => setSearchCategoryFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {businessCategoriesList
+                        .filter(cat => cat.toLowerCase().includes(searchCategoryFilter.toLowerCase()))
+                        .map(cat => {
+                          const isChecked = filterCategory.includes(cat);
+                          return (
+                            <label
+                              key={cat}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterCategory(prev => 
+                                    prev.includes(cat) ? prev.filter(x => x !== cat) : [...prev, cat]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{cat}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Location Filter */}
-            <div>
-              <select
-                value={selectedLocation}
-                onChange={e => {
-                  setSelectedLocation(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+            {/* Filter 4: Location */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'location' ? null : 'location')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterLocation.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                <option value="ALL">All Locations</option>
-                {uniqueLocations.map(loc => (
-                  <option key={loc} value={loc}>{loc}</option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {filterLocation.length === 0
+                    ? 'All Locations'
+                    : filterLocation.length === 1
+                    ? filterLocation[0]
+                    : `${filterLocation.length} Locations`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'location' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Location</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterLocation([...uniqueLocations])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterLocation([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search locations..."
+                      value={searchLocationFilter}
+                      onChange={e => setSearchLocationFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {uniqueLocations.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 text-center py-2">No locations recorded</p>
+                      ) : (
+                        uniqueLocations
+                          .filter(l => l.toLowerCase().includes(searchLocationFilter.toLowerCase()))
+                          .map((loc, idx) => {
+                            const isChecked = filterLocation.includes(loc);
+                            return (
+                              <label
+                                key={idx}
+                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setFilterLocation(prev => 
+                                      prev.includes(loc) ? prev.filter(x => x !== loc) : [...prev, loc]
+                                    );
+                                    setCurrentPage(1);
+                                  }}
+                                  className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                                />
+                                <span className="truncate">{loc}</span>
+                              </label>
+                            );
+                          })
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Account Owner Filter */}
-            <div className="col-span-2 md:col-span-1">
-              <select
-                value={selectedOwner}
-                onChange={e => {
-                  setSelectedOwner(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+            {/* Filter 5: Account Owner */}
+            <div className="col-span-2 md:col-span-1 relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'owner' ? null : 'owner')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterOwner.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                <option value="ALL">All Owners</option>
-                {uniqueOwners.map(owner => (
-                  <option key={owner} value={owner}>{owner}</option>
-                ))}
-              </select>
+                <span className="truncate">
+                  {filterOwner.length === 0
+                    ? 'All Owners'
+                    : filterOwner.length === 1
+                    ? filterOwner[0]
+                    : `${filterOwner.length} Owners`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'owner' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute right-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Account Owner</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterOwner([...uniqueOwners])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterOwner([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search owners..."
+                      value={searchOwnerFilter}
+                      onChange={e => setSearchOwnerFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {uniqueOwners.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 text-center py-2">No account owners recorded</p>
+                      ) : (
+                        uniqueOwners
+                          .filter(o => o.toLowerCase().includes(searchOwnerFilter.toLowerCase()))
+                          .map((owner, idx) => {
+                            const isChecked = filterOwner.includes(owner);
+                            return (
+                              <label
+                                key={idx}
+                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setFilterOwner(prev => 
+                                      prev.includes(owner) ? prev.filter(x => x !== owner) : [...prev, owner]
+                                    );
+                                    setCurrentPage(1);
+                                  }}
+                                  className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                                />
+                                <span className="truncate">{owner}</span>
+                              </label>
+                            );
+                          })
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1369,12 +1836,37 @@ export default function CRMAccountsView({
                               </span>
                             </div>
 
-                            {/* Details Box */}
-                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
-                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
-                                {entry.details || 'Account details or status modified'}
-                              </p>
-                            </div>
+                            {/* Details Box / Granular Changes (Matching Expense Module RegisterView) */}
+                            {entry.changes && entry.changes.length > 0 ? (
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                                {entry.changes.map((change, cIdx) => {
+                                  const displayOld = (!change.oldValue || change.oldValue === 'None') ? '(Blank)' : change.oldValue;
+                                  const displayNew = (!change.newValue || change.newValue === 'None') ? '(Blank)' : change.newValue;
+                                  return (
+                                    <div key={cIdx} className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                                      <span className="font-bold text-slate-400 text-[10px] uppercase tracking-wider truncate">
+                                        {change.field}
+                                      </span>
+                                      <span className="sm:col-span-2 text-slate-700 flex flex-wrap items-center gap-1.5 break-all">
+                                        <span className="font-medium bg-red-50 text-red-700 px-1.5 py-0.5 rounded-md text-[10px] line-through decoration-red-400">
+                                          {displayOld}
+                                        </span>
+                                        <span className="text-slate-400 text-[10px] font-bold">→</span>
+                                        <span className="font-extrabold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md text-[10px]">
+                                          {displayNew}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                                <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                                  {entry.details || 'Account details or status modified'}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1457,17 +1949,115 @@ export default function CRMAccountsView({
               {/* Form Content */}
               <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
                 
-                {/* Company Name */}
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Company Name *</label>
+                {/* Company Name with Live 3-Char Typeahead & Duplicate Warning */}
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">Company Name *</label>
+                    {formData.name.trim().length >= 3 && liveTypeaheadMatches.length > 0 && (
+                      <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                        {liveTypeaheadMatches.length} existing match{liveTypeaheadMatches.length > 1 ? 'es' : ''} found
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Ommax Electric Private Limited"
                     value={formData.name}
-                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    onChange={e => {
+                      setFormData({ ...formData, name: e.target.value });
+                      setDismissDuplicateWarning(false);
+                      setShowTypeaheadSuggestions(true);
+                    }}
+                    onFocus={() => setShowTypeaheadSuggestions(true)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                   />
+
+                  {/* 1. Live 3-Character Matching Suggestions Dropdown */}
+                  {showTypeaheadSuggestions && formData.name.trim().length >= 3 && liveTypeaheadMatches.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-xl border border-slate-200 z-40 overflow-hidden text-xs">
+                      <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                        <span>Matching Existing Accounts</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowTypeaheadSuggestions(false)}
+                          className="text-slate-400 hover:text-slate-700"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                        {liveTypeaheadMatches.map(acc => (
+                          <div
+                            key={acc.id}
+                            className="p-2.5 hover:bg-amber-50/50 flex items-center justify-between gap-2 transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                                <span>{acc.name}</span>
+                                <span className="font-mono text-[10px] text-slate-400 font-semibold shrink-0">({acc.id})</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
+                                <span className={`px-1.5 py-0.2 rounded font-bold uppercase text-[9px] ${
+                                  acc.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' :
+                                  acc.status === 'PROSPECT' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {acc.status === 'ACTIVE' ? 'Active' : acc.status === 'PROSPECT' ? 'Prospect' : 'Inactive'}
+                                </span>
+                                <span>Owner: {acc.assignedTo || 'Admin'}</span>
+                                {acc.billingCity && <span>• {acc.billingCity}</span>}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setViewingAccount(acc);
+                                setIsAddModalOpen(false);
+                              }}
+                              className="px-2 py-1 bg-white hover:bg-amber-100 border border-slate-200 text-slate-700 font-bold rounded-lg text-[10px] transition-colors shrink-0 cursor-pointer"
+                            >
+                              View Account
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Soft Warning Banner for Suffix / Normalized Duplicates */}
+                  {!dismissDuplicateWarning && duplicateAccountMatches.length > 0 && (
+                    <div className="mt-2 p-3 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start justify-between gap-2.5 text-xs">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="font-extrabold text-amber-900 text-xs">Potential Duplicate Account Detected</p>
+                          <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                            An existing account <strong className="font-bold text-amber-950">"{duplicateAccountMatches[0].name}"</strong> ({duplicateAccountMatches[0].id} • {duplicateAccountMatches[0].status === 'ACTIVE' ? 'Active Client' : duplicateAccountMatches[0].status === 'PROSPECT' ? 'Prospect' : 'Inactive'} • Owner: {duplicateAccountMatches[0].assignedTo || 'Admin'}) was found matching this company name.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewingAccount(duplicateAccountMatches[0]);
+                            setIsAddModalOpen(false);
+                          }}
+                          className="px-2.5 py-1 bg-amber-200/80 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-[10px] transition-colors cursor-pointer"
+                        >
+                          View Account
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDismissDuplicateWarning(true)}
+                          className="p-1 text-amber-700 hover:text-amber-950 rounded-md cursor-pointer"
+                          title="Dismiss warning"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Business Category & Industry */}
@@ -1503,27 +2093,33 @@ export default function CRMAccountsView({
                   </div>
                 </div>
 
-                {/* Phones */}
+                {/* Phones with Country Code Selector */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Office Phone *</label>
-                    <input
-                      type="tel"
+                    <CountryPhoneInput
+                      id="acc-office-phone"
                       required
-                      placeholder="+91 90259 76761"
                       value={formData.phone}
-                      onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      onChange={val => setFormData({ ...formData, phone: val })}
+                      placeholder="90259 76761"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
                     />
                   </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Alternative Phone</label>
-                    <input
-                      type="tel"
-                      placeholder="+91 4329 220075"
+                    <CountryPhoneInput
+                      id="acc-alt-phone"
                       value={formData.altPhone}
-                      onChange={e => setFormData({ ...formData, altPhone: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      onChange={val => setFormData({ ...formData, altPhone: val })}
+                      placeholder="4329 220075"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
                     />
                   </div>
                 </div>
