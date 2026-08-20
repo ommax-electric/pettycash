@@ -127,7 +127,22 @@ export type OpportunityStage =
   | 'PROPOSAL' 
   | 'NEGOTIATION' 
   | 'CLOSED_WON' 
-  | 'CLOSED_LOST';
+  | 'CLOSED_LOST'
+  | (string & {});
+
+export interface OpportunityEditHistoryEntry {
+  timestamp: string;
+  changedBy: string;
+  action: 'CREATED' | 'UPDATED' | 'STAGE_CHANGED' | 'OWNER_REASSIGNED';
+  details?: string;
+  oldStage?: string;
+  newStage?: string;
+  changes?: {
+    field: string;
+    oldValue: string;
+    newValue: string;
+  }[];
+}
 
 export interface CRMOpportunity {
   id: string;
@@ -141,11 +156,13 @@ export interface CRMOpportunity {
   probability: number; // e.g. 10 to 100
   expectedCloseDate: string;
   leadSource?: string;
+  portfolio?: string; // Product / Service Portfolio (e.g. Safety Products, Residential Solar, Commercial Solar)
   assignedTo?: string;
   createdAt: string;
   updatedAt?: string;
   notes?: string;
   lostReason?: string;
+  editHistory?: OpportunityEditHistoryEntry[];
 }
 
 export interface CountryCodeConfig {
@@ -307,6 +324,7 @@ export interface CRMSettings {
     color: string;
   }[];
   leadSources: string[];
+  productsAndServices?: string[]; // Master portfolio list for products & services
   industries: string[];
   businessCategories: string[];
   defaultCurrency: string;
@@ -327,6 +345,7 @@ export const DEFAULT_CRM_SETTINGS: CRMSettings = {
     { id: 'CLOSED_LOST', label: 'Closed Lost', probability: 0, color: '#ef4444' },
   ],
   leadSources: ['Direct Referral', 'Website', 'Trade Fair / Expo', 'Cold Call', 'LinkedIn', 'Partner Channel', 'Existing Client'],
+  productsAndServices: ['Safety Products', 'Residential Solar', 'Commercial Solar', 'Industrial HT Panels', 'EPC Turnkey', 'Maintenance AMC'],
   industries: ['Electrical & Power', 'Manufacturing', 'Construction & Infra', 'Renewable Energy', 'Automotive', 'Technology', 'Trading & Distribution', 'Other'],
   businessCategories: ['Enterprise / Corporate', 'SME / MSME', 'Government / PSU', 'EPC Contractor', 'Retail / Dealer', 'Consultant', 'Other'],
   defaultCurrency: '₹',
@@ -513,12 +532,13 @@ export const INITIAL_CRM_CONTACTS: CRMContact[] = [
 
 export const INITIAL_CRM_OPPORTUNITIES: CRMOpportunity[] = [
   {
-    id: 'OPP-3001',
+    id: 'DEAL - 001',
     title: '500kVA Transformer & HT Panel Supply - Phase 2',
-    accountId: 'ACC-1001',
+    accountId: 'ACC - 001',
     accountName: 'Tata Power Solar Systems Ltd',
-    contactId: 'CON-2001',
+    contactId: 'CON - 001',
     contactName: 'Rajesh Sharma',
+    portfolio: 'Commercial Solar',
     amount: 1850000,
     stage: 'NEGOTIATION',
     probability: 75,
@@ -529,12 +549,13 @@ export const INITIAL_CRM_OPPORTUNITIES: CRMOpportunity[] = [
     notes: 'Commercial negotiations on payment terms and delivery timeline.'
   },
   {
-    id: 'OPP-3002',
+    id: 'DEAL - 002',
     title: 'Metro Rail Substation Switchgear Package',
-    accountId: 'ACC-1002',
+    accountId: 'ACC - 002',
     accountName: 'Larsen & Toubro Ltd (ECC Div)',
-    contactId: 'CON-2002',
+    contactId: 'CON - 002',
     contactName: 'Priya Narayanan',
+    portfolio: 'Industrial HT Panels',
     amount: 4200000,
     stage: 'PROPOSAL',
     probability: 50,
@@ -545,12 +566,13 @@ export const INITIAL_CRM_OPPORTUNITIES: CRMOpportunity[] = [
     notes: 'Technical bid submitted. Awaiting commercial evaluation.'
   },
   {
-    id: 'OPP-3003',
+    id: 'DEAL - 003',
     title: 'Smart Metering & Panel Components Batch Order',
-    accountId: 'ACC-1003',
+    accountId: 'ACC - 003',
     accountName: 'Schneider Electric India Pvt Ltd',
-    contactId: 'CON-2003',
+    contactId: 'CON - 003',
     contactName: 'Amit Deshmukh',
+    portfolio: 'Safety Products',
     amount: 920000,
     stage: 'QUALIFICATION',
     probability: 25,

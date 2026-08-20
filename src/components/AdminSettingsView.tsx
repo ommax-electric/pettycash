@@ -49,7 +49,8 @@ import {
   Building2,
   FileText,
   Phone,
-  Star
+  Star,
+  Package
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { CRMSettings, DEFAULT_CRM_SETTINGS, STANDARD_COUNTRY_CODES, getCountryFromCode, getAllCountryCodes, CountryCodeConfig } from '../crm/types';
@@ -203,6 +204,13 @@ export default function AdminSettingsView({
   const [leadSourceError, setLeadSourceError] = useState('');
   const [deleteConfirmLeadSource, setDeleteConfirmLeadSource] = useState<string | null>(null);
 
+  // CRM Products & Services (Portfolio) State
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<string | null>(null);
+  const [productNameInput, setProductNameInput] = useState('');
+  const [productError, setProductError] = useState('');
+  const [deleteConfirmProduct, setDeleteConfirmProduct] = useState<string | null>(null);
+
   // CRM Country Dialling Codes State
   const [isCountryCodeModalOpen, setIsCountryCodeModalOpen] = useState(false);
   const [countryCodeInput, setCountryCodeInput] = useState('');
@@ -212,6 +220,17 @@ export default function AdminSettingsView({
   const [countryCodeError, setCountryCodeError] = useState('');
   const [deleteConfirmCountryCode, setDeleteConfirmCountryCode] = useState<CountryCodeConfig | null>(null);
   const [countryCodeDeleteError, setCountryCodeDeleteError] = useState('');
+
+  // CRM Pipeline Stages State
+  const [isStageModalOpen, setIsStageModalOpen] = useState(false);
+  const [editingStage, setEditingStage] = useState<{ id: string; label: string; probability: number; color: string } | null>(null);
+  const [stageIdInput, setStageIdInput] = useState('');
+  const [stageLabelInput, setStageLabelInput] = useState('');
+  const [stageProbabilityInput, setStageProbabilityInput] = useState<number>(50);
+  const [stageColorInput, setStageColorInput] = useState('#3b82f6');
+  const [stageError, setStageError] = useState('');
+  const [deleteConfirmStage, setDeleteConfirmStage] = useState<{ id: string; label: string } | null>(null);
+  const [stageDeleteError, setStageDeleteError] = useState('');
 
   // --- 2. User Management State ---
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -1192,6 +1211,90 @@ export default function AdminSettingsView({
   };
 
   // Handlers for Pipeline Stages & Lead Sources
+  const openAddStageModal = () => {
+    setEditingStage(null);
+    setStageIdInput('');
+    setStageLabelInput('');
+    setStageProbabilityInput(50);
+    setStageColorInput('#3b82f6');
+    setStageError('');
+    setIsStageModalOpen(true);
+  };
+
+  const openEditStageModal = (stage: { id: string; label: string; probability: number; color: string }) => {
+    setEditingStage(stage);
+    setStageIdInput(stage.id);
+    setStageLabelInput(stage.label);
+    setStageProbabilityInput(stage.probability);
+    setStageColorInput(stage.color || '#3b82f6');
+    setStageError('');
+    setIsStageModalOpen(true);
+  };
+
+  const handleSaveStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const labelTrimmed = stageLabelInput.trim();
+    if (!labelTrimmed) {
+      setStageError('Pipeline stage name is required.');
+      return;
+    }
+
+    const currentStages = currentCrmSettings.pipelineStages || DEFAULT_CRM_SETTINGS.pipelineStages;
+    const prob = Math.max(0, Math.min(100, Number(stageProbabilityInput) || 0));
+    const color = stageColorInput.trim() || '#3b82f6';
+
+    let updatedStages: typeof currentStages;
+
+    if (editingStage) {
+      updatedStages = currentStages.map(s => 
+        s.id === editingStage.id 
+          ? { ...s, label: labelTrimmed, probability: prob, color } 
+          : s
+      );
+    } else {
+      let id = stageIdInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+      if (!id) {
+        id = labelTrimmed.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+      }
+      if (currentStages.some(s => s.id === id)) {
+        id = `${id}_${Date.now().toString().slice(-4)}`;
+      }
+
+      const newStage = {
+        id,
+        label: labelTrimmed,
+        probability: prob,
+        color
+      };
+      updatedStages = [...currentStages, newStage];
+    }
+
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        pipelineStages: updatedStages
+      });
+    }
+    setIsStageModalOpen(false);
+  };
+
+  const handleDeleteStageDirect = async (stage: { id: string; label: string }) => {
+    const currentStages = currentCrmSettings.pipelineStages || DEFAULT_CRM_SETTINGS.pipelineStages;
+    if (currentStages.length <= 1) {
+      setStageDeleteError('At least one pipeline stage must remain in CRM settings.');
+      return;
+    }
+
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        pipelineStages: currentStages.filter(s => s.id !== stage.id)
+      });
+    }
+    setDeleteConfirmStage(null);
+    setStageDeleteError('');
+  };
+
   const handleUpdateStageProbability = async (stageId: string, prob: number) => {
     if (onUpdateCRMSettings) {
       const currentStages = currentCrmSettings.pipelineStages || DEFAULT_CRM_SETTINGS.pipelineStages;
@@ -1253,6 +1356,61 @@ export default function AdminSettingsView({
       });
     }
     setDeleteConfirmLeadSource(null);
+  };
+
+  // ----------------------------------------------------
+  // Handlers for CRM Products & Services (Portfolio)
+  // ----------------------------------------------------
+  const openAddProductModal = () => {
+    setEditingProduct(null);
+    setProductNameInput('');
+    setProductError('');
+    setIsProductModalOpen(true);
+  };
+
+  const openEditProductModal = (prod: string) => {
+    setEditingProduct(prod);
+    setProductNameInput(prod);
+    setProductError('');
+    setIsProductModalOpen(true);
+  };
+
+  const handleSaveProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = productNameInput.trim();
+    if (!trimmed) {
+      setProductError('Product or service name is required.');
+      return;
+    }
+    const currentProds = currentCrmSettings.productsAndServices || DEFAULT_CRM_SETTINGS.productsAndServices || [];
+    let updatedProds: string[];
+    if (editingProduct) {
+      updatedProds = currentProds.map(p => p === editingProduct ? trimmed : p);
+    } else {
+      if (currentProds.some(p => p.toLowerCase() === trimmed.toLowerCase())) {
+        setProductError('Product or service portfolio already exists.');
+        return;
+      }
+      updatedProds = [...currentProds, trimmed];
+    }
+    if (onUpdateCRMSettings) {
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        productsAndServices: updatedProds
+      });
+    }
+    setIsProductModalOpen(false);
+  };
+
+  const handleDeleteProductDirect = async (prod: string) => {
+    if (onUpdateCRMSettings) {
+      const currentProds = currentCrmSettings.productsAndServices || DEFAULT_CRM_SETTINGS.productsAndServices || [];
+      await onUpdateCRMSettings({
+        ...currentCrmSettings,
+        productsAndServices: currentProds.filter(p => p !== prod)
+      });
+    }
+    setDeleteConfirmProduct(null);
   };
 
   // ----------------------------------------------------
@@ -2076,63 +2234,130 @@ export default function AdminSettingsView({
                     </div>
                   </div>
 
-                  {/* 3. Lead Source Channels */}
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
-                          <Tag className="w-5 h-5 text-[#f7b944]" />
-                          Lead Source Channels
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          Origination channels and referral sources used across sales leads and business opportunities.
-                        </p>
-                      </div>
+                  {/* 3 & 4. Lead Source Channels & Products/Services Portfolio (Left & Right Side-by-Side) */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left: Lead Source Channels */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6 flex flex-col justify-between">
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                              <Tag className="w-5 h-5 text-[#f7b944]" />
+                              Lead Source Channels
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Origination channels and referral sources used across sales leads and opportunities.
+                            </p>
+                          </div>
 
-                      <button
-                        onClick={openAddLeadSourceModal}
-                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add Lead Source
-                      </button>
+                          <button
+                            onClick={openAddLeadSourceModal}
+                            className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Lead Source
+                          </button>
+                        </div>
+
+                        {/* Lead Sources List Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                          {(currentCrmSettings.leadSources || DEFAULT_CRM_SETTINGS.leadSources).map((source, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500"></span>
+                                <div className="min-w-0">
+                                  <span className="font-bold text-xs text-slate-800 truncate block">{source}</span>
+                                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-emerald-100 text-emerald-800 font-mono">
+                                    SOURCE
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <button
+                                  onClick={() => openEditLeadSourceModal(source)}
+                                  className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit Lead Source"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmLeadSource(source)}
+                                  className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Lead Source"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Lead Sources 3-Column Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
-                      {(currentCrmSettings.leadSources || DEFAULT_CRM_SETTINGS.leadSources).map((source, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500"></span>
-                            <div className="min-w-0">
-                              <span className="font-bold text-xs text-slate-800 truncate block">{source}</span>
-                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-emerald-100 text-emerald-800 font-mono">
-                                SOURCE
-                              </span>
-                            </div>
+                    {/* Right: Products and Services (Portfolio) */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6 flex flex-col justify-between">
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                              <Package className="w-5 h-5 text-[#f7b944]" />
+                              Products & Services
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Business portfolios, product lines & solutions (e.g. Safety Products, Residential Solar, Commercial Solar).
+                            </p>
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
-                            <button
-                              onClick={() => openEditLeadSourceModal(source)}
-                              className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
-                              title="Edit Lead Source"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmLeadSource(source)}
-                              className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                              title="Delete Lead Source"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          <button
+                            onClick={openAddProductModal}
+                            className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Product/Service
+                          </button>
                         </div>
-                      ))}
+
+                        {/* Products & Services List Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                          {(currentCrmSettings.productsAndServices || DEFAULT_CRM_SETTINGS.productsAndServices || []).map((prod, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3.5 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-100 transition-all flex items-center justify-between min-w-0"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-blue-500"></span>
+                                <div className="min-w-0">
+                                  <span className="font-bold text-xs text-slate-800 truncate block">{prod}</span>
+                                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md inline-block mt-0.5 bg-blue-100 text-blue-800 font-mono">
+                                    PORTFOLIO
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <button
+                                  onClick={() => openEditProductModal(prod)}
+                                  className="p-1.5 hover:bg-white text-slate-500 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit Product / Service"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmProduct(prod)}
+                                  className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Product / Service"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -2145,9 +2370,17 @@ export default function AdminSettingsView({
                           Pipeline Stages & Win Probability
                         </h3>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          Configure default probability percentages used for weighted forecasting and sales opportunity pipeline values.
+                          Add, edit, or remove stages and configure default win probability percentages for weighted forecasting.
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={openAddStageModal}
+                        className="bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2 px-3.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 self-start sm:self-auto"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        Add Stage
+                      </button>
                     </div>
 
                     {/* Pipeline Stages 3-Column Grid */}
@@ -2181,9 +2414,27 @@ export default function AdminSettingsView({
                                 const val = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
                                 handleUpdateStageProbability(stage.id, val);
                               }}
-                              className="w-14 px-2 py-1 bg-white border border-slate-200 rounded-lg text-center font-bold text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                              className="w-12 px-1.5 py-1 bg-white border border-slate-200 rounded-lg text-center font-bold text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                              title="Quick edit probability %"
                             />
-                            <span className="font-bold text-xs text-slate-600">%</span>
+                            <span className="font-bold text-xs text-slate-600 mr-1">%</span>
+
+                            <button
+                              type="button"
+                              onClick={() => openEditStageModal(stage)}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-amber-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Pipeline Stage"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmStage({ id: stage.id, label: stage.label })}
+                              className="p-1.5 hover:bg-white text-slate-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Pipeline Stage"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -5039,6 +5290,118 @@ export default function AdminSettingsView({
       )}
 
       {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CRM PRODUCT & SERVICE (PORTFOLIO)      */}
+      {/* ======================================================== */}
+      {isProductModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-900 flex items-center justify-center">
+                  <Package className="w-4 h-4 text-blue-700" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-800">
+                  {editingProduct ? 'Edit Product / Service' : 'Add Product / Service Portfolio'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsProductModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProduct} className="space-y-4">
+              {productError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {productError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Product / Service Portfolio Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={productNameInput}
+                  onChange={(e) => setProductNameInput(e.target.value)}
+                  placeholder="e.g. Safety Products, Residential Solar, Commercial Solar"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                  required
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  This portfolio will be available for selection and filtering in CRM Opportunities.
+                </span>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsProductModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Product / Service
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM PRODUCT & SERVICE              */}
+      {/* ======================================================== */}
+      {deleteConfirmProduct && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Product / Service Deletion</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to delete the product/service portfolio <span className="font-bold text-slate-800">"{deleteConfirmProduct}"</span>?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmProduct(null)}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteProductDirect(deleteConfirmProduct)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
       {/* MODAL: ADD CUSTOM CRM COUNTRY DIALLING CODE              */}
       {/* ======================================================== */}
       {isCountryCodeModalOpen && (
@@ -5194,6 +5557,205 @@ export default function AdminSettingsView({
               <button
                 type="button"
                 onClick={() => handleDeleteCountryCodeDirect(deleteConfirmCountryCode)}
+                className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Confirm Removal
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CRM PIPELINE STAGE                     */}
+      {/* ======================================================== */}
+      {isStageModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center">
+                  <Layers className="w-4 h-4 text-amber-700" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-800">
+                  {editingStage ? 'Edit Pipeline Stage' : 'Add New Pipeline Stage'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStageModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStage} className="space-y-4">
+              {stageError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {stageError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Stage Name / Label <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={stageLabelInput}
+                  onChange={(e) => setStageLabelInput(e.target.value)}
+                  placeholder="e.g. Technical Evaluation, Contract Sent"
+                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Stage Code / ID
+                  </label>
+                  <input
+                    type="text"
+                    disabled={!!editingStage}
+                    value={stageIdInput}
+                    onChange={(e) => setStageIdInput(e.target.value)}
+                    placeholder={editingStage ? editingStage.id : "Auto-generated"}
+                    className={`w-full py-2.5 px-3 border border-slate-200 rounded-xl text-xs font-mono uppercase font-bold ${
+                      editingStage ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-slate-50 focus:border-amber-500 focus:bg-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Win Probability (%) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={stageProbabilityInput}
+                      onChange={(e) => setStageProbabilityInput(Number(e.target.value))}
+                      className="w-full py-2.5 px-3 pr-7 bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white rounded-xl text-xs font-bold text-center"
+                      required
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                      %
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Stage Color Theme
+                </label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[
+                    '#64748b', // Slate
+                    '#3b82f6', // Blue
+                    '#0ea5e9', // Sky
+                    '#14b8a6', // Teal
+                    '#10b981', // Emerald
+                    '#eab308', // Yellow
+                    '#f59e0b', // Amber
+                    '#f97316', // Orange
+                    '#8b5cf6', // Violet
+                    '#ec4899', // Pink
+                    '#ef4444', // Rose
+                  ].map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setStageColorInput(color)}
+                      className={`w-6 h-6 rounded-full cursor-pointer transition-transform ${
+                        stageColorInput.toLowerCase() === color.toLowerCase() 
+                          ? 'ring-2 ring-offset-2 ring-slate-800 scale-110' 
+                          : 'hover:scale-105 opacity-80 hover:opacity-100'
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={stageColorInput}
+                    onChange={(e) => setStageColorInput(e.target.value)}
+                    className="w-7 h-7 rounded-lg cursor-pointer border border-slate-200 p-0.5"
+                    title="Custom color"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsStageModalOpen(false)}
+                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold rounded-xl text-xs cursor-pointer shadow-xs"
+                >
+                  Save Stage
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: DELETE CONFIRM CRM PIPELINE STAGE                 */}
+      {/* ======================================================== */}
+      {deleteConfirmStage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Confirm Pipeline Stage Removal</h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to remove the pipeline stage <span className="font-bold text-slate-800">"{deleteConfirmStage.label}"</span> ({deleteConfirmStage.id}) from CRM settings?
+              </p>
+            </div>
+
+            {stageDeleteError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium text-left">
+                <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                {stageDeleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmStage(null);
+                  setStageDeleteError('');
+                }}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteStageDirect(deleteConfirmStage)}
                 className="py-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />

@@ -1283,8 +1283,24 @@ export default function App() {
     }
   };
 
+  const getNextCRMOpportunityId = () => {
+    const usedNums = new Set<number>();
+    crmOpportunities.forEach(o => {
+      if (!o.id) return;
+      const match = o.id.match(/(?:DEAL\s*[-_]?\s*|OPP\s*[-_]?\s*)(\d+)/i);
+      if (match) {
+        usedNums.add(parseInt(match[1], 10));
+      }
+    });
+    let n = 1;
+    while (usedNums.has(n)) {
+      n++;
+    }
+    return `DEAL - ${String(n).padStart(3, '0')}`;
+  };
+
   const handleAddCRMOpportunity = async (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => {
-    const id = `DEAL-${Date.now().toString().slice(-5)}`;
+    const id = (opp as any).id || getNextCRMOpportunityId();
     const newOpp: CRMOpportunity = {
       ...opp,
       id,
@@ -1967,6 +1983,7 @@ export default function App() {
               contacts={crmContacts}
               crmSettings={crmSettings}
               currentUser={currentUser}
+              users={users}
               appSettings={appSettings}
               onAddOpportunity={handleAddCRMOpportunity}
               onUpdateOpportunity={handleUpdateCRMOpportunity}
@@ -2206,6 +2223,7 @@ export default function App() {
                   contacts={crmContacts}
                   crmSettings={crmSettings}
                   currentUser={currentUser}
+                  users={users}
                   appSettings={appSettings}
                   onAddOpportunity={handleAddCRMOpportunity}
                   onUpdateOpportunity={handleUpdateCRMOpportunity}

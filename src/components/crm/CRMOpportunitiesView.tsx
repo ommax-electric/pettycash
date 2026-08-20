@@ -3,24 +3,41 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Target, 
   Plus, 
-  Search, 
-  Filter, 
-  Edit3, 
+  Pencil, 
   Trash2, 
   Calendar, 
-  DollarSign, 
   Building2, 
   Users, 
-  ArrowRight, 
-  CheckCircle2, 
-  XCircle, 
   X, 
   AlertTriangle,
   Layers,
-  Sparkles
+  Tag,
+  Package,
+  UserCheck,
+  Filter,
+  FileSpreadsheet,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+  Percent,
+  DollarSign,
+  Eye,
+  History
 } from 'lucide-react';
-import { CRMOpportunity, CRMAccount, CRMContact, CRMSettings, OpportunityStage, formatCRMIDate } from '../../crm/types';
+import { 
+  CRMOpportunity, 
+  CRMAccount, 
+  CRMContact, 
+  CRMSettings, 
+  OpportunityStage, 
+  OpportunityEditHistoryEntry,
+  formatCRMIDate, 
+  formatCRMIDateTime,
+  DEFAULT_CRM_SETTINGS 
+} from '../../crm/types';
 import { User, AppSettings } from '../../types';
+import { MOCK_USERS } from '../../data';
 
 interface CRMOpportunitiesViewProps {
   opportunities: CRMOpportunity[];
@@ -28,6 +45,7 @@ interface CRMOpportunitiesViewProps {
   contacts: CRMContact[];
   crmSettings: CRMSettings;
   currentUser: User;
+  users?: User[];
   appSettings?: AppSettings;
   onAddOpportunity: (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateOpportunity: (opp: CRMOpportunity) => Promise<void>;
@@ -40,121 +58,355 @@ export default function CRMOpportunitiesView({
   contacts,
   crmSettings,
   currentUser,
+  users = [],
   appSettings,
   onAddOpportunity,
   onUpdateOpportunity,
   onDeleteOpportunity
 }: CRMOpportunitiesViewProps) {
-  const currencySymbol = appSettings?.currencySymbol || crmSettings.defaultCurrency || '₹';
+  const currencySymbol = appSettings?.currencySymbol || crmSettings?.defaultCurrency || '₹';
 
-  const [viewMode, setViewMode] = useState<'KANBAN' | 'LIST'>('KANBAN');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStageFilter, setSelectedStageFilter] = useState<string>('ALL');
+  // Dynamic Lists derived from Admin CRM App Settings
+  const pipelineStagesList = useMemo(() => {
+    return crmSettings?.pipelineStages?.length 
+      ? crmSettings.pipelineStages 
+      : DEFAULT_CRM_SETTINGS.pipelineStages;
+  }, [crmSettings]);
 
+  const leadSourcesList = useMemo(() => {
+    return crmSettings?.leadSources?.length 
+      ? crmSettings.leadSources 
+      : DEFAULT_CRM_SETTINGS.leadSources;
+  }, [crmSettings]);
+
+  const productsAndServicesList = useMemo(() => {
+    return crmSettings?.productsAndServices?.length
+      ? crmSettings.productsAndServices
+      : (DEFAULT_CRM_SETTINGS.productsAndServices || ['Safety Products', 'Residential Solar', 'Commercial Solar', 'Industrial HT Panels', 'EPC Turnkey', 'Maintenance AMC']);
+  }, [crmSettings]);
+
+  // Available Users List for Assignment & Filters
+  const availableUsersList = useMemo(() => {
+    return users && users.length > 0 ? users : MOCK_USERS;
+  }, [users]);
+
+  // RBAC permissions
+  const isAdmin = currentUser.role === 'ADMIN' || (currentUser as any).role === 'SUPER_ADMIN';
+  const isManager = currentUser.role === 'MANAGER' || currentUser.isManager === true;
+  const canChangeAnyStage = isAdmin || isManager;
+  const canEdit = isAdmin || isManager;
+  const canDelete = isAdmin;
+
+  const canChangeStageForOpp = (opp: CRMOpportunity) => {
+    if (canChangeAnyStage) return true;
+    const userIdentifier = (currentUser.fullName || currentUser.username || '').trim().toLowerCase();
+    const oppAssigned = (opp.assignedTo || '').trim().toLowerCase();
+    if (!oppAssigned) return true;
+    return oppAssigned === userIdentifier || (currentUser.username && oppAssigned === currentUser.username.trim().toLowerCase());
+  };
+
+  const handleQuickStageChange = async (opp: CRMOpportunity, newStage: OpportunityStage) => {
+    const oldStageConfig = getStageConfig(opp.stage);
+    const newStageConfig = pipelineStagesList.find(s => s.id === newStage) || {
+      id: newStage,
+      label: newStage,
+      probability: 10,
+      color: '#64748b'
+    };
+    const newProb = newStageConfig.probability;
+    const now = new Date().toISOString();
+    const actor = currentUser.fullName || currentUser.username || 'User';
+
+    const historyEntry: OpportunityEditHistoryEntry = {
+      timestamp: now,
+      changedBy: actor,
+      action: 'STAGE_CHANGED',
+      details: `Stage updated from "${oldStageConfig.label}" to "${newStageConfig.label}"`,
+      oldStage: oldStageConfig.label,
+      newStage: newStageConfig.label,
+      changes: [
+        { field: 'Pipeline Stage', oldValue: oldStageConfig.label, newValue: newStageConfig.label },
+        { field: 'Win Probability', oldValue: `${opp.probability}%`, newValue: `${newProb}%` }
+      ]
+    };
+    const updatedHistory = opp.editHistory ? [historyEntry, ...opp.editHistory] : [historyEntry];
+
+    try {
+      await onUpdateOpportunity({
+        ...opp,
+        stage: newStage,
+        probability: newProb,
+        updatedAt: now,
+        editHistory: updatedHistory
+      });
+      if (viewingOpp && viewingOpp.id === opp.id) {
+        setViewingOpp({
+          ...viewingOpp,
+          stage: newStage,
+          probability: newProb,
+          updatedAt: now,
+          editHistory: updatedHistory
+        });
+      }
+    } catch (err) {
+      console.error('Error updating stage:', err);
+    }
+  };
+
+  // ==================== FILTER STATES ====================
+  // a. From-To Calendar Filter
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
+
+  // b. Account Filter (multi-select)
+  const [filterAccounts, setFilterAccounts] = useState<string[]>([]);
+
+  // c. Pipeline Stage Filter (multi-select)
+  const [filterStages, setFilterStages] = useState<string[]>([]);
+
+  // d. Source Filter (multi-select)
+  const [filterSources, setFilterSources] = useState<string[]>([]);
+
+  // e. Portfolio / Products & Services Filter (multi-select)
+  const [filterPortfolios, setFilterPortfolios] = useState<string[]>([]);
+
+  // f. Account Owner Filter (multi-select)
+  const [filterOwners, setFilterOwners] = useState<string[]>([]);
+
+  // Filter Popover Open State
+  const [openFilter, setOpenFilter] = useState<'calendar' | 'account' | 'stage' | 'source' | 'portfolio' | 'owner' | null>(null);
+
+  // Search terms inside filter dropdowns
+  const [searchAccountFilter, setSearchAccountFilter] = useState('');
+  const [searchSourceFilter, setSearchSourceFilter] = useState('');
+  const [searchPortfolioFilter, setSearchPortfolioFilter] = useState('');
+  const [searchOwnerFilter, setSearchOwnerFilter] = useState('');
+
+  // Export dropdown state
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+
+  // ==================== PAGINATION STATE (10 PER PAGE) ====================
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
+  // ==================== MODAL STATES ====================
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingOpp, setEditingOpp] = useState<CRMOpportunity | null>(null);
+  const [viewingOpp, setViewingOpp] = useState<CRMOpportunity | null>(null);
   const [deletingOppId, setDeletingOppId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Form State - Empty strings as placeholders for dropdowns
   const [formData, setFormData] = useState({
     title: '',
-    accountId: accounts[0]?.id || '',
-    accountName: accounts[0]?.name || '',
+    accountId: '',
+    accountName: '',
     contactId: '',
     contactName: '',
-    amount: 0,
-    stage: 'PROSPECTING' as OpportunityStage,
-    probability: 10,
+    amount: '' as unknown as number,
+    stage: '' as OpportunityStage,
+    probability: 0,
     expectedCloseDate: '',
-    leadSource: crmSettings.leadSources[0] || 'Direct Referral',
-    assignedTo: currentUser.fullName,
+    leadSource: '',
+    portfolio: '',
+    assignedTo: currentUser.fullName || currentUser.username,
     notes: ''
   });
+
+  // Dynamic Contact list for Modal based on chosen account
+  const availableContactsForOpportunity = useMemo(() => {
+    if (!formData.accountId || formData.accountId === 'INDEPENDENT') {
+      return contacts.filter(c => 
+        !c.accountId || 
+        c.accountId === 'INDEPENDENT' || 
+        c.accountName === 'Independent / Direct Deal' || 
+        c.accountName === 'Independent (Direct Deals)' || 
+        c.accountName?.toLowerCase().includes('independent')
+      );
+    }
+    return contacts.filter(c => c.accountId === formData.accountId);
+  }, [contacts, formData.accountId]);
 
   const resetForm = () => {
     setFormData({
       title: '',
-      accountId: accounts[0]?.id || '',
-      accountName: accounts[0]?.name || '',
+      accountId: '',
+      accountName: '',
       contactId: '',
       contactName: '',
-      amount: 0,
-      stage: 'PROSPECTING',
-      probability: 10,
+      amount: '' as unknown as number,
+      stage: '' as OpportunityStage,
+      probability: 0,
       expectedCloseDate: '',
-      leadSource: crmSettings.leadSources[0] || 'Direct Referral',
-      assignedTo: currentUser.fullName,
+      leadSource: '',
+      portfolio: '',
+      assignedTo: currentUser.fullName || currentUser.username,
       notes: ''
     });
     setEditingOpp(null);
   };
 
-  const handleOpenAdd = (defaultStage?: OpportunityStage) => {
+  const handleOpenAdd = () => {
     resetForm();
-    if (defaultStage) {
-      const stageConfig = crmSettings.pipelineStages.find(s => s.id === defaultStage);
-      setFormData(prev => ({
-        ...prev,
-        stage: defaultStage,
-        probability: stageConfig?.probability || 10
-      }));
-    }
     setIsAddModalOpen(true);
   };
 
   const handleOpenEdit = (opp: CRMOpportunity) => {
     setEditingOpp(opp);
     setFormData({
-      title: opp.title,
-      accountId: opp.accountId,
-      accountName: opp.accountName,
+      title: opp.title || '',
+      accountId: opp.accountId || '',
+      accountName: opp.accountName || '',
       contactId: opp.contactId || '',
       contactName: opp.contactName || '',
       amount: opp.amount,
       stage: opp.stage,
       probability: opp.probability,
       expectedCloseDate: opp.expectedCloseDate || '',
-      leadSource: opp.leadSource || crmSettings.leadSources[0] || 'Direct Referral',
-      assignedTo: opp.assignedTo || currentUser.fullName,
+      leadSource: opp.leadSource || '',
+      portfolio: opp.portfolio || '',
+      assignedTo: opp.assignedTo || currentUser.fullName || currentUser.username,
       notes: opp.notes || ''
     });
     setIsAddModalOpen(true);
   };
 
   const handleStageChange = (newStage: OpportunityStage) => {
-    const stageConfig = crmSettings.pipelineStages.find(s => s.id === newStage);
+    const stageConfig = pipelineStagesList.find(s => s.id === newStage);
     setFormData(prev => ({
       ...prev,
       stage: newStage,
-      probability: stageConfig ? stageConfig.probability : prev.probability
+      probability: stageConfig ? stageConfig.probability : 0
     }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title.trim() || !formData.accountId) return;
+    if (
+      !formData.title.trim() || 
+      !formData.accountId || 
+      !formData.contactId || 
+      !formData.amount || 
+      !formData.expectedCloseDate || 
+      !formData.stage || 
+      !formData.portfolio || 
+      !formData.leadSource || 
+      !formData.assignedTo
+    ) {
+      return;
+    }
 
     setIsSaving(true);
+    const now = new Date().toISOString();
+    const actor = currentUser.fullName || currentUser.username || 'User';
+
     try {
-      const selectedAcc = accounts.find(a => a.id === formData.accountId);
-      const accName = selectedAcc ? selectedAcc.name : formData.accountName;
+      let accName = formData.accountName;
+      if (formData.accountId === 'INDEPENDENT') {
+        accName = 'Independent (Direct Deals)';
+      } else {
+        const selectedAcc = accounts.find(a => a.id === formData.accountId);
+        if (selectedAcc) accName = selectedAcc.name;
+      }
 
       const selectedCon = contacts.find(c => c.id === formData.contactId);
-      const conName = selectedCon ? `${selectedCon.firstName} ${selectedCon.lastName}` : formData.contactName;
+      const conName = selectedCon ? `${selectedCon.firstName} ${selectedCon.lastName}`.trim() : formData.contactName;
 
       if (editingOpp) {
-        await onUpdateOpportunity({
+        const changes: { field: string; oldValue: string; newValue: string }[] = [];
+
+        if ((editingOpp.title || '').trim() !== formData.title.trim()) {
+          changes.push({ field: 'Deal Title', oldValue: editingOpp.title || '(Blank)', newValue: formData.title.trim() });
+        }
+        if ((editingOpp.accountId || '') !== formData.accountId) {
+          changes.push({ field: 'Client Account', oldValue: editingOpp.accountName || '(Blank)', newValue: accName });
+        }
+        if ((editingOpp.contactId || '') !== formData.contactId) {
+          changes.push({ field: 'Contact Person', oldValue: editingOpp.contactName || '(Blank)', newValue: conName || '(Blank)' });
+        }
+        if (Number(editingOpp.amount || 0) !== Number(formData.amount || 0)) {
+          changes.push({ 
+            field: 'Commercial Value', 
+            oldValue: `${currencySymbol}${Number(editingOpp.amount || 0).toLocaleString('en-IN')}`, 
+            newValue: `${currencySymbol}${Number(formData.amount || 0).toLocaleString('en-IN')}` 
+          });
+        }
+        if ((editingOpp.expectedCloseDate || '') !== (formData.expectedCloseDate || '')) {
+          changes.push({ 
+            field: 'Target Close Date', 
+            oldValue: editingOpp.expectedCloseDate ? formatCRMIDate(editingOpp.expectedCloseDate) : '(Blank)', 
+            newValue: formData.expectedCloseDate ? formatCRMIDate(formData.expectedCloseDate) : '(Blank)' 
+          });
+        }
+        if (editingOpp.stage !== formData.stage) {
+          const oldStageLabel = getStageConfig(editingOpp.stage).label;
+          const newStageLabel = getStageConfig(formData.stage).label;
+          changes.push({ field: 'Pipeline Stage', oldValue: oldStageLabel, newValue: newStageLabel });
+        }
+        if (editingOpp.probability !== formData.probability) {
+          changes.push({ field: 'Win Probability', oldValue: `${editingOpp.probability}%`, newValue: `${formData.probability}%` });
+        }
+        if ((editingOpp.portfolio || '').trim() !== (formData.portfolio || '').trim()) {
+          changes.push({ field: 'Portfolio', oldValue: editingOpp.portfolio || '(Blank)', newValue: formData.portfolio || '(Blank)' });
+        }
+        if ((editingOpp.leadSource || '').trim() !== (formData.leadSource || '').trim()) {
+          changes.push({ field: 'Lead Source', oldValue: editingOpp.leadSource || '(Blank)', newValue: formData.leadSource || '(Blank)' });
+        }
+        if ((editingOpp.assignedTo || '').trim() !== (formData.assignedTo || '').trim()) {
+          changes.push({ field: 'Assigned Account', oldValue: editingOpp.assignedTo || '(Blank)', newValue: formData.assignedTo || '(Blank)' });
+        }
+        if ((editingOpp.notes || '').trim() !== (formData.notes || '').trim()) {
+          changes.push({ field: 'Scope & Notes', oldValue: editingOpp.notes || '(Blank)', newValue: formData.notes || '(Blank)' });
+        }
+
+        let actionType: 'UPDATED' | 'STAGE_CHANGED' | 'OWNER_REASSIGNED' = 'UPDATED';
+        if (editingOpp.stage !== formData.stage) {
+          actionType = 'STAGE_CHANGED';
+        } else if ((editingOpp.assignedTo || '').trim() !== (formData.assignedTo || '').trim()) {
+          actionType = 'OWNER_REASSIGNED';
+        }
+
+        const detailsText = changes.length > 0
+          ? `Updated ${changes.length} field${changes.length > 1 ? 's' : ''}: ${changes.map(c => c.field).join(', ')}`
+          : 'Opportunity details saved without modifications';
+
+        const historyEntry: OpportunityEditHistoryEntry = {
+          timestamp: now,
+          changedBy: actor,
+          action: actionType,
+          details: detailsText,
+          changes: changes.length > 0 ? changes : undefined
+        };
+        const updatedHistory = editingOpp.editHistory ? [historyEntry, ...editingOpp.editHistory] : [historyEntry];
+
+        const updatedOpportunity: CRMOpportunity = {
           ...editingOpp,
           ...formData,
+          amount: Number(formData.amount) || 0,
           accountName: accName,
           contactName: conName,
-          updatedAt: new Date().toISOString()
-        });
+          updatedAt: now,
+          editHistory: updatedHistory
+        };
+
+        await onUpdateOpportunity(updatedOpportunity);
+        if (viewingOpp && viewingOpp.id === editingOpp.id) {
+          setViewingOpp(updatedOpportunity);
+        }
       } else {
+        const historyEntry: OpportunityEditHistoryEntry = {
+          timestamp: now,
+          changedBy: actor,
+          action: 'CREATED',
+          details: 'Initial opportunity created in sales pipeline'
+        };
+
         await onAddOpportunity({
           ...formData,
+          amount: Number(formData.amount) || 0,
           accountName: accName,
-          contactName: conName
+          contactName: conName,
+          editHistory: [historyEntry]
         });
       }
       setIsAddModalOpen(false);
@@ -166,25 +418,15 @@ export default function CRMOpportunitiesView({
     }
   };
 
-  const handleQuickMoveStage = async (opp: CRMOpportunity, nextStage: OpportunityStage) => {
-    const stageConfig = crmSettings.pipelineStages.find(s => s.id === nextStage);
-    try {
-      await onUpdateOpportunity({
-        ...opp,
-        stage: nextStage,
-        probability: stageConfig ? stageConfig.probability : opp.probability,
-        updatedAt: new Date().toISOString()
-      });
-    } catch (err) {
-      console.error('Error moving stage:', err);
-    }
-  };
-
   const handleDelete = async (id: string) => {
+    if (!canDelete) return;
     setIsSaving(true);
     try {
       await onDeleteOpportunity(id);
       setDeletingOppId(null);
+      if (viewingOpp && viewingOpp.id === id) {
+        setViewingOpp(null);
+      }
     } catch (err) {
       console.error('Error deleting deal:', err);
     } finally {
@@ -192,309 +434,1460 @@ export default function CRMOpportunitiesView({
     }
   };
 
+  // ==================== UNIQUE FILTER LISTS ====================
+  const uniqueAccounts = useMemo(() => {
+    const accMap = new Map<string, string>();
+    // Always include Independent Account option
+    accMap.set('INDEPENDENT', '-- Independent / Direct --');
+    accounts.forEach(a => {
+      if (a.id && a.name && a.id !== 'INDEPENDENT') accMap.set(a.id, a.name);
+    });
+    opportunities.forEach(o => {
+      if (o.accountId && o.accountName && o.accountId !== 'INDEPENDENT') accMap.set(o.accountId, o.accountName);
+    });
+    return Array.from(accMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [accounts, opportunities]);
+
+  const uniquePortfolios = useMemo(() => {
+    const pSet = new Set<string>(productsAndServicesList);
+    opportunities.forEach(o => {
+      if (o.portfolio && o.portfolio.trim()) pSet.add(o.portfolio.trim());
+    });
+    return Array.from(pSet).sort();
+  }, [productsAndServicesList, opportunities]);
+
+  const uniqueOwners = useMemo(() => {
+    const ownerSet = new Set<string>();
+    opportunities.forEach(o => {
+      if (o.assignedTo && o.assignedTo.trim()) ownerSet.add(o.assignedTo.trim());
+    });
+    availableUsersList.forEach(u => {
+      const name = u.fullName || u.username;
+      if (name && name.trim()) ownerSet.add(name.trim());
+    });
+    if (currentUser.fullName) ownerSet.add(currentUser.fullName);
+    return Array.from(ownerSet).sort();
+  }, [opportunities, availableUsersList, currentUser]);
+
+  // ==================== FILTERING LOGIC ====================
   const filteredOpportunities = useMemo(() => {
     return opportunities.filter(opp => {
-      const matchesSearch = 
-        opp.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        opp.accountName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (opp.contactName && opp.contactName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        opp.id.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesStage = selectedStageFilter === 'ALL' || opp.stage === selectedStageFilter;
+      // a. Calendar Date Filter (Expected Close Date or Created Date)
+      const oppDate = opp.expectedCloseDate || (opp.createdAt ? opp.createdAt.slice(0, 10) : '');
+      if (fromDate && oppDate && oppDate < fromDate) {
+        return false;
+      }
+      if (toDate && oppDate && oppDate > toDate) {
+        return false;
+      }
+      if ((fromDate || toDate) && !oppDate) {
+        return false;
+      }
 
-      return matchesSearch && matchesStage;
-    });
-  }, [opportunities, searchTerm, selectedStageFilter]);
+      // b. Account Filter (supports INDEPENDENT accounts)
+      if (filterAccounts.length > 0) {
+        const isOppIndependent = !opp.accountId || opp.accountId === 'INDEPENDENT' || opp.accountName?.toLowerCase().includes('independent');
+        const matchesAccount = filterAccounts.some(accId => {
+          if (accId === 'INDEPENDENT') {
+            return isOppIndependent;
+          }
+          return opp.accountId === accId || opp.accountName === accId;
+        });
+        if (!matchesAccount) {
+          return false;
+        }
+      }
 
-  // Group by stage for Kanban
-  const kanbanColumns = useMemo(() => {
-    return crmSettings.pipelineStages.map(stage => {
-      const items = filteredOpportunities.filter(o => o.stage === stage.id);
-      const totalVal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      return {
-        ...stage,
-        items,
-        totalVal
-      };
+      // c. Pipeline Stage Filter
+      if (filterStages.length > 0) {
+        if (!filterStages.includes(opp.stage)) {
+          return false;
+        }
+      }
+
+      // d. Source Filter
+      if (filterSources.length > 0) {
+        const source = opp.leadSource || 'Direct Referral';
+        if (!filterSources.includes(source)) {
+          return false;
+        }
+      }
+
+      // e. Portfolio / Products & Services Filter
+      if (filterPortfolios.length > 0) {
+        const port = opp.portfolio || 'General / Unspecified';
+        if (!filterPortfolios.includes(port)) {
+          return false;
+        }
+      }
+
+      // f. Owner Filter
+      if (filterOwners.length > 0) {
+        const owner = opp.assignedTo?.trim() || 'Admin Operator';
+        if (!filterOwners.includes(owner)) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [crmSettings, filteredOpportunities]);
+  }, [opportunities, fromDate, toDate, filterAccounts, filterStages, filterSources, filterPortfolios, filterOwners]);
+
+  // Filter Active Check
+  const isFilterActive = 
+    Boolean(fromDate) || 
+    Boolean(toDate) || 
+    filterAccounts.length > 0 || 
+    filterStages.length > 0 || 
+    filterSources.length > 0 || 
+    filterPortfolios.length > 0 ||
+    filterOwners.length > 0;
+
+  const handleResetFilters = () => {
+    setFromDate('');
+    setToDate('');
+    setFilterAccounts([]);
+    setFilterStages([]);
+    setFilterSources([]);
+    setFilterPortfolios([]);
+    setFilterOwners([]);
+    setSearchAccountFilter('');
+    setSearchSourceFilter('');
+    setSearchPortfolioFilter('');
+    setSearchOwnerFilter('');
+    setCurrentPage(1);
+  };
+
+  // ==================== PAGINATION CALCULATIONS ====================
+  const totalItems = filteredOpportunities.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const validCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedOpportunities = useMemo(() => {
+    const startIndex = (validCurrentPage - 1) * pageSize;
+    return filteredOpportunities.slice(startIndex, startIndex + pageSize);
+  }, [filteredOpportunities, validCurrentPage, pageSize]);
+
+  // Stage Config Helper
+  const getStageConfig = (stageId: OpportunityStage) => {
+    return pipelineStagesList.find(s => s.id === stageId) || {
+      id: stageId,
+      label: stageId,
+      probability: 10,
+      color: '#64748b'
+    };
+  };
+
+  // Date Presets Helper
+  const applyDatePreset = (preset: 'THIS_MONTH' | 'NEXT_MONTH' | 'THIS_QUARTER' | 'THIS_YEAR' | 'CLEAR') => {
+    if (preset === 'CLEAR') {
+      setFromDate('');
+      setToDate('');
+      setCurrentPage(1);
+      return;
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+
+    if (preset === 'THIS_MONTH') {
+      const firstDay = new Date(year, month, 1).toISOString().slice(0, 10);
+      const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+      setFromDate(firstDay);
+      setToDate(lastDay);
+    } else if (preset === 'NEXT_MONTH') {
+      const firstDay = new Date(year, month + 1, 1).toISOString().slice(0, 10);
+      const lastDay = new Date(year, month + 2, 0).toISOString().slice(0, 10);
+      setFromDate(firstDay);
+      setToDate(lastDay);
+    } else if (preset === 'THIS_QUARTER') {
+      const quarterStartMonth = Math.floor(month / 3) * 3;
+      const firstDay = new Date(year, quarterStartMonth, 1).toISOString().slice(0, 10);
+      const lastDay = new Date(year, quarterStartMonth + 3, 0).toISOString().slice(0, 10);
+      setFromDate(firstDay);
+      setToDate(lastDay);
+    } else if (preset === 'THIS_YEAR') {
+      setFromDate(`${year}-01-01`);
+      setToDate(`${year}-12-31`);
+    }
+    setCurrentPage(1);
+  };
+
+  // ==================== EXPORT REPORT HANDLERS ====================
+  const handleExportCSV = () => {
+    const headers = [
+      'Opportunity ID',
+      'Deal Title',
+      'Contact Person',
+      'Client Account',
+      'Portfolio / Product',
+      `Commercial Deal Value (${currencySymbol})`,
+      'Pipeline Stage',
+      'Win Probability (%)',
+      'Expected Close Date',
+      'Lead Source',
+      'Assigned Account',
+      'Created Date (IST)',
+      'Notes'
+    ];
+
+    const rows = filteredOpportunities.map(opp => {
+      const stage = getStageConfig(opp.stage);
+      return [
+        `"${opp.id}"`,
+        `"${(opp.title || '').replace(/"/g, '""')}"`,
+        `"${(opp.contactName || 'Direct Account').replace(/"/g, '""')}"`,
+        `"${(opp.accountName || '').replace(/"/g, '""')}"`,
+        `"${(opp.portfolio || 'General').replace(/"/g, '""')}"`,
+        `"${Number(opp.amount) || 0}"`,
+        `"${stage.label}"`,
+        `"${opp.probability}%"`,
+        `"${opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : ''}"`,
+        `"${(opp.leadSource || '').replace(/"/g, '""')}"`,
+        `"${(opp.assignedTo || '').replace(/"/g, '""')}"`,
+        `"${formatCRMIDate(opp.createdAt)}"`,
+        `"${(opp.notes || '').replace(/"/g, '""')}"`
+      ];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `crm_opportunities_report_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportXLSX = () => {
+    const rowsHTML = filteredOpportunities.map(opp => {
+      const stage = getStageConfig(opp.stage);
+      return `
+      <tr>
+        <td style="font-family: monospace; font-weight: bold;">${opp.id}</td>
+        <td style="font-weight: bold;">${opp.title}</td>
+        <td style="font-weight: bold;">${opp.contactName || 'Direct Account'}</td>
+        <td>${opp.accountName}</td>
+        <td style="font-weight: bold; color: #0284c7;">${opp.portfolio || '—'}</td>
+        <td style="font-family: monospace; font-weight: bold; text-align: right;">${currencySymbol}${Number(opp.amount).toLocaleString('en-IN')}</td>
+        <td style="font-weight: bold;">${stage.label}</td>
+        <td style="text-align: center;">${opp.probability}%</td>
+        <td>${opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : '—'}</td>
+        <td>${opp.leadSource || '—'}</td>
+        <td>${opp.assignedTo || '—'}</td>
+        <td>${formatCRMIDate(opp.createdAt)}</td>
+        <td>${(opp.notes || '').replace(/</g, '&lt;')}</td>
+      </tr>
+    `;
+    }).join('');
+
+    const totalValue = filteredOpportunities.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+
+    const xlsContent = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        </head>
+        <body>
+          <table border="1">
+            <thead>
+              <tr style="background-color: #f7b944; color: #000; font-weight: bold;">
+                <th>ID</th>
+                <th>Opportunity Title</th>
+                <th>Contact Person</th>
+                <th>Client Account</th>
+                <th>Portfolio / Solution</th>
+                <th>Commercial Value (${currencySymbol})</th>
+                <th>Pipeline Stage</th>
+                <th>Win Prob.</th>
+                <th>Expected Close</th>
+                <th>Lead Source</th>
+                <th>Assigned Account</th>
+                <th>Created Date</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+            <tfoot>
+              <tr style="background-color: #f1f5f9; font-weight: bold;">
+                <td colspan="5" style="text-align: right;">Total Commercial Value:</td>
+                <td style="font-family: monospace; text-align: right;">${currencySymbol}${totalValue.toLocaleString('en-IN')}</td>
+                <td colspan="7"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([xlsContent], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `crm_opportunities_report_${new Date().toISOString().slice(0, 10)}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPDF = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const totalValue = filteredOpportunities.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+
+    const rowsHTML = filteredOpportunities.map(opp => {
+      const stage = getStageConfig(opp.stage);
+      return `
+      <tr style="border-bottom: 1px solid #e2e8f0; font-size: 10px;">
+        <td style="padding: 6px; font-family: monospace; font-weight: bold; white-space: nowrap;">${opp.id}</td>
+        <td style="padding: 6px 8px; font-weight: bold; color: #0f172a;">
+          ${opp.title}
+          <div style="font-size: 9px; color: #0f172a; font-weight: bold; margin-top: 2px;">
+            ${opp.contactName ? opp.contactName : 'Direct Account'}
+          </div>
+          <div style="font-size: 8.5px; color: #64748b; font-weight: normal;">${opp.accountName}</div>
+        </td>
+        <td style="padding: 6px; color: #0369a1; font-weight: bold; white-space: nowrap;">
+          ${opp.portfolio || '—'}
+        </td>
+        <td style="padding: 6px; white-space: nowrap;">
+          <span style="background-color: ${stage.color}15; color: ${stage.color}; border: 1px solid ${stage.color}40; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+            ${stage.label}
+          </span>
+        </td>
+        <td style="padding: 6px; text-align: right; font-family: monospace; font-weight: bold; white-space: nowrap;">
+          ${currencySymbol}${Number(opp.amount).toLocaleString('en-IN')}
+        </td>
+        <td style="padding: 6px; text-align: center; white-space: nowrap;">
+          ${opp.probability}%
+        </td>
+        <td style="padding: 6px; white-space: nowrap;">${opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : '—'}</td>
+        <td style="padding: 6px; color: #475569; white-space: nowrap;">${opp.leadSource || '—'}</td>
+        <td style="padding: 6px; color: #475569; white-space: nowrap;">${opp.assignedTo || '—'}</td>
+      </tr>
+    `;
+    }).join('');
+
+    const nowIST = formatCRMIDateTime(new Date().toISOString());
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>CRM Opportunities Pipeline Report</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #1e293b; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th { text-align: left; background-color: #f8fafc; color: #475569; font-size: 9.5px; text-transform: uppercase; padding: 8px 6px; border-bottom: 2px solid #cbd5e1; }
+            @media print {
+              body { margin: 10mm; }
+              @page { size: landscape; margin: 10mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f7b944; padding-bottom: 12px;">
+            <div>
+              <h2 style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 800;">CRM Sales Opportunities Pipeline Report</h2>
+              <p style="margin: 3px 0 0 0; font-size: 11px; color: #64748b;">Generated on: ${nowIST} (IST) | Total Filtered Opportunities: <strong>${filteredOpportunities.length}</strong></p>
+            </div>
+            <div style="text-align: right;">
+              <span style="background: linear-gradient(135deg, #ec003f, #f7b944); color: #ffffff; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 900; letter-spacing: 1px; display: inline-block;">
+                CONNECT
+              </span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 75px;">ID</th>
+                <th>Opportunity & Contact / Client</th>
+                <th>Portfolio</th>
+                <th>Stage</th>
+                <th style="text-align: right;">Commercial Value</th>
+                <th style="text-align: center;">Prob.</th>
+                <th>Expected Close</th>
+                <th>Lead Source</th>
+                <th>Assigned Account</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+            <tfoot>
+              <tr style="background-color: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1; font-size: 10px;">
+                <td colspan="4" style="padding: 8px 6px; text-align: right;">Total Commercial Value:</td>
+                <td style="padding: 8px 6px; text-align: right; font-family: monospace;">${currencySymbol}${totalValue.toLocaleString('en-IN')}</td>
+                <td colspan="4" style="padding: 8px 6px;"></td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #475569; display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div><strong>Generated On:</strong> ${nowIST} (IST)</div>
+            </div>
+            <div>
+              <strong>Generated By:</strong> ${currentUser.fullName || currentUser.username}
+            </div>
+          </div>
+
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       
-      {/* 1. CONTROLS HEADER */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
-        
-        {/* Search, Filter & View Toggle */}
-        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 flex-1">
-          <div className="relative flex-1 min-w-0 sm:min-w-[220px] max-w-full md:max-w-md">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search deals by title, company, or ID..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]/50 focus:border-[#f7b944]"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3">
-            <select
-              value={selectedStageFilter}
-              onChange={e => setSelectedStageFilter(e.target.value)}
-              className="py-2.5 sm:py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#f7b944]/50 w-full"
-            >
-              <option value="ALL">All Stages</option>
-              {crmSettings.pipelineStages.map(s => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-
-            {/* View Mode Toggle */}
-            <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
-              <button
-                onClick={() => setViewMode('KANBAN')}
-                className={`flex-1 sm:flex-none text-center px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  viewMode === 'KANBAN' 
-                    ? 'bg-white text-slate-900 shadow-xs' 
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                Kanban
-              </button>
-              <button
-                onClick={() => setViewMode('LIST')}
-                className={`flex-1 sm:flex-none text-center px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  viewMode === 'LIST' 
-                    ? 'bg-white text-slate-900 shadow-xs' 
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                List
-              </button>
+      {/* 1. TOP HEADER & ACTION BAR */}
+      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200/60 flex items-center justify-center text-amber-600 shrink-0">
+              <Target className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 leading-tight">
+                Sales Opportunities & Pipeline
+              </h2>
+              <span className="text-xs text-slate-500 font-medium">
+                Showing {filteredOpportunities.length} of {opportunities.length} opportunities
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Create Deal Button */}
-        <button
-          onClick={() => handleOpenAdd()}
-          className="flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 bg-[#f7b944] text-slate-950 rounded-xl text-xs font-extrabold shadow-sm hover:bg-[#e5aa3b] transition-all cursor-pointer whitespace-nowrap w-full sm:w-auto"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-          New Opportunity
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap sm:flex-nowrap">
+          {/* Export Report Dropdown */}
+          <div className="relative flex-1 sm:flex-initial">
+            <button 
+              type="button"
+              onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+              className="w-full sm:w-auto py-2.5 px-3 sm:px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl border border-slate-200 transition-all text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Export Report</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500 ml-0.5 shrink-0" />
+            </button>
+            {isExportDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setIsExportDropdownOpen(false)}></div>
+                <div className="absolute right-0 mt-1.5 w-44 bg-white border border-slate-200 rounded-2xl shadow-xl py-2 z-30 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 mb-1">
+                    Export Options
+                  </div>
+                  <button
+                    onClick={() => {
+                      handleExportCSV();
+                      setIsExportDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    Export as CSV
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleExportXLSX();
+                      setIsExportDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Export as Excel (.xls)
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleExportPDF();
+                      setIsExportDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Print / Export PDF
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2.5 bg-[#f7b944] text-slate-950 rounded-xl text-xs font-extrabold shadow-xs hover:bg-[#e5aa3b] transition-all cursor-pointer whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4 stroke-[3] shrink-0" />
+            <span>New Opportunity</span>
+          </button>
+        </div>
       </div>
 
-      {/* 2. KANBAN PIPELINE BOARD */}
-      {viewMode === 'KANBAN' && (
-        <div className="flex gap-4 overflow-x-auto pb-4 items-start min-h-[600px]">
-          {kanbanColumns.map(column => (
-            <div 
-              key={column.id} 
-              className="w-80 shrink-0 bg-slate-100/70 border border-slate-200/80 rounded-2xl p-3.5 flex flex-col max-h-[85vh]"
-            >
-              {/* Column Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200/70 mb-3 px-1">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: column.color }}></span>
-                  <h4 className="font-extrabold text-xs text-slate-900">{column.label}</h4>
-                  <span className="px-1.5 py-0.2 rounded-md bg-white border border-slate-200 text-slate-600 text-[10px] font-bold">
-                    {column.items.length}
+      {/* 2. FILTERS TOOLBAR (One Row / Multi-Select: Calendar, Account, Stage, Source, Portfolio, Owner) */}
+      <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 shrink-0">
+            <Filter className="w-3.5 h-3.5 text-slate-500" />
+            <span>Filters:</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 w-full flex-1">
+            {/* Filter a: From - To Calendar Filter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'calendar' ? null : 'calendar')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  (fromDate || toDate) ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <Calendar className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span className="truncate">
+                    {fromDate && toDate
+                      ? `${fromDate} → ${toDate}`
+                      : fromDate
+                      ? `From: ${fromDate}`
+                      : toDate
+                      ? `To: ${toDate}`
+                      : 'Close / Target Date'}
                   </span>
                 </div>
-                <button
-                  onClick={() => handleOpenAdd(column.id)}
-                  className="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"
-                  title={`Add deal to ${column.label}`}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
 
-              {/* Total Column Amount Banner */}
-              <div className="bg-white/80 border border-slate-200/50 rounded-xl py-1 px-2.5 mb-3 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                <span>Stage Value:</span>
-                <span className="font-extrabold text-slate-900 font-mono">
-                  {currencySymbol}{column.totalVal.toLocaleString('en-IN')}
-                </span>
-              </div>
+              {openFilter === 'calendar' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3.5 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Date Range Filter</span>
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset('CLEAR')}
+                        className="text-[10px] font-bold text-slate-500 hover:text-amber-600 cursor-pointer"
+                      >
+                        Clear Range
+                      </button>
+                    </div>
 
-              {/* Cards Container */}
-              <div className="space-y-3 overflow-y-auto pr-1 flex-1">
-                {column.items.map(opp => (
-                  <div
-                    key={opp.id}
-                    className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all group"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <h5 className="font-extrabold text-xs text-slate-900 leading-snug line-clamp-2">
-                        {opp.title}
-                      </h5>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => handleOpenEdit(opp)}
-                          className="p-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-900"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => setDeletingOppId(opp.id)}
-                          className="p-1 rounded-md hover:bg-red-50 text-slate-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                    {/* Quick Preset Buttons */}
+                    <div className="grid grid-cols-2 gap-1.5 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset('THIS_MONTH')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                      >
+                        This Month
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset('NEXT_MONTH')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                      >
+                        Next Month
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset('THIS_QUARTER')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                      >
+                        This Quarter
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset('THIS_YEAR')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                      >
+                        This Year
+                      </button>
+                    </div>
+
+                    {/* From and To Date Inputs */}
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">From Date:</label>
+                        <input
+                          type="date"
+                          value={fromDate}
+                          onChange={e => {
+                            setFromDate(e.target.value);
+                            setCurrentPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-hidden focus:border-amber-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">To Date:</label>
+                        <input
+                          type="date"
+                          value={toDate}
+                          onChange={e => {
+                            setToDate(e.target.value);
+                            setCurrentPage(1);
+                          }}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-hidden focus:border-amber-400"
+                        />
                       </div>
                     </div>
 
-                    <div className="mt-2 space-y-1 text-[11px]">
-                      <p className="font-semibold text-slate-700 flex items-center gap-1.5 truncate">
-                        <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                    <div className="mt-3 pt-2 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFilter(null)}
+                        className="px-3 py-1 bg-[#f7b944] text-slate-950 font-bold rounded-lg text-xs hover:bg-[#e0a330]"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Filter b: Account Filter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'account' ? null : 'account')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterAccounts.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {filterAccounts.length === 0
+                      ? 'All Accounts'
+                      : filterAccounts.length === 1
+                      ? uniqueAccounts.find(a => a.id === filterAccounts[0] || a.name === filterAccounts[0])?.name || filterAccounts[0]
+                      : `${filterAccounts.length} Accounts`}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'account' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Account</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterAccounts(uniqueAccounts.map(a => a.id))}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterAccounts([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search accounts..."
+                      value={searchAccountFilter}
+                      onChange={e => setSearchAccountFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {uniqueAccounts
+                        .filter(acc => acc.name.toLowerCase().includes(searchAccountFilter.toLowerCase()))
+                        .map(acc => {
+                          const isChecked = filterAccounts.includes(acc.id) || filterAccounts.includes(acc.name);
+                          return (
+                            <label
+                              key={acc.id}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterAccounts(prev => 
+                                    prev.includes(acc.id) ? prev.filter(x => x !== acc.id && x !== acc.name) : [...prev, acc.id]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{acc.name}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Filter c: Pipeline Stage Filter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'stage' ? null : 'stage')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterStages.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {filterStages.length === 0
+                      ? 'All Stages'
+                      : filterStages.length === 1
+                      ? pipelineStagesList.find(s => s.id === filterStages[0])?.label || filterStages[0]
+                      : `${filterStages.length} Stages`}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'stage' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Pipeline Stage</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterStages(pipelineStagesList.map(s => s.id))}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterStages([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                      {pipelineStagesList.map(stage => {
+                        const isChecked = filterStages.includes(stage.id);
+                        return (
+                          <label
+                            key={stage.id}
+                            className="flex items-center justify-between px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterStages(prev => 
+                                    prev.includes(stage.id) ? prev.filter(x => x !== stage.id) : [...prev, stage.id]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: stage.color }} />
+                              <span className="truncate">{stage.label}</span>
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-400 font-mono">{stage.probability}%</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Filter d: Source Filter (from Admin CRM App Settings) */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'source' ? null : 'source')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterSources.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <Tag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {filterSources.length === 0
+                      ? 'All Sources'
+                      : filterSources.length === 1
+                      ? filterSources[0]
+                      : `${filterSources.length} Sources`}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'source' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Lead Source</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterSources([...leadSourcesList])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterSources([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search sources..."
+                      value={searchSourceFilter}
+                      onChange={e => setSearchSourceFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {leadSourcesList
+                        .filter(src => src.toLowerCase().includes(searchSourceFilter.toLowerCase()))
+                        .map(src => {
+                          const isChecked = filterSources.includes(src);
+                          return (
+                            <label
+                              key={src}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterSources(prev => 
+                                    prev.includes(src) ? prev.filter(x => x !== src) : [...prev, src]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{src}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Filter e: Portfolio / Products & Services Filter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'portfolio' ? null : 'portfolio')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterPortfolios.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <Package className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {filterPortfolios.length === 0
+                      ? 'All Portfolios'
+                      : filterPortfolios.length === 1
+                      ? filterPortfolios[0]
+                      : `${filterPortfolios.length} Portfolios`}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'portfolio' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Portfolio</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterPortfolios([...uniquePortfolios])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterPortfolios([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search products/services..."
+                      value={searchPortfolioFilter}
+                      onChange={e => setSearchPortfolioFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {uniquePortfolios
+                        .filter(p => p.toLowerCase().includes(searchPortfolioFilter.toLowerCase()))
+                        .map(p => {
+                          const isChecked = filterPortfolios.includes(p);
+                          return (
+                            <label
+                              key={p}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterPortfolios(prev => 
+                                    prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{p}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Filter f: Account Owner Filter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'owner' ? null : 'owner')}
+                className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                  filterOwners.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">
+                    {filterOwners.length === 0
+                      ? 'All Owners'
+                      : filterOwners.length === 1
+                      ? filterOwners[0]
+                      : `${filterOwners.length} Owners`}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+              </button>
+
+              {openFilter === 'owner' && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
+                  <div className="absolute left-0 top-full mt-1.5 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="font-extrabold text-slate-800 text-[11px]">Filter Account Owner</span>
+                      <div className="flex gap-2 text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setFilterOwners([...uniqueOwners])}
+                          className="text-amber-600 hover:underline cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setFilterOwners([])}
+                          className="text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search owners..."
+                      value={searchOwnerFilter}
+                      onChange={e => setSearchOwnerFilter(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs mb-2 focus:outline-hidden focus:border-amber-400"
+                    />
+                    <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                      {uniqueOwners
+                        .filter(own => own.toLowerCase().includes(searchOwnerFilter.toLowerCase()))
+                        .map(own => {
+                          const isChecked = filterOwners.includes(own);
+                          return (
+                            <label
+                              key={own}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterOwners(prev => 
+                                    prev.includes(own) ? prev.filter(x => x !== own) : [...prev, own]
+                                  );
+                                  setCurrentPage(1);
+                                }}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer accent-amber-600"
+                              />
+                              <span className="truncate">{own}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Reset Filters Action Button */}
+          {isFilterActive && (
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Reset all active filters"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+              <span>Reset</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 3. OPPORTUNITY LIST VIEW */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        
+        {/* DESKTOP TABLE VIEW */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-4">Opportunity & ID</th>
+                <th className="py-3 px-4">Contact & Client Account</th>
+                <th className="py-3 px-3">Pipeline Stage</th>
+                <th className="py-3 px-3 text-right">Deal Value ({currencySymbol})</th>
+                <th className="py-3 px-3 text-center">Win Prob.</th>
+                <th className="py-3 px-3">Expected Close</th>
+                <th className="py-3 px-3">Lead Source</th>
+                <th className="py-3 px-3">Assigned Account</th>
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {paginatedOpportunities.map(opp => {
+                const stage = getStageConfig(opp.stage);
+                const canChangeStage = canChangeStageForOpp(opp);
+
+                return (
+                  <tr key={opp.id} className="hover:bg-slate-50/90 transition-colors group">
+                    {/* Opportunity Title & ID */}
+                    <td className="py-3.5 px-4 max-w-[200px]">
+                      <p className="font-extrabold text-slate-900 leading-snug truncate" title={opp.title}>
+                        {opp.title}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setViewingOpp(opp)}
+                        className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200/80 transition-colors cursor-pointer hover:underline inline-flex items-center gap-1 mt-0.5"
+                        title="Click to view Opportunity Details & Edit History"
+                      >
+                        <span>{opp.id}</span>
+                        <History className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+                    </td>
+
+                    {/* Contact & Client Account (Contact Person is Primary & Visible) */}
+                    <td className="py-3.5 px-4 max-w-[200px]">
+                      <p className="font-extrabold text-slate-900 truncate" title={opp.contactName || 'Direct Account'}>
+                        {opp.contactName ? opp.contactName : 'Direct Account'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-medium truncate flex items-center gap-1 mt-0.5" title={opp.accountName}>
+                        <Building2 className="w-3 h-3 text-slate-400 shrink-0 inline" />
                         <span className="truncate">{opp.accountName}</span>
                       </p>
-                      {opp.contactName && (
-                        <p className="text-slate-400 flex items-center gap-1.5 truncate text-[10px]">
-                          <Users className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className="truncate">{opp.contactName}</span>
-                        </p>
-                      )}
-                    </div>
+                    </td>
 
-                    {/* Commercial Value & Probability */}
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-medium">Deal Amount</span>
-                        <span className="font-black text-xs text-slate-900 font-mono">
-                          {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 block font-medium">Prob.</span>
-                        <span className="font-bold text-xs text-slate-700">
-                          {opp.probability}%
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Stage quick advance buttons */}
-                    <div className="mt-3 pt-2 flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="font-mono">{opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : 'No close date'}</span>
-                      
-                      <div className="flex items-center gap-1">
-                        {column.id !== 'CLOSED_WON' && (
-                          <button
-                            onClick={() => handleQuickMoveStage(opp, 'CLOSED_WON')}
-                            className="p-1 rounded-md hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors"
-                            title="Mark Won"
+                    {/* Pipeline Stage Dropdown for Authorized Users & Managers / Badge for others */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {canChangeStage ? (
+                        <div className="relative inline-block">
+                          <select
+                            value={opp.stage}
+                            onChange={(e) => handleQuickStageChange(opp, e.target.value as OpportunityStage)}
+                            className="appearance-none font-extrabold font-mono text-[10px] pl-2.5 pr-6 py-1 rounded-lg border cursor-pointer focus:outline-none transition-all shadow-2xs hover:opacity-90"
+                            style={{
+                              backgroundColor: `${stage.color}15`,
+                              color: stage.color,
+                              borderColor: `${stage.color}40`,
+                            }}
+                            title="Click to update pipeline stage"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {column.id !== 'CLOSED_LOST' && (
-                          <button
-                            onClick={() => handleQuickMoveStage(opp, 'CLOSED_LOST')}
-                            className="p-1 rounded-md hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                            title="Mark Lost"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                  </div>
-                ))}
-
-                {column.items.length === 0 && (
-                  <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center text-[11px] text-slate-400">
-                    No deals in this stage
-                  </div>
-                )}
-              </div>
-
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 3. LIST VIEW */}
-      {viewMode === 'LIST' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="bg-slate-50/70 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
-                  <th className="py-3.5 px-4">Opportunity Title</th>
-                  <th className="py-3.5 px-4">Client Account</th>
-                  <th className="py-3.5 px-4">Pipeline Stage</th>
-                  <th className="py-3.5 px-4 text-right">Value ({currencySymbol})</th>
-                  <th className="py-3.5 px-4 text-center">Probability</th>
-                  <th className="py-3.5 px-4">Expected Close</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredOpportunities.map(opp => {
-                  const stageConfig = crmSettings.pipelineStages.find(s => s.id === opp.stage);
-                  return (
-                    <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4">
-                        <p className="font-extrabold text-slate-900">{opp.title}</p>
-                        <span className="text-[10px] font-mono text-slate-400">{opp.id}</span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <p className="font-bold text-slate-800">{opp.accountName}</p>
-                        <p className="text-[10px] text-slate-400">{opp.contactName || 'Direct'}</p>
-                      </td>
-                      <td className="py-3.5 px-4">
+                            {pipelineStagesList.map(s => (
+                              <option key={s.id} value={s.id} className="bg-white text-slate-900 font-sans font-medium text-xs">
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown 
+                            className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
+                            style={{ color: stage.color }} 
+                          />
+                        </div>
+                      ) : (
                         <span 
-                          className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold font-mono"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-extrabold font-mono"
                           style={{ 
-                            backgroundColor: `${stageConfig?.color || '#64748b'}15`,
-                            color: stageConfig?.color || '#64748b',
-                            border: `1px solid ${stageConfig?.color || '#64748b'}30`
+                            backgroundColor: `${stage.color}15`,
+                            color: stage.color,
+                            border: `1px solid ${stage.color}35`
                           }}
+                          title="Stage view only (assigned to other user)"
                         >
-                          {stageConfig?.label || opp.stage}
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                          {stage.label}
                         </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-bold text-slate-900 font-mono">
-                        {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-700">
-                        {opp.probability}%
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-500 font-medium">
-                        {opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : 'TBD'}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleOpenEdit(opp)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                            title="Edit Deal"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
+                      )}
+                    </td>
+
+                    {/* Commercial Deal Value */}
+                    <td className="py-3.5 px-3 text-right font-black text-slate-900 font-mono whitespace-nowrap">
+                      {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
+                    </td>
+
+                    {/* Win Probability with mini bar */}
+                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                      <div className="inline-flex flex-col items-center">
+                        <span className="font-bold text-xs text-slate-800">{opp.probability}%</span>
+                        <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-0.5">
+                          <div 
+                            className="h-full rounded-full" 
+                            style={{ 
+                              width: `${opp.probability}%`,
+                              backgroundColor: stage.color 
+                            }} 
+                          />
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Expected Close Date */}
+                    <td className="py-3.5 px-3 text-slate-600 font-medium whitespace-nowrap font-mono text-[11px]">
+                      {opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : '—'}
+                    </td>
+
+                    {/* Lead Source */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-[10px] font-semibold">
+                        {opp.leadSource || 'Direct'}
+                      </span>
+                    </td>
+
+                    {/* Assigned Account */}
+                    <td className="py-3.5 px-3 text-slate-600 text-[11px] whitespace-nowrap truncate max-w-[120px]" title={opp.assignedTo}>
+                      {opp.assignedTo || '—'}
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setViewingOpp(opp)}
+                          className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
+                          title="View Opportunity & Edit History"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(opp)}
+                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
+                          title="Edit Opportunity"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        {canDelete && (
                           <button
                             onClick={() => setDeletingOppId(opp.id)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
-                            title="Delete Deal"
+                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="Delete Opportunity"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {paginatedOpportunities.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                        <Target className="w-5 h-5" />
+                      </div>
+                      <p className="font-bold text-xs text-slate-600">No opportunities match the selected filters</p>
+                      {isFilterActive && (
+                        <button
+                          onClick={handleResetFilters}
+                          className="text-xs text-amber-600 font-bold hover:underline cursor-pointer"
+                        >
+                          Reset Filters
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* MOBILE RESPONSIVE STACKED CARDS VIEW (No horizontal scrolling) */}
+        <div className="block md:hidden divide-y divide-slate-100">
+          {paginatedOpportunities.map(opp => {
+            const stage = getStageConfig(opp.stage);
+            const canChangeStage = canChangeStageForOpp(opp);
+
+            return (
+              <div key={opp.id} className="p-4 space-y-3 hover:bg-slate-50/70 transition-colors">
+                
+                {/* Header: Title, ID & Pipeline Stage Dropdown */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setViewingOpp(opp)}
+                        className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100 cursor-pointer flex items-center gap-1"
+                        title="Click to view Opportunity & History"
+                      >
+                        <span>{opp.id}</span>
+                        <History className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+                      {canChangeStage ? (
+                        <div className="relative inline-block">
+                          <select
+                            value={opp.stage}
+                            onChange={(e) => handleQuickStageChange(opp, e.target.value as OpportunityStage)}
+                            className="appearance-none font-extrabold font-mono text-[10px] pl-2 pr-5 py-0.5 rounded-md border cursor-pointer focus:outline-none"
+                            style={{
+                              backgroundColor: `${stage.color}15`,
+                              color: stage.color,
+                              borderColor: `${stage.color}40`,
+                            }}
+                          >
+                            {pipelineStagesList.map(s => (
+                              <option key={s.id} value={s.id} className="bg-white text-slate-900 font-sans font-medium text-xs">
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown 
+                            className="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
+                            style={{ color: stage.color }} 
+                          />
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      ) : (
+                        <span 
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold font-mono"
+                          style={{ 
+                            backgroundColor: `${stage.color}15`,
+                            color: stage.color,
+                            border: `1px solid ${stage.color}35`
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                          {stage.label}
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="font-extrabold text-xs text-slate-900 mt-1 leading-snug">
+                      {opp.title}
+                    </h4>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setViewingOpp(opp)}
+                      className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg cursor-pointer"
+                      title="View Opportunity & History"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenEdit(opp)}
+                      className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 cursor-pointer"
+                      title="Edit Opportunity"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => setDeletingOppId(opp.id)}
+                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer"
+                        title="Delete Opportunity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Contact & Client Account Info (Contact Person is prominent) */}
+                <div className="space-y-1 text-[11px] bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center gap-1.5 font-extrabold text-slate-900 truncate">
+                    <Users className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span className="truncate">{opp.contactName ? opp.contactName : 'Direct Account'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 font-medium text-slate-500 truncate text-[10px]">
+                    <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span className="truncate">{opp.accountName}</span>
+                  </div>
+                </div>
+
+                {/* Commercial Deal Value & Probability (No Weighted Forecast) */}
+                <div className="grid grid-cols-2 gap-2 bg-slate-50/50 p-2 rounded-xl border border-slate-100 text-center">
+                  <div>
+                    <span className="text-[9px] font-bold uppercase text-slate-400 block">Commercial Value</span>
+                    <span className="font-black text-xs text-slate-900 font-mono">
+                      {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold uppercase text-slate-400 block">Win Prob.</span>
+                    <span className="font-bold text-xs text-slate-700">
+                      {opp.probability}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Footer: Close Date, Source & Assigned Account */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 pt-1">
+                  <div className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-slate-400" />
+                    <span>Close: <strong>{opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : 'TBD'}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded font-medium">
+                      {opp.leadSource || 'Direct'}
+                    </span>
+                    <span>• {opp.assignedTo || 'Unassigned'}</span>
+                  </div>
+                </div>
+
+              </div>
+            );
+          })}
+
+          {paginatedOpportunities.length === 0 && (
+            <div className="py-10 text-center text-slate-400 px-4">
+              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mx-auto mb-2">
+                <Target className="w-5 h-5" />
+              </div>
+              <p className="font-bold text-xs text-slate-600">No opportunities match the selected filters</p>
+              {isFilterActive && (
+                <button
+                  onClick={handleResetFilters}
+                  className="text-xs text-amber-600 font-bold hover:underline cursor-pointer mt-1"
+                >
+                  Reset Filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 4. PAGINATION FOOTER (10 ITEMS PER PAGE) */}
+        <div className="px-4 py-3 bg-slate-50/70 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="text-slate-500 text-[11px] font-medium text-center sm:text-left">
+            Showing <strong className="text-slate-800">{totalItems === 0 ? 0 : (validCurrentPage - 1) * pageSize + 1}</strong> to{' '}
+            <strong className="text-slate-800">{Math.min(validCurrentPage * pageSize, totalItems)}</strong> of{' '}
+            <strong className="text-slate-800">{totalItems}</strong> opportunities
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={validCurrentPage <= 1}
+              className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs"
+              title="Previous Page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Page Buttons */}
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - validCurrentPage) <= 1)
+              .map((p, idx, arr) => {
+                const prevP = arr[idx - 1];
+                const showEllipsis = prevP && p - prevP > 1;
+
+                return (
+                  <React.Fragment key={p}>
+                    {showEllipsis && <span className="px-1 text-slate-400 font-bold">...</span>}
+                    <button
+                      onClick={() => setCurrentPage(p)}
+                      className={`min-w-[30px] h-[30px] px-2 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                        validCurrentPage === p
+                          ? 'bg-[#f7b944] text-slate-950 shadow-2xs'
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={validCurrentPage >= totalPages}
+              className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs"
+              title="Next Page"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
-      )}
 
-      {/* 4. ADD / EDIT OPPORTUNITY MODAL */}
+      </div>
+
+      {/* 5. ADD / EDIT OPPORTUNITY MODAL */}
       <AnimatePresence>
         {isAddModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -523,7 +1916,7 @@ export default function CRMOpportunitiesView({
                 </div>
                 <button 
                   onClick={() => setIsAddModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -531,6 +1924,7 @@ export default function CRMOpportunitiesView({
 
               <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
                 
+                {/* Deal / Project Title */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Deal / Project Title *</label>
                   <input
@@ -539,10 +1933,11 @@ export default function CRMOpportunitiesView({
                     placeholder="e.g. 500kVA Transformer & HT Panel Supply"
                     value={formData.title}
                     onChange={e => setFormData({ ...formData, title: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                   />
                 </div>
 
+                {/* Client Account & Contact Person */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Client Account *</label>
@@ -550,126 +1945,206 @@ export default function CRMOpportunitiesView({
                       required
                       value={formData.accountId}
                       onChange={e => {
-                        const acc = accounts.find(a => a.id === e.target.value);
-                        setFormData({ 
-                          ...formData, 
-                          accountId: e.target.value,
-                          accountName: acc ? acc.name : ''
-                        });
+                        const val = e.target.value;
+                        if (!val) {
+                          setFormData({ 
+                            ...formData, 
+                            accountId: '',
+                            accountName: '',
+                            contactId: '',
+                            contactName: ''
+                          });
+                        } else if (val === 'INDEPENDENT') {
+                          setFormData({ 
+                            ...formData, 
+                            accountId: 'INDEPENDENT',
+                            accountName: 'Independent (Direct Deals)',
+                            contactId: '',
+                            contactName: ''
+                          });
+                        } else {
+                          const acc = accounts.find(a => a.id === val);
+                          setFormData({ 
+                            ...formData, 
+                            accountId: val,
+                            accountName: acc ? acc.name : '',
+                            contactId: '',
+                            contactName: ''
+                          });
+                        }
                       }}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
-                      {accounts.map(acc => (
-                        <option key={acc.id} value={acc.id}>{acc.name}</option>
-                      ))}
+                      <option value="">Choose Client Account</option>
+                      <option value="INDEPENDENT">Independent (Direct Deals)</option>
+                      {accounts
+                        .filter(acc => acc.id !== 'INDEPENDENT')
+                        .map(acc => (
+                          <option key={acc.id} value={acc.id}>{acc.name}</option>
+                        ))}
                     </select>
                   </div>
 
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Stakeholder Contact</label>
+                    <label className="block font-bold text-slate-700 mb-1">Contact Person *</label>
                     <select
+                      required
                       value={formData.contactId}
                       onChange={e => {
                         const con = contacts.find(c => c.id === e.target.value);
                         setFormData({ 
                           ...formData, 
                           contactId: e.target.value,
-                          contactName: con ? `${con.firstName} ${con.lastName}` : ''
+                          contactName: con ? `${con.firstName} ${con.lastName}`.trim() : ''
                         });
                       }}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
-                      <option value="">-- Direct Account --</option>
-                      {contacts
-                        .filter(c => !formData.accountId || c.accountId === formData.accountId)
-                        .map(con => (
-                          <option key={con.id} value={con.id}>{con.firstName} {con.lastName} ({con.designation || 'Contact'})</option>
-                        ))}
+                      <option value="">Choose Contact Person</option>
+                      {availableContactsForOpportunity.map(con => (
+                        <option key={con.id} value={con.id}>
+                          {con.firstName} {con.lastName} {con.designation ? `(${con.designation})` : ''}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
+                {/* Commercial Value & Target Close Date */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Commercial Value ({currencySymbol}) *</label>
                     <input
                       type="number"
                       required
+                      min="1"
                       placeholder="1850000"
                       value={formData.amount || ''}
                       onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944] font-mono"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Target Close Date</label>
+                    <label className="block font-bold text-slate-700 mb-1">Target Close Date *</label>
                     <input
                       type="date"
+                      required
                       value={formData.expectedCloseDate}
                       onChange={e => setFormData({ ...formData, expectedCloseDate: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     />
                   </div>
                 </div>
 
+                {/* Pipeline Stage & Probability (Auto-assigned & Read-only) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Pipeline Stage</label>
+                    <label className="block font-bold text-slate-700 mb-1">Pipeline Stage *</label>
                     <select
+                      required
                       value={formData.stage}
                       onChange={e => handleStageChange(e.target.value as OpportunityStage)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
-                      {crmSettings.pipelineStages.map(s => (
+                      <option value="">Choose Pipeline Stage</option>
+                      {pipelineStagesList.map(s => (
                         <option key={s.id} value={s.id}>{s.label}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Probability (%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={formData.probability}
-                      onChange={e => setFormData({ ...formData, probability: parseInt(e.target.value, 10) || 0 })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
-                    />
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Probability (%) <span className="text-[10px] font-normal text-slate-400">(Auto-assigned)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        readOnly
+                        disabled
+                        value={formData.probability}
+                        placeholder="0"
+                        className="w-full px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl font-bold text-slate-700 cursor-not-allowed select-none focus:outline-none"
+                      />
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">
+                        %
+                      </span>
+                    </div>
                   </div>
                 </div>
 
+                {/* Portfolio & Lead Source */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Lead Source</label>
+                    <label className="block font-bold text-slate-700 mb-1">Portfolio (Product / Service) *</label>
                     <select
-                      value={formData.leadSource}
-                      onChange={e => setFormData({ ...formData, leadSource: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                      required
+                      value={formData.portfolio}
+                      onChange={e => setFormData({ ...formData, portfolio: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
-                      {crmSettings.leadSources.map(src => (
-                        <option key={src} value={src}>{src}</option>
+                      <option value="">Choose Portfolio</option>
+                      {productsAndServicesList.map(item => (
+                        <option key={item} value={item}>{item}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Assigned Account Executive</label>
-                    <input
-                      type="text"
-                      value={formData.assignedTo}
-                      onChange={e => setFormData({ ...formData, assignedTo: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
-                    />
+                    <label className="block font-bold text-slate-700 mb-1">Lead Source *</label>
+                    <select
+                      required
+                      value={formData.leadSource}
+                      onChange={e => setFormData({ ...formData, leadSource: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="">Choose Lead Source</option>
+                      {leadSourcesList.map(src => (
+                        <option key={src} value={src}>{src}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
+                {/* Assigned Account (User dropdown showing ONLY names for Admin, auto-assigned for others) */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Commercial Scope & Scope Notes</label>
+                  <label className="block font-bold text-slate-700 mb-1">Assigned Account *</label>
+                  {isAdmin ? (
+                    <select
+                      required
+                      value={formData.assignedTo}
+                      onChange={e => setFormData({ ...formData, assignedTo: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="">Choose Assigned Account</option>
+                      {availableUsersList.map(u => {
+                        const uName = u.fullName || u.username;
+                        return (
+                          <option key={u.id || u.username} value={uName}>
+                            {uName}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <div className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl font-semibold text-slate-800 flex items-center justify-between">
+                      <span>{currentUser.fullName || currentUser.username}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200 px-2 py-0.5 rounded-md">
+                        Auto-assigned
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Commercial Scope & Notes (Optional) */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Commercial Scope & Notes <span className="text-[10px] font-normal text-slate-400">(Optional)</span>
+                  </label>
                   <textarea
                     rows={3}
                     placeholder="Project delivery milestones, quotation revisions, payment schedule..."
                     value={formData.notes}
                     onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#f7b944]"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                   />
                 </div>
 
@@ -677,14 +2152,14 @@ export default function CRMOpportunitiesView({
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold transition-all text-center"
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold transition-all text-center cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSaving}
-                    className="px-6 py-2.5 rounded-xl bg-[#f7b944] text-slate-950 font-extrabold hover:bg-[#e5aa3b] transition-all shadow-xs disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="px-6 py-2.5 rounded-xl bg-[#f7b944] text-slate-950 font-extrabold hover:bg-[#e5aa3b] transition-all shadow-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSaving ? 'Saving...' : editingOpp ? 'Save Changes' : 'Create Opportunity'}
                   </button>
@@ -695,7 +2170,276 @@ export default function CRMOpportunitiesView({
         )}
       </AnimatePresence>
 
-      {/* 5. DELETE CONFIRMATION MODAL */}
+      {/* 6. OPPORTUNITY DETAIL & EDIT HISTORY MODAL (Matching Existing Accounts UI Pattern) */}
+      <AnimatePresence>
+        {viewingOpp && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingOpp(null)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600">
+                    <Target className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                        {viewingOpp.id}
+                      </span>
+                      <h3 className="font-extrabold text-base text-slate-900 truncate max-w-[280px] sm:max-w-md">
+                        {viewingOpp.title}
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Created: {formatCRMIDateTime(viewingOpp.createdAt)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingOpp(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-xs">
+                
+                {/* Top Quick Status Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Pipeline Stage</span>
+                    {(() => {
+                      const st = getStageConfig(viewingOpp.stage);
+                      return (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-extrabold font-mono mt-1"
+                          style={{
+                            backgroundColor: `${st.color}15`,
+                            color: st.color,
+                            border: `1px solid ${st.color}35`
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.color }} />
+                          {st.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Commercial Value</span>
+                    <span className="font-mono font-black text-slate-900 text-sm block mt-0.5">
+                      {currencySymbol}{Number(viewingOpp.amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Win Probability</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="font-bold text-xs text-slate-800">{viewingOpp.probability}%</span>
+                      <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-amber-500 rounded-full" 
+                          style={{ width: `${viewingOpp.probability}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Expected Close</span>
+                    <span className="font-mono text-slate-700 font-semibold block mt-1">
+                      {viewingOpp.expectedCloseDate ? formatCRMIDate(viewingOpp.expectedCloseDate) : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Details Section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Contact Person</span>
+                    <div className="flex items-center gap-2 font-bold text-slate-900 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <Users className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{viewingOpp.contactName ? viewingOpp.contactName : 'Direct Account'}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Client Account</span>
+                    <div className="flex items-center gap-2 font-bold text-slate-900 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
+                      <span>{viewingOpp.accountName}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Portfolio (Product / Service)</span>
+                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {viewingOpp.portfolio || '—'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Lead Source</span>
+                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {viewingOpp.leadSource || 'Direct Referral'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Assigned Account</span>
+                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {viewingOpp.assignedTo || '—'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-slate-400 text-[11px] block font-bold">Last Updated (IST)</span>
+                    <div className="font-mono text-slate-700 font-semibold bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {formatCRMIDateTime(viewingOpp.updatedAt || viewingOpp.createdAt)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scope & Notes */}
+                {viewingOpp.notes && (
+                  <div className="space-y-1 pt-1 border-t border-slate-100">
+                    <span className="text-slate-400 text-[11px] block font-bold">Commercial Scope & Notes</span>
+                    <p className="text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed whitespace-pre-wrap">
+                      {viewingOpp.notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* EDIT HISTORY & ACTIVITY TRAIL (Matching Existing Accounts Pattern) */}
+                <div className="border-t border-slate-100 pt-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <History className="w-4 h-4 text-amber-500" />
+                      <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
+                        Opportunity Edit & Activity History
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">All timestamps in IST</span>
+                  </div>
+
+                  {!viewingOpp.editHistory || viewingOpp.editHistory.length === 0 ? (
+                    <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
+                      <span className="text-[11px] font-medium italic">
+                        Original opportunity entry created on {formatCRMIDateTime(viewingOpp.createdAt)} by {viewingOpp.assignedTo || 'Admin'}. No edits or stage transitions have been recorded yet.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-h-[240px] overflow-y-auto pr-1">
+                      {viewingOpp.editHistory.map((entry, eIdx) => (
+                        <div key={eIdx} className="relative pl-5 border-l-2 border-amber-200 py-0.5 text-[11px] sm:text-xs">
+                          {/* Timeline dot */}
+                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-amber-500 border border-white"></div>
+                          
+                          {/* Log Header */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
+                            <span className="font-bold text-slate-800">
+                              <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                                entry.action === 'CREATED'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : entry.action === 'STAGE_CHANGED'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              }`}>
+                                {entry.action.replace('_', ' ')}
+                              </span>
+                              by <span className="text-amber-700 font-semibold">{entry.changedBy}</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                              {formatCRMIDateTime(entry.timestamp)}
+                            </span>
+                          </div>
+
+                          {/* Details Box / Granular Changes (Matching Existing Expense & Accounts Pattern) */}
+                          {entry.changes && entry.changes.length > 0 ? (
+                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                              {entry.changes.map((change, cIdx) => {
+                                const displayOld = (!change.oldValue || change.oldValue === 'None') ? '(Blank)' : change.oldValue;
+                                const displayNew = (!change.newValue || change.newValue === 'None') ? '(Blank)' : change.newValue;
+                                return (
+                                  <div key={cIdx} className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                                    <span className="font-bold text-slate-400 text-[10px] uppercase tracking-wider truncate">
+                                      {change.field}
+                                    </span>
+                                    <span className="sm:col-span-2 text-slate-700 flex flex-wrap items-center gap-1.5 break-all">
+                                      <span className="font-medium bg-red-50 text-red-700 px-1.5 py-0.5 rounded-md text-[10px] line-through decoration-red-400">
+                                        {displayOld}
+                                      </span>
+                                      <span className="text-slate-400 text-[10px] font-bold">→</span>
+                                      <span className="font-extrabold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md text-[10px]">
+                                        {displayNew}
+                                      </span>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                                {entry.details || 'Opportunity details or pipeline stage modified'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const opp = viewingOpp;
+                      setViewingOpp(null);
+                      handleOpenEdit(opp);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Edit Opportunity</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setViewingOpp(null)}
+                  className="px-5 py-2 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all text-xs cursor-pointer ml-auto"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. DELETE CONFIRMATION MODAL */}
       <AnimatePresence>
         {deletingOppId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -713,7 +2457,7 @@ export default function CRMOpportunitiesView({
               exit={{ opacity: 0, scale: 0.95 }}
               className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 z-10 text-center"
             >
-              <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <h3 className="font-extrabold text-base text-slate-900">Delete Opportunity?</h3>
@@ -724,7 +2468,7 @@ export default function CRMOpportunitiesView({
                 <button
                   type="button"
                   onClick={() => setDeletingOppId(null)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition-all"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -732,7 +2476,7 @@ export default function CRMOpportunitiesView({
                   type="button"
                   onClick={() => handleDelete(deletingOppId)}
                   disabled={isSaving}
-                  className="px-5 py-2.5 rounded-xl bg-red-600 text-white text-xs font-extrabold hover:bg-red-700 transition-all shadow-xs"
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-extrabold hover:bg-rose-700 transition-all shadow-xs cursor-pointer"
                 >
                   {isSaving ? 'Deleting...' : 'Confirm Delete'}
                 </button>
