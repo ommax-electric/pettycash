@@ -1190,7 +1190,7 @@ export default function App() {
     return `CON - ${String(n).padStart(3, '0')}`;
   };
 
-  const handleAddCRMAccount = async (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => {
+  const handleAddCRMAccount = async (acc: Omit<CRMAccount, 'id' | 'createdAt'>): Promise<CRMAccount> => {
     const id = (acc as any).id || getNextCRMAccountId();
     const now = new Date().toISOString();
     const statusLabel = acc.status === 'ACTIVE' ? 'Active Client' : acc.status === 'PROSPECT' ? 'Prospect / Lead' : 'Inactive';
@@ -1214,6 +1214,7 @@ export default function App() {
     } catch (err) {
       console.error('Error adding CRM account:', err);
     }
+    return newAcc;
   };
 
   const handleUpdateCRMAccount = async (acc: CRMAccount) => {
@@ -1236,7 +1237,7 @@ export default function App() {
     }
   };
 
-  const handleAddCRMContact = async (con: Omit<CRMContact, 'id' | 'createdAt'>) => {
+  const handleAddCRMContact = async (con: Omit<CRMContact, 'id' | 'createdAt'>): Promise<CRMContact> => {
     const id = (con as any).id || getNextCRMContactId();
     const now = new Date().toISOString();
     const statusLabel = con.status === 'ACTIVE' ? 'Active' : con.status === 'INACTIVE' ? 'Inactive' : con.status === 'LEFT_COMPANY' ? 'Left Company' : 'Do Not Contact';
@@ -1261,6 +1262,7 @@ export default function App() {
     } catch (err) {
       console.error('Error adding CRM contact:', err);
     }
+    return newCon;
   };
 
   const handleUpdateCRMContact = async (con: CRMContact) => {
@@ -1988,6 +1990,8 @@ export default function App() {
               onAddOpportunity={handleAddCRMOpportunity}
               onUpdateOpportunity={handleUpdateCRMOpportunity}
               onDeleteOpportunity={handleDeleteCRMOpportunity}
+              onAddAccount={handleAddCRMAccount}
+              onAddContact={handleAddCRMContact}
             />
           )}
           {activeTab === 'HRMS' && (
@@ -2228,6 +2232,8 @@ export default function App() {
                   onAddOpportunity={handleAddCRMOpportunity}
                   onUpdateOpportunity={handleUpdateCRMOpportunity}
                   onDeleteOpportunity={handleDeleteCRMOpportunity}
+                  onAddAccount={handleAddCRMAccount}
+                  onAddContact={handleAddCRMContact}
                 />
               )}
 

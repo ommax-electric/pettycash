@@ -46,7 +46,7 @@ interface CRMContactsViewProps {
   currentUser: User;
   users?: User[];
   appSettings?: AppSettings;
-  onAddContact: (contact: Omit<CRMContact, 'id' | 'createdAt'>) => Promise<void>;
+  onAddContact: (contact: Omit<CRMContact, 'id' | 'createdAt'>) => Promise<CRMContact | void>;
   onUpdateContact: (contact: CRMContact) => Promise<void>;
   onDeleteContact: (id: string) => Promise<void>;
 }
@@ -2224,13 +2224,13 @@ export default function CRMContactsView({
                         setFormData({ 
                           ...formData, 
                           accountId: val,
-                          accountName: acc ? acc.name : ''
+                          accountName: isIndep ? 'Independent (Direct Sales)' : (acc ? acc.name : '')
                         });
                       }}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
                       <option value="" disabled>Choose the account</option>
-                      <option value="INDEPENDENT">-- Independent --</option>
+                      <option value="INDEPENDENT">Independent (Direct Sales)</option>
                       {accounts.map(acc => (
                         <option key={acc.id} value={acc.id}>{acc.name}</option>
                       ))}

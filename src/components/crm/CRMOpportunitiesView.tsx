@@ -23,7 +23,17 @@ import {
   Percent,
   DollarSign,
   Eye,
-  History
+  History,
+  UserPlus,
+  ArrowRight,
+  ArrowLeft,
+  Star,
+  MapPin,
+  Phone,
+  Mail,
+  Globe,
+  Briefcase,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   CRMOpportunity, 
@@ -32,12 +42,16 @@ import {
   CRMSettings, 
   OpportunityStage, 
   OpportunityEditHistoryEntry,
+  ContactStatus,
   formatCRMIDate, 
   formatCRMIDateTime,
+  normalizeCompanyName,
+  normalizePhoneNumber,
   DEFAULT_CRM_SETTINGS 
 } from '../../crm/types';
 import { User, AppSettings } from '../../types';
 import { MOCK_USERS } from '../../data';
+import CountryPhoneInput from './CountryPhoneInput';
 
 interface CRMOpportunitiesViewProps {
   opportunities: CRMOpportunity[];
@@ -50,6 +64,8 @@ interface CRMOpportunitiesViewProps {
   onAddOpportunity: (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateOpportunity: (opp: CRMOpportunity) => Promise<void>;
   onDeleteOpportunity: (id: string) => Promise<void>;
+  onAddAccount?: (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => Promise<CRMAccount | void> | CRMAccount | void;
+  onAddContact?: (con: Omit<CRMContact, 'id' | 'createdAt'>) => Promise<CRMContact | void> | CRMContact | void;
 }
 
 export default function CRMOpportunitiesView({
@@ -62,7 +78,9 @@ export default function CRMOpportunitiesView({
   appSettings,
   onAddOpportunity,
   onUpdateOpportunity,
-  onDeleteOpportunity
+  onDeleteOpportunity,
+  onAddAccount,
+  onAddContact
 }: CRMOpportunitiesViewProps) {
   const currencySymbol = appSettings?.currencySymbol || crmSettings?.defaultCurrency || '₹';
 
@@ -83,6 +101,18 @@ export default function CRMOpportunitiesView({
     return crmSettings?.productsAndServices?.length
       ? crmSettings.productsAndServices
       : (DEFAULT_CRM_SETTINGS.productsAndServices || ['Safety Products', 'Residential Solar', 'Commercial Solar', 'Industrial HT Panels', 'EPC Turnkey', 'Maintenance AMC']);
+  }, [crmSettings]);
+
+  const businessCategoriesList = useMemo(() => {
+    return crmSettings?.businessCategories?.length
+      ? crmSettings.businessCategories
+      : (DEFAULT_CRM_SETTINGS.businessCategories || ['Distributor', 'Manufacturer', 'Direct Customer', 'Consultant', 'Contractor', 'Government / PSU']);
+  }, [crmSettings]);
+
+  const industriesList = useMemo(() => {
+    return crmSettings?.industries?.length
+      ? crmSettings.industries
+      : (DEFAULT_CRM_SETTINGS.industries || ['Electrical & Electronics', 'Solar Energy', 'Renewable Energy', 'Manufacturing & Heavy Industry', 'Infrastructure & Construction', 'Textiles', 'Information Technology', 'Healthcare & Pharmaceuticals', 'Education & Institutional']);
   }, [crmSettings]);
 
   // Available Users List for Assignment & Filters
@@ -221,11 +251,443 @@ export default function CRMOpportunitiesView({
         c.accountId === 'INDEPENDENT' || 
         c.accountName === 'Independent / Direct Deal' || 
         c.accountName === 'Independent (Direct Deals)' || 
+        c.accountName === 'Independent (Direct Sales)' || 
         c.accountName?.toLowerCase().includes('independent')
       );
     }
     return contacts.filter(c => c.accountId === formData.accountId);
   }, [contacts, formData.accountId]);
+
+  // ==================== GUIDED DEAL WIZARD STATES & LOGIC ====================
+  const [wizardStep, setWizardStep] = useState<'NONE' | 'PROMPT_CHOICE' | 'CREATE_ACCOUNT' | 'CREATE_CONTACT'>('NONE');
+  const [wizardMode, setWizardMode] = useState<'INDEPENDENT' | 'CORPORATE' | null>(null);
+  const [wizardCreatedAccount, setWizardCreatedAccount] = useState<CRMAccount | null>(null);
+  const [wizardCreatedContact, setWizardCreatedContact] = useState<CRMContact | null>(null);
+  const [isWizardSaving, setIsWizardSaving] = useState(false);
+
+  // Wizard Account Form Data (Matching CRMAccountsView)
+  const [wizardAccountFormData, setWizardAccountFormData] = useState({
+    name: '',
+    businessCategory: '',
+    industry: '',
+    phone: '',
+    altPhone: '',
+    email: '',
+    website: '',
+    address: '',
+    billingCity: '',
+    billingState: '',
+    pincode: '',
+    country: 'India',
+    status: 'ACTIVE' as 'ACTIVE' | 'PROSPECT' | 'INACTIVE',
+    assignedTo: currentUser.fullName || currentUser.username,
+    notes: ''
+  });
+  const [wizardAccountShowTypeahead, setWizardAccountShowTypeahead] = useState(false);
+  const [wizardAccountDismissDuplicateWarning, setWizardAccountDismissDuplicateWarning] = useState(false);
+
+  // Live 3-character prefix/substring matching for company name
+  const wizardLiveTypeaheadMatches = useMemo(() => {
+    const term = wizardAccountFormData.name.trim().toLowerCase();
+    if (term.length < 3) return [];
+    return accounts.filter(acc => {
+      return acc.name.toLowerCase().includes(term);
+    }).slice(0, 5);
+  }, [wizardAccountFormData.name, accounts]);
+
+  // Exact/Suffix/Normalized duplicate matching
+  const wizardDuplicateAccountMatches = useMemo(() => {
+    const raw = wizardAccountFormData.name.trim();
+    if (!raw) return [];
+    const normalized = normalizeCompanyName(raw);
+    if (!normalized) return [];
+
+    return accounts.filter(acc => {
+      const existingNorm = normalizeCompanyName(acc.name);
+      return existingNorm === normalized || acc.name.toLowerCase().trim() === raw.toLowerCase();
+    });
+  }, [wizardAccountFormData.name, accounts]);
+
+  // Wizard Contact Form Data (Matching CRMContactsView)
+  const [wizardContactFormData, setWizardContactFormData] = useState({
+    name: '',
+    accountId: '',
+    accountName: '',
+    email: '',
+    mobile: '',
+    altMobile: '',
+    designation: '',
+    department: '',
+    isPrimary: false,
+    hasAlternativeAddress: false,
+    address: '',
+    city: '',
+    state: '',
+    pincode: '',
+    country: 'India',
+    status: 'ACTIVE' as ContactStatus,
+    assignedTo: currentUser.fullName || currentUser.username,
+    notes: ''
+  });
+  const [wizardContactDismissDuplicateWarning, setWizardContactDismissDuplicateWarning] = useState(false);
+
+  // Duplicate Contact Matching
+  const wizardDuplicateContactMatches = useMemo(() => {
+    const cleanMobile = normalizePhoneNumber(wizardContactFormData.mobile);
+    const rawEmail = wizardContactFormData.email.trim().toLowerCase();
+    const rawName = wizardContactFormData.name.trim().toLowerCase();
+
+    if (!cleanMobile && !rawEmail && !rawName) return [];
+
+    const matches: { contact: CRMContact; matchReason: string }[] = [];
+
+    for (const c of contacts) {
+      if (cleanMobile && (normalizePhoneNumber(c.mobile) === cleanMobile || normalizePhoneNumber(c.phone) === cleanMobile || normalizePhoneNumber(c.altMobile) === cleanMobile)) {
+        matches.push({ contact: c, matchReason: 'Matching Mobile Number' });
+        continue;
+      }
+      if (rawEmail && c.email && c.email.trim().toLowerCase() === rawEmail) {
+        matches.push({ contact: c, matchReason: 'Matching Email Address' });
+        continue;
+      }
+      const cName = (c.name || `${c.firstName || ''} ${c.lastName || ''}`).trim().toLowerCase();
+      if (rawName && cName === rawName && wizardContactFormData.accountId && c.accountId === wizardContactFormData.accountId) {
+        matches.push({ contact: c, matchReason: 'Same Full Name in this Account' });
+        continue;
+      }
+    }
+    return matches;
+  }, [wizardContactFormData.mobile, wizardContactFormData.email, wizardContactFormData.name, wizardContactFormData.accountId, contacts]);
+
+  const handleStartGuidedDealWizard = () => {
+    setWizardCreatedAccount(null);
+    setWizardCreatedContact(null);
+    setWizardStep('PROMPT_CHOICE');
+  };
+
+  const handleSelectIndependentFlow = () => {
+    setWizardMode('INDEPENDENT');
+    setWizardCreatedAccount(null);
+    setWizardContactFormData({
+      name: '',
+      accountId: 'INDEPENDENT',
+      accountName: 'Independent (Direct Sales)',
+      email: '',
+      mobile: '',
+      altMobile: '',
+      designation: '',
+      department: '',
+      isPrimary: true,
+      hasAlternativeAddress: false,
+      address: '',
+      city: '',
+      state: '',
+      pincode: '',
+      country: 'India',
+      status: 'ACTIVE',
+      assignedTo: currentUser.fullName || currentUser.username,
+      notes: ''
+    });
+    setWizardContactDismissDuplicateWarning(false);
+    setWizardStep('CREATE_CONTACT');
+  };
+
+  const handleSelectCorporateFlow = () => {
+    setWizardMode('CORPORATE');
+    setWizardCreatedAccount(null);
+    setWizardAccountFormData({
+      name: '',
+      businessCategory: '',
+      industry: '',
+      phone: '',
+      altPhone: '',
+      email: '',
+      website: '',
+      address: '',
+      billingCity: '',
+      billingState: '',
+      pincode: '',
+      country: 'India',
+      status: 'ACTIVE',
+      assignedTo: currentUser.fullName || currentUser.username,
+      notes: ''
+    });
+    setWizardAccountDismissDuplicateWarning(false);
+    setWizardAccountShowTypeahead(false);
+    setWizardStep('CREATE_ACCOUNT');
+  };
+
+  const handleWizardAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !wizardAccountFormData.name.trim() ||
+      !wizardAccountFormData.businessCategory ||
+      !wizardAccountFormData.industry ||
+      !wizardAccountFormData.phone.trim() ||
+      !wizardAccountFormData.address.trim() ||
+      !wizardAccountFormData.billingCity.trim() ||
+      !wizardAccountFormData.billingState.trim() ||
+      !wizardAccountFormData.pincode.trim() ||
+      !wizardAccountFormData.country.trim() ||
+      !wizardAccountFormData.status ||
+      !wizardAccountFormData.assignedTo
+    ) {
+      return;
+    }
+
+    setIsWizardSaving(true);
+    try {
+      let createdAcc: CRMAccount;
+      if (onAddAccount) {
+        const res = await onAddAccount({
+          name: wizardAccountFormData.name.trim(),
+          businessCategory: wizardAccountFormData.businessCategory,
+          industry: wizardAccountFormData.industry,
+          phone: wizardAccountFormData.phone.trim(),
+          altPhone: wizardAccountFormData.altPhone.trim() || undefined,
+          email: wizardAccountFormData.email.trim() || undefined,
+          website: wizardAccountFormData.website.trim() || undefined,
+          address: wizardAccountFormData.address.trim(),
+          billingCity: wizardAccountFormData.billingCity.trim(),
+          billingState: wizardAccountFormData.billingState.trim(),
+          pincode: wizardAccountFormData.pincode.trim(),
+          country: wizardAccountFormData.country.trim(),
+          billingCountry: wizardAccountFormData.country.trim(),
+          status: wizardAccountFormData.status,
+          assignedTo: wizardAccountFormData.assignedTo,
+          notes: wizardAccountFormData.notes.trim() || undefined
+        });
+        if (res) {
+          createdAcc = res;
+        } else {
+          createdAcc = {
+            id: `ACC-${Date.now().toString().slice(-4)}`,
+            name: wizardAccountFormData.name.trim(),
+            businessCategory: wizardAccountFormData.businessCategory,
+            industry: wizardAccountFormData.industry,
+            phone: wizardAccountFormData.phone.trim(),
+            altPhone: wizardAccountFormData.altPhone.trim() || undefined,
+            email: wizardAccountFormData.email.trim() || undefined,
+            website: wizardAccountFormData.website.trim() || undefined,
+            address: wizardAccountFormData.address.trim(),
+            billingCity: wizardAccountFormData.billingCity.trim(),
+            billingState: wizardAccountFormData.billingState.trim(),
+            pincode: wizardAccountFormData.pincode.trim(),
+            country: wizardAccountFormData.country.trim(),
+            billingCountry: wizardAccountFormData.country.trim(),
+            status: wizardAccountFormData.status,
+            assignedTo: wizardAccountFormData.assignedTo,
+            notes: wizardAccountFormData.notes.trim() || undefined,
+            createdAt: new Date().toISOString()
+          };
+        }
+      } else {
+        createdAcc = {
+          id: `ACC-${Date.now().toString().slice(-4)}`,
+          name: wizardAccountFormData.name.trim(),
+          businessCategory: wizardAccountFormData.businessCategory,
+          industry: wizardAccountFormData.industry,
+          phone: wizardAccountFormData.phone.trim(),
+          altPhone: wizardAccountFormData.altPhone.trim() || undefined,
+          email: wizardAccountFormData.email.trim() || undefined,
+          website: wizardAccountFormData.website.trim() || undefined,
+          address: wizardAccountFormData.address.trim(),
+          billingCity: wizardAccountFormData.billingCity.trim(),
+          billingState: wizardAccountFormData.billingState.trim(),
+          pincode: wizardAccountFormData.pincode.trim(),
+          country: wizardAccountFormData.country.trim(),
+          billingCountry: wizardAccountFormData.country.trim(),
+          status: wizardAccountFormData.status,
+          assignedTo: wizardAccountFormData.assignedTo,
+          notes: wizardAccountFormData.notes.trim() || undefined,
+          createdAt: new Date().toISOString()
+        };
+      }
+
+      setWizardCreatedAccount(createdAcc);
+      setWizardContactFormData({
+        name: '',
+        accountId: createdAcc.id,
+        accountName: createdAcc.name,
+        email: '',
+        mobile: '',
+        altMobile: '',
+        designation: '',
+        department: '',
+        isPrimary: true,
+        hasAlternativeAddress: false,
+        address: createdAcc.address || '',
+        city: createdAcc.billingCity || '',
+        state: createdAcc.billingState || '',
+        pincode: createdAcc.pincode || '',
+        country: createdAcc.country || 'India',
+        status: 'ACTIVE',
+        assignedTo: createdAcc.assignedTo || (currentUser.fullName || currentUser.username),
+        notes: ''
+      });
+      setWizardContactDismissDuplicateWarning(false);
+      setWizardStep('CREATE_CONTACT');
+    } catch (err) {
+      console.error('Failed to create account in wizard:', err);
+    } finally {
+      setIsWizardSaving(false);
+    }
+  };
+
+  const handleWizardContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !wizardContactFormData.name.trim() ||
+      !wizardContactFormData.accountId ||
+      !wizardContactFormData.mobile.trim() ||
+      !wizardContactFormData.status ||
+      !wizardContactFormData.assignedTo
+    ) {
+      return;
+    }
+
+    if (wizardContactFormData.accountId === 'INDEPENDENT') {
+      if (
+        !wizardContactFormData.address.trim() ||
+        !wizardContactFormData.city.trim() ||
+        !wizardContactFormData.state.trim() ||
+        !wizardContactFormData.pincode.trim() ||
+        !wizardContactFormData.country.trim()
+      ) {
+        return;
+      }
+    }
+
+    setIsWizardSaving(true);
+    try {
+      const isIndep = wizardContactFormData.accountId === 'INDEPENDENT';
+      const targetAcc = isIndep ? null : (wizardCreatedAccount || accounts.find(a => a.id === wizardContactFormData.accountId));
+      const accId = isIndep ? 'INDEPENDENT' : (targetAcc?.id || wizardContactFormData.accountId);
+      const accName = isIndep ? 'Independent (Direct Sales)' : (targetAcc?.name || wizardContactFormData.accountName);
+
+      const nameParts = wizardContactFormData.name.trim().split(' ');
+      const firstName = nameParts[0] || wizardContactFormData.name.trim();
+      const lastName = nameParts.slice(1).join(' ');
+
+      let createdCon: CRMContact;
+      if (onAddContact) {
+        const res = await onAddContact({
+          name: wizardContactFormData.name.trim(),
+          firstName,
+          lastName,
+          accountId: accId,
+          accountName: accName,
+          email: wizardContactFormData.email.trim(),
+          phone: wizardContactFormData.mobile.trim(),
+          mobile: wizardContactFormData.mobile.trim(),
+          altMobile: wizardContactFormData.altMobile.trim() || undefined,
+          designation: wizardContactFormData.designation.trim() || undefined,
+          department: wizardContactFormData.department.trim() || undefined,
+          isPrimary: wizardContactFormData.isPrimary,
+          hasAlternativeAddress: wizardContactFormData.hasAlternativeAddress,
+          address: wizardContactFormData.address.trim() || undefined,
+          city: wizardContactFormData.city.trim() || undefined,
+          state: wizardContactFormData.state.trim() || undefined,
+          pincode: wizardContactFormData.pincode.trim() || undefined,
+          country: wizardContactFormData.country.trim() || undefined,
+          status: wizardContactFormData.status,
+          assignedTo: wizardContactFormData.assignedTo,
+          notes: wizardContactFormData.notes.trim() || undefined
+        });
+        if (res) {
+          createdCon = res;
+        } else {
+          createdCon = {
+            id: `CON-${Date.now().toString().slice(-4)}`,
+            name: wizardContactFormData.name.trim(),
+            firstName,
+            lastName,
+            accountId: accId,
+            accountName: accName,
+            email: wizardContactFormData.email.trim(),
+            phone: wizardContactFormData.mobile.trim(),
+            mobile: wizardContactFormData.mobile.trim(),
+            altMobile: wizardContactFormData.altMobile.trim() || undefined,
+            designation: wizardContactFormData.designation.trim() || undefined,
+            department: wizardContactFormData.department.trim() || undefined,
+            isPrimary: wizardContactFormData.isPrimary,
+            hasAlternativeAddress: wizardContactFormData.hasAlternativeAddress,
+            address: wizardContactFormData.address.trim() || undefined,
+            city: wizardContactFormData.city.trim() || undefined,
+            state: wizardContactFormData.state.trim() || undefined,
+            pincode: wizardContactFormData.pincode.trim() || undefined,
+            country: wizardContactFormData.country.trim() || undefined,
+            status: wizardContactFormData.status,
+            assignedTo: wizardContactFormData.assignedTo,
+            notes: wizardContactFormData.notes.trim() || undefined,
+            createdAt: new Date().toISOString()
+          };
+        }
+      } else {
+        createdCon = {
+          id: `CON-${Date.now().toString().slice(-4)}`,
+          name: wizardContactFormData.name.trim(),
+          firstName,
+          lastName,
+          accountId: accId,
+          accountName: accName,
+          email: wizardContactFormData.email.trim(),
+          phone: wizardContactFormData.mobile.trim(),
+          mobile: wizardContactFormData.mobile.trim(),
+          altMobile: wizardContactFormData.altMobile.trim() || undefined,
+          designation: wizardContactFormData.designation.trim() || undefined,
+          department: wizardContactFormData.department.trim() || undefined,
+          isPrimary: wizardContactFormData.isPrimary,
+          hasAlternativeAddress: wizardContactFormData.hasAlternativeAddress,
+          address: wizardContactFormData.address.trim() || undefined,
+          city: wizardContactFormData.city.trim() || undefined,
+          state: wizardContactFormData.state.trim() || undefined,
+          pincode: wizardContactFormData.pincode.trim() || undefined,
+          country: wizardContactFormData.country.trim() || undefined,
+          status: wizardContactFormData.status,
+          assignedTo: wizardContactFormData.assignedTo,
+          notes: wizardContactFormData.notes.trim() || undefined,
+          createdAt: new Date().toISOString()
+        };
+      }
+
+      setWizardCreatedContact(createdCon);
+      setWizardStep('NONE');
+
+      const defaultTargetCloseDate = (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 30);
+        return d.toISOString().split('T')[0];
+      })();
+
+      const contactDisplayName = wizardContactFormData.name.trim();
+      const oppTitle = isIndep
+        ? `${contactDisplayName} - Direct Deal`
+        : `${accName} - Project Supply`;
+
+      setFormData({
+        title: oppTitle,
+        accountId: accId,
+        accountName: accName,
+        contactId: createdCon.id,
+        contactName: contactDisplayName,
+        amount: '' as unknown as number,
+        stage: (pipelineStagesList[0]?.id as OpportunityStage) || 'PROPOSAL',
+        probability: pipelineStagesList[0]?.probability || 10,
+        expectedCloseDate: defaultTargetCloseDate,
+        leadSource: leadSourcesList[0] || 'Direct Referral',
+        portfolio: productsAndServicesList[0] || 'Safety Products',
+        assignedTo: wizardContactFormData.assignedTo || (currentUser.fullName || currentUser.username),
+        notes: ''
+      });
+      setEditingOpp(null);
+      setIsAddModalOpen(true);
+    } catch (err) {
+      console.error('Failed to create contact in wizard:', err);
+    } finally {
+      setIsWizardSaving(false);
+    }
+  };
 
   const resetForm = () => {
     setFormData({
@@ -926,6 +1388,7 @@ export default function CRMOpportunitiesView({
           </div>
 
           <button
+            type="button"
             onClick={handleOpenAdd}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2.5 bg-[#f7b944] text-slate-950 rounded-xl text-xs font-extrabold shadow-xs hover:bg-[#e5aa3b] transition-all cursor-pointer whitespace-nowrap"
           >
@@ -1905,21 +2368,57 @@ export default function CRMOpportunitiesView({
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[90vh] flex flex-col"
             >
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-[#f7b944]/20 border border-[#f7b944]/40 flex items-center justify-center text-[#f7b944]">
-                    <Target className="w-4 h-4" />
+              <div className="px-5 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-slate-50/50">
+                <div className="flex items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-[#f7b944]/20 border border-[#f7b944]/40 flex items-center justify-center text-[#f7b944] shrink-0">
+                      <Target className="w-4 h-4" />
+                    </div>
+                    <h3 className="font-extrabold text-sm sm:text-base text-slate-900 truncate">
+                      {editingOpp ? 'Edit Opportunity' : 'Create New Opportunity'}
+                    </h3>
                   </div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    {editingOpp ? 'Edit Opportunity' : 'Create New Opportunity'}
-                  </h3>
+
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    {!editingOpp && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddModalOpen(false);
+                          handleStartGuidedDealWizard();
+                        }}
+                        className="hidden sm:flex items-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 bg-slate-900 text-white hover:bg-slate-800 rounded-xl text-xs font-extrabold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <UserPlus className="w-4 h-4 text-[#f7b944] shrink-0" />
+                        <span>Opportunity for New Contact</span>
+                      </button>
+                    )}
+                    <button 
+                      type="button"
+                      onClick={() => setIsAddModalOpen(false)}
+                      className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <button 
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+
+                {/* Mobile view dedicated full-width action button */}
+                {!editingOpp && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/70 sm:hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddModalOpen(false);
+                        handleStartGuidedDealWizard();
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white hover:bg-slate-800 rounded-xl text-xs font-extrabold shadow-xs transition-all cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4 text-[#f7b944] shrink-0" />
+                      <span>Opportunity for New Contact</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
@@ -1958,7 +2457,7 @@ export default function CRMOpportunitiesView({
                           setFormData({ 
                             ...formData, 
                             accountId: 'INDEPENDENT',
-                            accountName: 'Independent (Direct Deals)',
+                            accountName: 'Independent (Direct Sales)',
                             contactId: '',
                             contactName: ''
                           });
@@ -1976,7 +2475,7 @@ export default function CRMOpportunitiesView({
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
                       <option value="">Choose Client Account</option>
-                      <option value="INDEPENDENT">Independent (Direct Deals)</option>
+                      <option value="INDEPENDENT">Independent (Direct Sales)</option>
                       {accounts
                         .filter(acc => acc.id !== 'INDEPENDENT')
                         .map(acc => (
@@ -2434,6 +2933,979 @@ export default function CRMOpportunitiesView({
                   Close
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== GUIDED DEAL WIZARD MODALS ==================== */}
+      {/* 1. SELECTION PROMPT MODAL */}
+      <AnimatePresence>
+        {wizardStep === 'PROMPT_CHOICE' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setWizardStep('NONE')}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 p-6 space-y-5 text-xs"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-700">
+                    <UserPlus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-slate-900">
+                      Opportunity for New Contact
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      Select client account type to proceed
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('NONE')}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                {/* Option A: Independent Account */}
+                <button
+                  type="button"
+                  onClick={handleSelectIndependentFlow}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/40 transition-all group cursor-pointer flex items-center justify-between gap-3 shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100/60 group-hover:bg-amber-200/80 text-amber-900 flex items-center justify-center shrink-0 transition-colors">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-slate-900 text-xs">
+                        Option A: Independent Account
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium">
+                        (Direct individual)
+                      </div>
+                    </div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-amber-700 group-hover:translate-x-0.5 transition-all shrink-0" />
+                </button>
+
+                {/* Option B: Other Account */}
+                <button
+                  type="button"
+                  onClick={handleSelectCorporateFlow}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/40 transition-all group cursor-pointer flex items-center justify-between gap-3 shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-100/60 group-hover:bg-indigo-200/80 text-indigo-900 flex items-center justify-center shrink-0 transition-colors">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-slate-900 text-xs">
+                        Option B: Other Account
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium">
+                        (New company or organization)
+                      </div>
+                    </div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-700 group-hover:translate-x-0.5 transition-all shrink-0" />
+                </button>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setWizardStep('NONE')}
+                  className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-800 font-bold hover:bg-slate-100 transition-colors text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 2. WIZARD STEP: CREATE ACCOUNT (FOR OTHER ACCOUNT FLOW) */}
+      <AnimatePresence>
+        {wizardStep === 'CREATE_ACCOUNT' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setWizardStep('NONE')}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[92vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-700">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-black uppercase tracking-wider">
+                        Step 1 of 2
+                      </span>
+                      <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                        Create Account
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      Enter company details for this new corporate opportunity.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setWizardStep('NONE')}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleWizardAccountSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+                
+                {/* Company Name with Live 3-Char Typeahead & Duplicate Warning */}
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">Company Name *</label>
+                    {wizardAccountFormData.name.trim().length >= 3 && wizardLiveTypeaheadMatches.length > 0 && (
+                      <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                        {wizardLiveTypeaheadMatches.length} existing match{wizardLiveTypeaheadMatches.length > 1 ? 'es' : ''} found
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Ommax Electric Private Limited"
+                    value={wizardAccountFormData.name}
+                    onChange={e => {
+                      setWizardAccountFormData({ ...wizardAccountFormData, name: e.target.value });
+                      setWizardAccountDismissDuplicateWarning(false);
+                      setWizardAccountShowTypeahead(true);
+                    }}
+                    onFocus={() => setWizardAccountShowTypeahead(true)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                  />
+
+                  {/* Typeahead Suggestions Dropdown */}
+                  {wizardAccountShowTypeahead && wizardAccountFormData.name.trim().length >= 3 && wizardLiveTypeaheadMatches.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-2xl shadow-xl border border-slate-200 z-40 overflow-hidden text-xs">
+                      <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                        <span>Matching Existing Accounts</span>
+                        <button
+                          type="button"
+                          onClick={() => setWizardAccountShowTypeahead(false)}
+                          className="text-slate-400 hover:text-slate-700"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                        {wizardLiveTypeaheadMatches.map(acc => (
+                          <div
+                            key={acc.id}
+                            className="p-2.5 hover:bg-amber-50/50 flex items-center justify-between gap-2 transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                                <span>{acc.name}</span>
+                                <span className="font-mono text-[10px] text-slate-400 font-semibold shrink-0">({acc.id})</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
+                                <span className={`px-1.5 py-0.2 rounded font-bold uppercase text-[9px] ${
+                                  acc.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' :
+                                  acc.status === 'PROSPECT' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {acc.status === 'ACTIVE' ? 'Active' : acc.status === 'PROSPECT' ? 'Prospect' : 'Inactive'}
+                                </span>
+                                <span>Owner: {acc.assignedTo || 'Admin'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Warning Banner */}
+                  {!wizardAccountDismissDuplicateWarning && wizardDuplicateAccountMatches.length > 0 && (
+                    <div className="mt-2 p-3 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start justify-between gap-2.5 text-xs">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="font-extrabold text-amber-900 text-xs">Potential Duplicate Account Detected</p>
+                          <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                            An existing account <strong className="font-bold text-amber-950">"{wizardDuplicateAccountMatches[0].name}"</strong> ({wizardDuplicateAccountMatches[0].id}) was found matching this company name.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setWizardAccountDismissDuplicateWarning(true)}
+                        className="p-1 text-amber-700 hover:text-amber-950 rounded-md cursor-pointer shrink-0"
+                        title="Dismiss warning"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Business Category & Industry */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Business Category *</label>
+                    <select
+                      required
+                      value={wizardAccountFormData.businessCategory}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, businessCategory: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="">Choose Business Category</option>
+                      {businessCategoriesList.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Industry *</label>
+                    <select
+                      required
+                      value={wizardAccountFormData.industry}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, industry: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="">Choose Industry</option>
+                      {industriesList.map(ind => (
+                        <option key={ind} value={ind}>{ind}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Office Phone & Alternative Phone */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Office Phone *</label>
+                    <CountryPhoneInput
+                      id="wizard-acc-office-phone"
+                      required
+                      value={wizardAccountFormData.phone}
+                      onChange={val => setWizardAccountFormData({ ...wizardAccountFormData, phone: val })}
+                      placeholder="90259 76761"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Alternative Phone</label>
+                    <CountryPhoneInput
+                      id="wizard-acc-alt-phone"
+                      value={wizardAccountFormData.altPhone}
+                      onChange={val => setWizardAccountFormData({ ...wizardAccountFormData, altPhone: val })}
+                      placeholder="4329 220075"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
+                    />
+                  </div>
+                </div>
+
+                {/* Official Email & Website */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Official Email</label>
+                    <input
+                      type="email"
+                      placeholder="hello@oepl.com"
+                      value={wizardAccountFormData.email}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, email: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Website</label>
+                    <input
+                      type="text"
+                      placeholder="https://company.com"
+                      value={wizardAccountFormData.website}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, website: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Street Address */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Street Address *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Plot / Door No, Street, Landmark, Industrial Area"
+                    value={wizardAccountFormData.address}
+                    onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, address: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                  />
+                </div>
+
+                {/* City, State, Pin code, Country */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">City *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ariyalur"
+                      value={wizardAccountFormData.billingCity}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, billingCity: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">State *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Tamil Nadu"
+                      value={wizardAccountFormData.billingState}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, billingState: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="621704"
+                      value={wizardAccountFormData.pincode}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, pincode: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Country *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="India"
+                      value={wizardAccountFormData.country}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, country: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Account Status & Account Owner */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Account Status *</label>
+                    <select
+                      required
+                      value={wizardAccountFormData.status}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, status: e.target.value as any })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="ACTIVE">Active Client</option>
+                      <option value="PROSPECT">Prospect / Lead</option>
+                      <option value="INACTIVE">Inactive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Account Owner * {!isAdmin && <span className="text-[10px] font-normal text-slate-400">(Auto-assigned)</span>}
+                    </label>
+                    {isAdmin ? (
+                      <select
+                        required
+                        value={wizardAccountFormData.assignedTo}
+                        onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, assignedTo: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors cursor-pointer"
+                      >
+                        {availableUsersList.map(u => {
+                          const displayName = u.fullName || u.username;
+                          return (
+                            <option key={u.id || u.username} value={displayName}>
+                              {displayName}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        readOnly
+                        disabled
+                        value={wizardAccountFormData.assignedTo}
+                        className="w-full px-3.5 py-2.5 rounded-xl font-semibold text-slate-500 bg-slate-100/80 border border-slate-200 cursor-not-allowed"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Notes / Background</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Brief background or notes about this client account..."
+                    value={wizardAccountFormData.notes}
+                    onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, notes: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                  />
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setWizardStep('PROMPT_CHOICE')}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 text-xs"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back
+                  </button>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setWizardStep('NONE')}
+                      className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-800 font-bold hover:bg-slate-100 transition-colors text-xs cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isWizardSaving}
+                      className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs"
+                    >
+                      {isWizardSaving ? (
+                        <span>Saving Account...</span>
+                      ) : (
+                        <>
+                          <span>Next: Add Contact</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. WIZARD STEP: CREATE CONTACT (FOR INDEPENDENT & CORPORATE FLOWS) */}
+      <AnimatePresence>
+        {wizardStep === 'CREATE_CONTACT' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setWizardStep('NONE')}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[92vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-700">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-wider">
+                        {wizardMode === 'INDEPENDENT' ? 'Step 1 of 2' : 'Step 2 of 2'}
+                      </span>
+                      <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                        Create Contact
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      {wizardMode === 'INDEPENDENT'
+                        ? 'Enter details for the direct individual contact.'
+                        : `Enter contact details for ${wizardCreatedAccount?.name || wizardContactFormData.accountName || 'this account'}.`}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setWizardStep('NONE')}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleWizardContactSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+                
+                {/* Full Name */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Rajesh Sharma"
+                    value={wizardContactFormData.name}
+                    onChange={e => {
+                      setWizardContactFormData({ ...wizardContactFormData, name: e.target.value });
+                      setWizardContactDismissDuplicateWarning(false);
+                    }}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                  />
+                </div>
+
+                {/* Associated Account & Contact Status */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Associated Account *</label>
+                    <div className="px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-800 flex items-center justify-between">
+                      <span className="truncate">
+                        {wizardMode === 'INDEPENDENT'
+                          ? 'Independent (Direct Sales)'
+                          : (wizardCreatedAccount?.name || wizardContactFormData.accountName || 'Selected Account')}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 shrink-0 ml-2">
+                        {wizardMode === 'INDEPENDENT' ? 'Direct Deal' : 'Linked Account'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Contact Status *</label>
+                    <select
+                      required
+                      value={wizardContactFormData.status}
+                      onChange={e => setWizardContactFormData({ ...wizardContactFormData, status: e.target.value as ContactStatus })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    >
+                      <option value="ACTIVE">Active</option>
+                      <option value="INACTIVE">Inactive</option>
+                      <option value="LEFT_COMPANY">Left Company</option>
+                      <option value="DO_NOT_CONTACT">Do Not Contact</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Email Address & Mobile Number */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      placeholder="hello@domain.com"
+                      value={wizardContactFormData.email}
+                      onChange={e => {
+                        setWizardContactFormData({ ...wizardContactFormData, email: e.target.value });
+                        setWizardContactDismissDuplicateWarning(false);
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Mobile Number *</label>
+                    <CountryPhoneInput
+                      id="wizard-con-mobile-number"
+                      required
+                      value={wizardContactFormData.mobile}
+                      onChange={val => {
+                        setWizardContactFormData({ ...wizardContactFormData, mobile: val });
+                        setWizardContactDismissDuplicateWarning(false);
+                      }}
+                      placeholder="90259 76761"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
+                    />
+                  </div>
+                </div>
+
+                {/* Duplicate Contact Warning Banner */}
+                {!wizardContactDismissDuplicateWarning && wizardDuplicateContactMatches.length > 0 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start justify-between gap-2.5 text-xs">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="font-extrabold text-amber-900 text-xs">Potential Duplicate Contact Detected</p>
+                        <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                          A contact <strong className="font-bold text-amber-950">"{wizardDuplicateContactMatches[0].contact.name || wizardDuplicateContactMatches[0].contact.firstName}"</strong> ({wizardDuplicateContactMatches[0].contact.id} • {wizardDuplicateContactMatches[0].contact.mobile || wizardDuplicateContactMatches[0].contact.phone}) already exists with {wizardDuplicateContactMatches[0].matchReason.toLowerCase()}.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWizardContactDismissDuplicateWarning(true)}
+                      className="p-1 text-amber-700 hover:text-amber-950 rounded-md cursor-pointer shrink-0"
+                      title="Dismiss warning"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Alternative Mobile Number & Contact Owner */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Alternative Mobile Number</label>
+                    <CountryPhoneInput
+                      id="wizard-con-alt-mobile-number"
+                      value={wizardContactFormData.altMobile}
+                      onChange={val => setWizardContactFormData({ ...wizardContactFormData, altMobile: val })}
+                      placeholder="4329 220075"
+                      defaultCountryCode={crmSettings?.defaultCountryCode || '+91'}
+                      allowedCountryCodes={crmSettings?.allowedCountryCodes}
+                      customCountryCodes={crmSettings?.customCountryCodes}
+                      recentCountryCodes={crmSettings?.recentCountryCodes}
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Contact Owner * {!isAdmin && <span className="text-[10px] font-normal text-slate-400">(Auto-assigned)</span>}
+                    </label>
+                    {isAdmin ? (
+                      <select
+                        required
+                        value={wizardContactFormData.assignedTo}
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, assignedTo: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors cursor-pointer"
+                      >
+                        {availableUsersList.map(u => {
+                          const displayName = u.fullName || u.username;
+                          return (
+                            <option key={u.id || u.username} value={displayName}>
+                              {displayName}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        readOnly
+                        disabled
+                        value={wizardContactFormData.assignedTo}
+                        className="w-full px-3.5 py-2.5 rounded-xl font-semibold text-slate-500 bg-slate-100/80 border border-slate-200 cursor-not-allowed"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Department & Job Designation */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Department</label>
+                    <input
+                      type="text"
+                      placeholder="Supply Chain & Contracts"
+                      value={wizardContactFormData.department}
+                      onChange={e => setWizardContactFormData({ ...wizardContactFormData, department: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Job Designation</label>
+                    <input
+                      type="text"
+                      placeholder="Head of Procurement"
+                      value={wizardContactFormData.designation}
+                      onChange={e => setWizardContactFormData({ ...wizardContactFormData, designation: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Primary Key Contact & Optional Alternative Address Option */}
+                {wizardMode !== 'INDEPENDENT' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        id="wizardPrimaryKeyContactCheckbox"
+                        checked={wizardContactFormData.isPrimary}
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, isPrimary: e.target.checked })}
+                        className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                      />
+                      <label htmlFor="wizardPrimaryKeyContactCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                        <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                        <span>Primary Key Contact for this Account</span>
+                      </label>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center gap-2.5 hover:bg-slate-100/60 transition-colors">
+                      <input
+                        type="checkbox"
+                        id="wizardRequireAltAddressCheckbox"
+                        checked={wizardContactFormData.hasAlternativeAddress}
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, hasAlternativeAddress: e.target.checked })}
+                        className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                      />
+                      <label htmlFor="wizardRequireAltAddressCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                        <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span>Do you require alternative address for this contact?</span>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      id="wizardPrimaryKeyContactCheckbox"
+                      checked={wizardContactFormData.isPrimary}
+                      onChange={e => setWizardContactFormData({ ...wizardContactFormData, isPrimary: e.target.checked })}
+                      className="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer accent-amber-600 shrink-0"
+                    />
+                    <label htmlFor="wizardPrimaryKeyContactCheckbox" className="font-bold text-slate-800 text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                      <span>Primary Key Contact for this Account</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Alternative Address Fields (when alternative address is checked) */}
+                {wizardMode !== 'INDEPENDENT' && wizardContactFormData.hasAlternativeAddress && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Alternative / Specific Contact Address</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium">Optional address specific to this contact</span>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Street Address</label>
+                      <input
+                        type="text"
+                        placeholder="Specific Office, Branch, Site, Floor No, Street Address"
+                        value={wizardContactFormData.address}
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">City</label>
+                        <input
+                          type="text"
+                          placeholder="City"
+                          value={wizardContactFormData.city}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">State</label>
+                        <input
+                          type="text"
+                          placeholder="State"
+                          value={wizardContactFormData.state}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Pin code</label>
+                        <input
+                          type="text"
+                          placeholder="Pin code"
+                          value={wizardContactFormData.pincode}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Country</label>
+                        <input
+                          type="text"
+                          placeholder="India"
+                          value={wizardContactFormData.country}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Independent Contact Address Fields (REQUIRED when Independent) */}
+                {wizardMode === 'INDEPENDENT' && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3"
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Independent Contact Address *</span>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Street Address *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Plot / Door No, Street, Landmark, Industrial Area"
+                        value={wizardContactFormData.address}
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">City *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Ariyalur"
+                          value={wizardContactFormData.city}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">State *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Tamil Nadu"
+                          value={wizardContactFormData.state}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="621704"
+                          value={wizardContactFormData.pincode}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Country *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="India"
+                          value={wizardContactFormData.country}
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Notes */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Notes / Preferences</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Preferred contact hours, direct assistant contact..."
+                    value={wizardContactFormData.notes}
+                    onChange={e => setWizardContactFormData({ ...wizardContactFormData, notes: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                  />
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="pt-4 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (wizardMode === 'INDEPENDENT') {
+                        setWizardStep('PROMPT_CHOICE');
+                      } else {
+                        setWizardStep('CREATE_ACCOUNT');
+                      }
+                    }}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 text-xs"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back
+                  </button>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setWizardStep('NONE')}
+                      className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-800 font-bold hover:bg-slate-100 transition-colors text-xs cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isWizardSaving}
+                      className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs"
+                    >
+                      {isWizardSaving ? (
+                        <span>Saving Contact...</span>
+                      ) : (
+                        <>
+                          <span>Continue to Opportunity</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+              </form>
             </motion.div>
           </div>
         )}

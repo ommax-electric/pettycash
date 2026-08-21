@@ -46,7 +46,7 @@ interface CRMAccountsViewProps {
   currentUser: User;
   users?: User[];
   appSettings?: AppSettings;
-  onAddAccount: (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => Promise<void>;
+  onAddAccount: (acc: Omit<CRMAccount, 'id' | 'createdAt'>) => Promise<CRMAccount | void>;
   onUpdateAccount: (acc: CRMAccount) => Promise<void>;
   onDeleteAccount: (id: string) => Promise<void>;
 }
