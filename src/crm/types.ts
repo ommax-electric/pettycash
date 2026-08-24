@@ -44,6 +44,8 @@ export const formatCRMIDateTime = (isoString?: string | null): string => {
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
+    const prefFormat = typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_date_format') : null;
+    const sep = prefFormat && prefFormat.includes('/') ? '/' : '-';
     const formatter = new Intl.DateTimeFormat('en-IN', {
       timeZone: 'Asia/Kolkata',
       day: '2-digit',
@@ -62,7 +64,7 @@ export const formatCRMIDateTime = (isoString?: string | null): string => {
     const hh = map.hour || '12';
     const min = map.minute || '00';
     const dayPeriod = (map.dayPeriod || 'AM').toUpperCase();
-    return `${dd}-${mm}-${yyyy} | ${hh}:${min} ${dayPeriod}`;
+    return `${dd}${sep}${mm}${sep}${yyyy} | ${hh}:${min} ${dayPeriod}`;
   } catch {
     return isoString || '—';
   }
@@ -73,6 +75,8 @@ export const formatCRMIDate = (isoString?: string | null): string => {
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
+    const prefFormat = typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_date_format') : null;
+    const sep = prefFormat && prefFormat.includes('/') ? '/' : '-';
     const formatter = new Intl.DateTimeFormat('en-IN', {
       timeZone: 'Asia/Kolkata',
       day: '2-digit',
@@ -85,7 +89,7 @@ export const formatCRMIDate = (isoString?: string | null): string => {
     const dd = map.day || '01';
     const mm = map.month || '01';
     const yyyy = map.year || '2026';
-    return `${dd}-${mm}-${yyyy}`;
+    return `${dd}${sep}${mm}${sep}${yyyy}`;
   } catch {
     return isoString || '—';
   }

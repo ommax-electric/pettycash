@@ -1272,9 +1272,9 @@ export default function RegisterView({
         <tr>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
-          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Project Ref</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Paid To</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; min-width: 130px;">Particulars</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Project Ref</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: right; white-space: nowrap;">Debit Amount</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: center; white-space: nowrap;">Mode</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
@@ -1286,9 +1286,9 @@ export default function RegisterView({
         <tr style="border-bottom: 1px solid #e2e8f0; font-size: 9.5px;">
           <td style="padding: 5px; white-space: nowrap;">${formatDate(t.date)}</td>
           <td style="padding: 5px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}${t.receiptName ? ' #' : ''}</td>
-          <td style="padding: 5px; font-family: monospace; font-size: 9px; color: #475569; white-space: nowrap;">${t.projectRefNo || '-'}</td>
           <td style="padding: 5px; font-weight: bold; color: #0f172a;">${t.merchant}</td>
           <td style="padding: 5px 6px; color: #1e293b; font-size: 10px; font-weight: 500; line-height: 1.3;">${t.description}</td>
+          <td style="padding: 5px; font-family: monospace; font-size: 9px; color: #475569; white-space: nowrap;">${t.projectRefNo || '-'}</td>
           <td style="padding: 5px; font-weight: bold; color: #e11d48; text-align: right; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td style="padding: 5px; text-align: center; white-space: nowrap;">${t.paymentType === 'ONLINE' ? 'Online' : 'Cash'}</td>
           <td style="padding: 5px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.category}</span></td>
@@ -1313,35 +1313,30 @@ export default function RegisterView({
     }
 
     printWindow.document.write(`
+      <!DOCTYPE html>
       <html>
         <head>
           <title>${reportTitle} - ${periodText}</title>
           <style>
-            @page {
-              size: A4 landscape;
-              margin: 8mm;
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #1e293b; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th { text-align: left; background-color: #f8fafc; color: #475569; font-size: 9.5px; text-transform: uppercase; padding: 8px 6px; border-bottom: 2px solid #cbd5e1; }
+            @media print {
+              body { margin: 10mm; }
+              @page { size: landscape; margin: 10mm; }
             }
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 15px; color: #1e293b; }
-            .company-name { font-size: 18px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; }
-            .report-title { font-size: 13px; font-weight: 700; color: ${forceTypeVal === 'IN' ? '#059669' : '#e11d48'}; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
-            .period-badge { font-size: 11px; font-weight: 700; color: #475569; margin-top: 4px; background-color: #f1f5f9; display: inline-block; padding: 2px 8px; border-radius: 6px; border: 1px solid #cbd5e1; }
-            .header-info { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; font-size: 10px; border-bottom: 2px solid #cbd5e1; padding-bottom: 10px; }
-            .footer-info { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #475569; }
-            table { border-collapse: collapse; margin-top: 10px; font-size: 9.5px; width: 100%; text-align: left; table-layout: auto; }
-            th { background-color: #f1f5f9; padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; }
           </style>
         </head>
         <body>
-          <div class="header-info">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f7b944; padding-bottom: 12px;">
             <div>
-              <div class="company-name">Ommax Electric Private Limited</div>
-              <div class="report-title">${reportTitle}</div>
-              <div class="period-badge">${periodText}</div>
+              <h2 style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 800;">${reportTitle}</h2>
+              <p style="margin: 3px 0 0 0; font-size: 11px; color: #64748b;">${periodText} | Generated on: ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} | Total Filtered Vouchers: <strong>${filteredTransactions.length}</strong></p>
             </div>
-            <div style="text-align: right; line-height: 1.5;">
-              <div style="font-size: 10px; font-weight: 700; color: #475569; background-color: #f8fafc; padding: 4px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                Total Vouchers: ${filteredTransactions.length}
-              </div>
+            <div style="text-align: right;">
+              <span style="background: linear-gradient(135deg, #ec003f, #f7b944); color: #ffffff; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 900; letter-spacing: 1px; display: inline-block;">
+                CONNECT
+              </span>
             </div>
           </div>
           <table>
@@ -1352,12 +1347,12 @@ export default function RegisterView({
               ${rowsHTML}
             </tbody>
           </table>
-          <div class="footer-info">
+          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; font-size: 10px; color: #475569; display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
               <div><strong>Generated On:</strong> ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
-              ${forceTypeVal !== 'IN' ? `<div style="font-size: 9.5px; color: #475569; font-weight: 600; margin-top: 6px;"># Vouchers has supporting documents</div>` : ''}
+              ${forceTypeVal !== 'IN' ? `<div style="font-size: 9px; color: #64748b; margin-top: 3px;"># Vouchers has supporting documents</div>` : ''}
             </div>
-            <div><strong>Generated By:</strong> ${currentUser.fullName}</div>
+            <div><strong>Generated By:</strong> ${currentUser.fullName || currentUser.username}</div>
           </div>
           <script>
             window.onload = function() {
@@ -3339,7 +3334,7 @@ export default function RegisterView({
                             handleExportCSV();
                             setIsExportDropdownOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
+                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
                         >
                           <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                           Export as CSV
@@ -3349,7 +3344,7 @@ export default function RegisterView({
                             handleExportXLSX();
                             setIsExportDropdownOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
+                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
                         >
                           <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                           Export as XLSX
@@ -3359,7 +3354,7 @@ export default function RegisterView({
                             handleExportPDF();
                             setIsExportDropdownOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2"
+                          className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center gap-2 cursor-pointer"
                         >
                           <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                           Export as PDF

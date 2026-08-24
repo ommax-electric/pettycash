@@ -41,7 +41,8 @@ export const formatTimestampInTimezone = (
     if (isNaN(d.getTime())) return String(dateInput);
 
     const ianaTz = getIanaTimezone(timezoneStr);
-    const fmt = dateFormatStr || 'DD/MM/YYYY';
+    const prefFmt = (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_date_format') : null);
+    const fmt = prefFmt || dateFormatStr || 'DD-MM-YYYY';
 
     // Format using Intl.DateTimeFormat in the requested timezone
     const formatter = new Intl.DateTimeFormat('en-GB', {

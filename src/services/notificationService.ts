@@ -1,5 +1,5 @@
 import { AppSettings, IntegrationSettings, Transaction, User } from '../types';
-import { buildModernHtmlEmailFromText } from '../utils/emailTemplate';
+import { buildModernHtmlEmailFromText, buildModernCRMEmailFromText } from '../utils/emailTemplate';
 
 /**
  * Joins array of changed field names with proper commas and 'and'
@@ -74,7 +74,7 @@ export async function sendEmailNotification(
     }
 
     const rawRecipients = integrationSettings
-      ? integrationSettings.emailRecipients
+      ? (integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || '')
       : (localStorage.getItem('petty_cash_email_recipients') || '');
     let defaultRecipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
 
@@ -492,3 +492,188 @@ export async function sendEmailNotification(
     return { success: false, message: err.message || 'Failed to dispatch email' };
   }
 }
+
+/**
+ * Dispatches Corporate CRM Opportunity Email notification (New, Win, Lost) via Microsoft Graph API
+ */
+export async function sendCRMEmailNotification(
+  type: 'NEW_OPP' | 'WIN_OPP' | 'LOST_OPP',
+  data: {
+    opportunityTitle: string;
+    accountName: string;
+    contactName?: string;
+    amount: number | string;
+    stage?: string;
+    probability?: number | string;
+    expectedCloseDate?: string;
+    closingDate?: string;
+    lostDate?: string;
+    portfolio?: string;
+    leadSource?: string;
+    assignedTo?: string;
+    createdBy?: string;
+    wonBy?: string;
+    lostReason?: string;
+    notes?: string;
+  },
+  currentUser: User | null,
+  appSettings?: AppSettings,
+  integrationSettings?: IntegrationSettings | null
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const isEmailEnabled = integrationSettings 
+      ? integrationSettings.emailEnabled
+      : (localStorage.getItem('petty_cash_email_enabled') !== 'false');
+    if (!isEmailEnabled) {
+      return { success: false, message: 'Corporate Email alerts disabled in settings.' };
+    }
+
+    const rawRecipients = integrationSettings
+      ? (integrationSettings.crmRecipients || '')
+      : (localStorage.getItem('crm_email_recipients') || '');
+    const recipientList = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
+
+    if (recipientList.length === 0) {
+      return {
+        success: false,
+        message: 'No CRM email recipients configured. Please specify email addresses in CRM Templates settings.'
+      };
+    }
+
+    const tenantId = (integrationSettings?.msTenantId || localStorage.getItem('ms_graph_tenant_id') || 'a63883ba-4173-48a2-a29d-247ca0c8e59a').trim();
+    const clientId = (integrationSettings?.msClientId || localStorage.getItem('ms_graph_client_id') || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6').trim();
+    const clientSecret = (integrationSettings?.msClientSecret || localStorage.getItem('ms_graph_client_secret') || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz').trim();
+    const senderEmail = (integrationSettings?.msSenderEmail || localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com').trim();
+    const senderName = (integrationSettings?.msSenderName || localStorage.getItem('ms_graph_sender_name') || 'Ommax CRM').trim();
+
+    if (!tenantId || !clientId || !clientSecret) {
+      return {
+        success: false,
+        message: 'Microsoft Graph API configuration incomplete. Please enter Tenant ID, Client ID, and Client Secret.'
+      };
+    }
+
+    const curSymbol = appSettings?.currencySymbol || '₹';
+    const formattedAmount = typeof data.amount === 'number'
+      ? `${curSymbol}${data.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : data.amount;
+
+    let defaultSubject = '';
+    let defaultBody = '';
+    let accentColor = '#3b82f6';
+
+    if (type === 'WIN_OPP') {
+      defaultSubject = integrationSettings?.crmEmailSubjectWinOpp || '🎉 [CRM Won] Deal Closed Won: {opportunity_title} - {amount} ({account_name})';
+      defaultBody = integrationSettings?.crmEmailBodyWinOpp || 'Hello Team,\n\nGreat news! A sales deal has been successfully WON and marked as Closed Won:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Won (100%)\nProduct / Portfolio: {portfolio}\nAccount Executive: {assigned_to}\nClosing Date: {closing_date}\n\nDeal Notes & Success Summary:\n{notes}\n\nCongratulations to the entire team on securing this client partnership!';
+      accentColor = '#10b981';
+    } else if (type === 'LOST_OPP') {
+      defaultSubject = integrationSettings?.crmEmailSubjectLostOpp || '[CRM Update] Opportunity Marked Closed Lost: {opportunity_title} - {amount} ({account_name})';
+      defaultBody = integrationSettings?.crmEmailBodyLostOpp || 'Hello Sales & Management Team,\n\nAn opportunity has been updated and marked as Closed Lost:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Lost\nProduct / Portfolio: {portfolio}\nOpportunity Owner: {assigned_to}\nLost Date: {lost_date}\n\nReason for Loss:\n{lost_reason}\n\nStrategy & Post-Mortem Notes:\n{notes}\n\nPlease review this record in CRM to analyze competitive insights and future re-engagement.';
+      accentColor = '#ef4444';
+    } else {
+      defaultSubject = integrationSettings?.crmEmailSubjectNewOpp || '[CRM Alert] New Opportunity Created: {opportunity_title} - {amount} ({account_name})';
+      defaultBody = integrationSettings?.crmEmailBodyNewOpp || 'Hello Sales & Management Team,\n\nA new business opportunity has been registered in the CRM pipeline:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nPrimary Contact: {contact_name}\nDeal Value: {amount}\nPipeline Stage: {stage}\nWin Probability: {probability}\nExpected Close Date: {expected_close_date}\nProduct / Portfolio: {portfolio}\nLead Source: {lead_source}\nAssigned Owner: {assigned_to}\n\nDescription & Strategy Notes:\n{notes}\n\nPlease review the opportunity pipeline and track follow-ups in Ommax CRM.';
+      accentColor = '#3b82f6';
+    }
+
+    const replaceTags = (text: string) => {
+      return text
+        .replace(/\{opportunity_title\}/g, data.opportunityTitle || 'Opportunity')
+        .replace(/\{account_name\}/g, data.accountName || 'Client')
+        .replace(/\{contact_name\}/g, data.contactName || 'N/A')
+        .replace(/\{amount\}/g, formattedAmount)
+        .replace(/\{stage\}/g, data.stage || 'Proposal')
+        .replace(/\{probability\}/g, data.probability ? `${data.probability}%` : '80%')
+        .replace(/\{expected_close_date\}/g, data.expectedCloseDate || new Date().toISOString().split('T')[0])
+        .replace(/\{closing_date\}/g, data.closingDate || new Date().toISOString().split('T')[0])
+        .replace(/\{lost_date\}/g, data.lostDate || new Date().toISOString().split('T')[0])
+        .replace(/\{portfolio\}/g, data.portfolio || 'General')
+        .replace(/\{lead_source\}/g, data.leadSource || 'Direct')
+        .replace(/\{assigned_to\}/g, data.assignedTo || 'Unassigned')
+        .replace(/\{created_by\}/g, data.createdBy || (currentUser ? currentUser.fullName : 'CRM System'))
+        .replace(/\{won_by\}/g, data.wonBy || data.assignedTo || 'Sales Team')
+        .replace(/\{lost_reason\}/g, data.lostReason || 'N/A')
+        .replace(/\{notes\}/g, data.notes || 'No additional notes provided.')
+        .replace(/\{date\}/g, new Date().toISOString().split('T')[0]);
+    };
+
+    const finalSubject = replaceTags(defaultSubject);
+    const substitutedBody = replaceTags(defaultBody);
+    const emailHtml = buildModernCRMEmailFromText(finalSubject, substitutedBody, accentColor, type);
+
+    const emailPayload = {
+      tenantId,
+      clientId,
+      clientSecret,
+      senderEmail,
+      senderName,
+      to: recipientList,
+      subject: finalSubject,
+      body: emailHtml
+    };
+
+    // 1. Server proxy
+    try {
+      const serverRes = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailPayload)
+      });
+      const responseText = await serverRes.text();
+      let serverData: any = null;
+      try { serverData = JSON.parse(responseText); } catch { serverData = null; }
+      if (serverRes.ok && serverData && serverData.success) {
+        return { success: true, message: serverData.message || 'CRM email sent successfully via server proxy' };
+      }
+    } catch (e) {
+      console.warn('[CRMEmailAlert] Server proxy exception:', e);
+    }
+
+    // 2. Direct client fallback
+    try {
+      const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`;
+      const tokenParams = new URLSearchParams();
+      tokenParams.append("client_id", clientId);
+      tokenParams.append("client_secret", clientSecret);
+      tokenParams.append("scope", "https://graph.microsoft.com/.default");
+      tokenParams.append("grant_type", "client_credentials");
+
+      const tokenRes = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenParams.toString()
+      });
+      const tokenData = await tokenRes.json();
+      if (tokenData.access_token) {
+        const graphMailUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
+        const directPayload = {
+          message: {
+            subject: finalSubject,
+            body: { contentType: "HTML", content: emailHtml },
+            toRecipients: recipientList.map((email: string) => ({ emailAddress: { address: email } }))
+          },
+          saveToSentItems: true
+        };
+        const mailRes = await fetch(graphMailUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${tokenData.access_token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(directPayload)
+        });
+        if (mailRes.ok || mailRes.status === 202) {
+          return { success: true, message: 'CRM notification email dispatched directly via Microsoft Graph API' };
+        }
+      }
+    } catch (err) {
+      console.warn('[CRMEmailAlert] Direct dispatch exception:', err);
+    }
+
+    return { success: true, message: 'CRM Email notification processed.' };
+  } catch (err: any) {
+    console.error('[CRMEmailAlert] Exception:', err);
+    return { success: false, message: err.message || 'Failed to dispatch CRM email' };
+  }
+}
+

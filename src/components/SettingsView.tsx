@@ -14,7 +14,7 @@ import {
   Lock,
   Globe
 } from 'lucide-react';
-import { User as UserType } from '../types';
+import { User as UserType, AppSettings } from '../types';
 import { 
   CountryCodeConfig, 
   CRMSettings, 
@@ -26,9 +26,19 @@ interface SettingsViewProps {
   currentUser: UserType;
   onUpdateUser?: (updatedUser: UserType) => void;
   crmSettings?: CRMSettings;
+  appSettings?: AppSettings;
+  onUpdateAppSettings?: (newSettings: AppSettings) => void;
+  availableModules?: { id: string; label: string }[];
 }
 
-export default function SettingsView({ currentUser, onUpdateUser, crmSettings }: SettingsViewProps) {
+export default function SettingsView({ 
+  currentUser, 
+  onUpdateUser, 
+  crmSettings, 
+  appSettings, 
+  onUpdateAppSettings,
+  availableModules 
+}: SettingsViewProps) {
   // Password Change State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -41,12 +51,25 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
   const [passError, setPassError] = useState('');
   const [passSuccess, setPassSuccess] = useState('');
 
+  // Available Modules list (extensible dynamically)
+  const availableModulesList = useMemo(() => {
+    if (availableModules && availableModules.length > 0) return availableModules;
+    return [
+      { id: 'CRM', label: 'CRM' },
+      { id: 'HRMS', label: 'HRMS' },
+      { id: 'CASH_BOOK', label: 'Cash Book' }
+    ];
+  }, [availableModules]);
+
   // Preference State
   const [defaultPaymentMode, setDefaultPaymentMode] = useState<'CASH' | 'ONLINE'>(() => {
     return (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE') || 'CASH';
   });
-  const [defaultExportFormat, setDefaultExportFormat] = useState<'EXCEL' | 'CSV' | 'PDF'>(() => {
-    return (localStorage.getItem('ommax_pref_export_format') as 'EXCEL' | 'CSV' | 'PDF') || 'EXCEL';
+  const [dateFormat, setDateFormat] = useState<'DD-MM-YYYY' | 'DD/MM/YYYY'>(() => {
+    return (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY') || 'DD-MM-YYYY';
+  });
+  const [defaultModule, setDefaultModule] = useState<string>(() => {
+    return localStorage.getItem('ommax_pref_default_module') || 'CRM';
   });
   const [defaultDateFilter, setDefaultDateFilter] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL'>(() => {
     return (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
@@ -75,12 +98,14 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
   // Sync preferences on mount or when returning to tab or when crmSettings changes
   useEffect(() => {
     const savedPaymentMode = localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE';
-    const savedExportFormat = localStorage.getItem('ommax_pref_export_format') as 'EXCEL' | 'CSV' | 'PDF';
+    const savedDateFormat = localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY';
+    const savedDefaultModule = localStorage.getItem('ommax_pref_default_module');
     const savedDateFilter = localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL';
     const savedCountryCode = localStorage.getItem('ommax_pref_country_code');
 
     if (savedPaymentMode) setDefaultPaymentMode(savedPaymentMode);
-    if (savedExportFormat) setDefaultExportFormat(savedExportFormat);
+    if (savedDateFormat) setDateFormat(savedDateFormat);
+    if (savedDefaultModule) setDefaultModule(savedDefaultModule);
     if (savedDateFilter) setDefaultDateFilter(savedDateFilter);
     if (savedCountryCode) {
       setDefaultCountryCode(savedCountryCode);
@@ -171,9 +196,17 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
     
     // Save to local storage for persistence
     localStorage.setItem('ommax_pref_payment_mode', defaultPaymentMode);
-    localStorage.setItem('ommax_pref_export_format', defaultExportFormat);
+    localStorage.setItem('ommax_pref_date_format', dateFormat);
+    localStorage.setItem('ommax_pref_default_module', defaultModule);
     localStorage.setItem('ommax_pref_date_filter', defaultDateFilter);
     localStorage.setItem('ommax_pref_country_code', defaultCountryCode);
+
+    if (onUpdateAppSettings && appSettings) {
+      onUpdateAppSettings({
+        ...appSettings,
+        dateFormat: dateFormat
+      });
+    }
 
     setPrefSuccess(true);
 
@@ -360,8 +393,40 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
                 </motion.div>
               )}
 
-              {/* Default Payment Mode & Export Format */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Row 1: Default Module & Date Format */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Module</label>
+                  <select
+                    value={defaultModule}
+                    onChange={(e) => setDefaultModule(e.target.value)}
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
+                  >
+                    {availableModulesList.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">Module menu automatically revealed upon login</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Date Format</label>
+                  <select
+                    value={dateFormat}
+                    onChange={(e) => setDateFormat(e.target.value as 'DD-MM-YYYY' | 'DD/MM/YYYY')}
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
+                  >
+                    <option value="DD-MM-YYYY">DD-MM-YYYY (e.g. 24-08-2026)</option>
+                    <option value="DD/MM/YYYY">DD/MM/YYYY (e.g. 24/08/2026)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">Workspace-wide date presentation format</p>
+                </div>
+              </div>
+
+              {/* Row 2: Default Payment Mode & Default Register Date Filter */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Payment Mode</label>
                   <select
@@ -375,22 +440,6 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Export Format</label>
-                  <select
-                    value={defaultExportFormat}
-                    onChange={(e) => setDefaultExportFormat(e.target.value as 'EXCEL' | 'CSV' | 'PDF')}
-                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-violet-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 cursor-pointer"
-                  >
-                    <option value="EXCEL">Excel (.xlsx)</option>
-                    <option value="CSV">CSV File (.csv)</option>
-                    <option value="PDF">Printable PDF</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Default Date Filter Range & Default Country Code */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Register Date Filter</label>
                   <select
                     value={defaultDateFilter}
@@ -402,7 +451,10 @@ export default function SettingsView({ currentUser, onUpdateUser, crmSettings }:
                     <option value="ALL">All Recorded Dates</option>
                   </select>
                 </div>
+              </div>
 
+              {/* Row 3: Default Country Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">Default Phone Country Code</label>
                   <select

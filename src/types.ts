@@ -40,6 +40,8 @@ export interface IntegrationSettings {
   msSenderEmail?: string;
   msSenderName?: string;
   emailRecipients?: string;
+  pettyCashRecipients?: string;
+  crmRecipients?: string;
   emailSubjectNew?: string;
   emailBodyNew?: string;
   emailSubjectEdit?: string;
@@ -58,6 +60,12 @@ export interface IntegrationSettings {
   emailBodyRequestRejected?: string;
   emailSubjectRequestRerouted?: string;
   emailBodyRequestRerouted?: string;
+  crmEmailSubjectNewOpp?: string;
+  crmEmailBodyNewOpp?: string;
+  crmEmailSubjectWinOpp?: string;
+  crmEmailBodyWinOpp?: string;
+  crmEmailSubjectLostOpp?: string;
+  crmEmailBodyLostOpp?: string;
 }
 
 export type TransactionType = 'IN' | 'OUT';
@@ -118,35 +126,41 @@ export interface Transaction {
   deleteReason?: string; // Reason for deletion
 }
 
-export const formatDateToDMY = (dateStr?: string | null): string => {
+export const formatDateToDMY = (dateStr?: string | null, customFormat?: string): string => {
   if (!dateStr) return '';
   let str = dateStr.trim();
   if (str.includes('T')) {
     str = str.split('T')[0];
   }
+  const prefFormat = customFormat || (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_date_format') : null) || 'DD-MM-YYYY';
+  const sep = prefFormat.includes('/') ? '/' : '-';
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     const [yyyy, mm, dd] = str.split('-');
-    return `${dd}-${mm}-${yyyy}`;
+    return `${dd}${sep}${mm}${sep}${yyyy}`;
   }
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
     const [dd, mm, yyyy] = str.split('/');
-    return `${dd}-${mm}-${yyyy}`;
+    return `${dd}${sep}${mm}${sep}${yyyy}`;
   }
   if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
-    return str;
+    const [dd, mm, yyyy] = str.split('-');
+    return `${dd}${sep}${mm}${sep}${yyyy}`;
   }
   return str;
 };
 
-export const formatISTDateTime = (isoOrDateStr?: string | null): string => {
+export const formatISTDateTime = (isoOrDateStr?: string | null, customFormat?: string): string => {
   if (!isoOrDateStr) return '';
   const str = isoOrDateStr.trim();
   if (!str.includes('T') && !str.includes(':')) {
-    return formatDateToDMY(str);
+    return formatDateToDMY(str, customFormat);
   }
   try {
     const d = new Date(str);
     if (isNaN(d.getTime())) return str;
+    const prefFormat = customFormat || (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_date_format') : null) || 'DD-MM-YYYY';
+    const sep = prefFormat.includes('/') ? '/' : '-';
     const options: Intl.DateTimeFormatOptions = {
       timeZone: 'Asia/Kolkata',
       day: '2-digit',
@@ -158,7 +172,7 @@ export const formatISTDateTime = (isoOrDateStr?: string | null): string => {
     };
     const formatted = new Intl.DateTimeFormat('en-GB', options).format(d);
     const parts = formatted.split(', ');
-    const cleanDate = parts[0].replace(/\//g, '-');
+    const cleanDate = parts[0].replace(/[\/-]/g, sep);
     const cleanTime = parts[1] ? parts[1].toUpperCase() : '';
     return `${cleanDate} ${cleanTime} IST`;
   } catch {

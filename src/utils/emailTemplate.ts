@@ -486,3 +486,259 @@ function renderTimelineHeaderHtml(title: string, typeOrStatus?: string): string 
   </table>`;
 }
 
+/**
+ * Converts raw CRM template text with tag placeholders into realistic sample values for previewing.
+ */
+export function substituteCRMSampleTags(
+  templateText: string,
+  currencySymbol: string = '₹',
+  type: 'NEW_OPP' | 'WIN_OPP' | 'LOST_OPP' = 'NEW_OPP'
+): string {
+  if (!templateText) return '';
+
+  const sampleAmount = `${currencySymbol}45,00,000.00`;
+  const stageName = type === 'WIN_OPP' ? 'Closed Won' : type === 'LOST_OPP' ? 'Closed Lost' : 'Proposal / Quotation';
+  const probVal = type === 'WIN_OPP' ? '100%' : type === 'LOST_OPP' ? '0%' : '80%';
+  const closeDate = type === 'WIN_OPP' ? '28-08-2026' : type === 'LOST_OPP' ? '28-08-2026' : '15-09-2026';
+
+  return templateText
+    .replace(/\{opportunity_title\}/g, 'Commercial Rooftop Solar 250kW')
+    .replace(/\{account_name\}/g, 'Apex Industries Ltd')
+    .replace(/\{contact_name\}/g, 'Vikramaditya Verma')
+    .replace(/\{amount\}/g, sampleAmount)
+    .replace(/\{stage\}/g, stageName)
+    .replace(/\{probability\}/g, probVal)
+    .replace(/\{expected_close_date\}/g, closeDate)
+    .replace(/\{closing_date\}/g, '28-08-2026')
+    .replace(/\{lost_date\}/g, '28-08-2026')
+    .replace(/\{portfolio\}/g, 'Commercial & Industrial Solar')
+    .replace(/\{lead_source\}/g, 'Direct Inbound / Referral')
+    .replace(/\{assigned_to\}/g, 'Rajesh Sharma')
+    .replace(/\{created_by\}/g, 'Anita Roy')
+    .replace(/\{won_by\}/g, 'Rajesh Sharma')
+    .replace(/\{lost_reason\}/g, 'Client delayed capital expenditure to next financial year due to internal plant restructuring.')
+    .replace(/\{notes\}/g, type === 'WIN_OPP'
+      ? 'Client signed 250kW Turnkey EPC agreement. Advance payment of 20% approved by finance director.'
+      : type === 'LOST_OPP'
+      ? 'Decision postponed by client management; stay in touch for next quarter CAPEX review.'
+      : 'Initial site survey completed. Detailed engineering proposal & ROI calculation submitted for executive review.'
+    )
+    .replace(/\{date\}/g, '28-08-2026');
+}
+
+/**
+ * Builds modern, classic Outlook-compatible HTML email for CRM Opportunities (New, Win, Lost).
+ * Built with robust table markup, inline CSS styles, and Word/Outlook engine compatibility.
+ */
+export function buildModernCRMEmailFromText(
+  title: string,
+  bodyText: string,
+  accentColor: string = '#3b82f6',
+  type: 'NEW_OPP' | 'WIN_OPP' | 'LOST_OPP' = 'NEW_OPP'
+): string {
+  const blocks = parseBodyTextToBlocks(bodyText);
+
+  let introParagraphsHtml = '';
+  const gridLines: { key: string; value: string; raw: string }[] = [];
+  const detailLines: { key: string; value: string; raw: string }[] = [];
+  let signoffHtml = '';
+
+  blocks.forEach(block => {
+    if (block.type === 'paragraph') {
+      introParagraphsHtml += `<p style="margin: 0 0 12px 0; font-size: 14px; color: #334155; line-height: 22px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${block.text?.replace(/\n/g, '<br/>')}</p>`;
+    } else if (block.type === 'callout' && block.lines) {
+      block.lines.forEach(line => {
+        const k = line.key.toLowerCase();
+        if (
+          k.includes('note') ||
+          k.includes('reason') ||
+          k.includes('summary') ||
+          k.includes('strategy') ||
+          k.includes('description') ||
+          k.includes('remark')
+        ) {
+          detailLines.push(line);
+        } else {
+          gridLines.push(line);
+        }
+      });
+    } else if (block.type === 'signoff' || block.type === 'note') {
+      signoffHtml += `<p style="margin: 14px 0 0 0; font-size: 13px; color: #64748b; line-height: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${block.text}</p>`;
+    }
+  });
+
+  const getCRMFieldIcon = (key: string) => {
+    const k = key.toLowerCase();
+    if (k.includes('amount') || k.includes('value') || k.includes('deal value')) return '💰 ';
+    if (k.includes('opportunity') || k.includes('title') || k.includes('deal')) return '💼 ';
+    if (k.includes('account') || k.includes('client') || k.includes('company')) return '🏢 ';
+    if (k.includes('contact') || k.includes('person') || k.includes('owner') || k.includes('assigned') || k.includes('executive')) return '👤 ';
+    if (k.includes('stage') || k.includes('status')) return '📊 ';
+    if (k.includes('probability') || k.includes('win rate')) return '📈 ';
+    if (k.includes('date') || k.includes('close') || k.includes('expected')) return '📅 ';
+    if (k.includes('portfolio') || k.includes('product') || k.includes('service')) return '📦 ';
+    if (k.includes('lead') || k.includes('source')) return '🎯 ';
+    return '📌 ';
+  };
+
+  const renderCRMGridCell = (item: { key: string; value: string }, cellWidth: string) => {
+    const isAmount = item.key.toLowerCase().includes('amount') || item.key.toLowerCase().includes('value') || item.key.toLowerCase().includes('deal value');
+    const isStage = item.key.toLowerCase().includes('stage');
+    const icon = getCRMFieldIcon(item.key);
+
+    if (isAmount) {
+      return `<td width="${cellWidth}" valign="top" style="background-color: #f8fafc; border-radius: 8px; padding: 12px 14px; border: 1.5px solid ${accentColor}; border-top: 3.5px solid ${accentColor}; box-sizing: border-box;">
+        <p style="margin: 0 0 4px 0; font-size: 10px; color: ${accentColor}; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; line-height: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${icon}${item.key}</p>
+        <p style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 700; line-height: 22px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${item.value}</p>
+      </td>`;
+    }
+
+    if (isStage) {
+      const stageBadgeBg = type === 'WIN_OPP' ? '#10b981' : type === 'LOST_OPP' ? '#ef4444' : '#3b82f6';
+      return `<td width="${cellWidth}" valign="top" style="background-color: #f8fafc; border-radius: 8px; padding: 12px 14px; border: 1px solid #e2e8f0; box-sizing: border-box;">
+        <p style="margin: 0 0 4px 0; font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; line-height: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${icon}${item.key}</p>
+        <p style="margin: 0; font-size: 13px; line-height: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+          <span style="background-color: ${stageBadgeBg}; color: #ffffff; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 700; display: inline-block;">${item.value}</span>
+        </p>
+      </td>`;
+    }
+
+    return `<td width="${cellWidth}" valign="top" style="background-color: #f8fafc; border-radius: 8px; padding: 12px 14px; border: 1px solid #e2e8f0; box-sizing: border-box;">
+      <p style="margin: 0 0 4px 0; font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; line-height: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${icon}${item.key}</p>
+      <p style="margin: 0; font-size: 14px; color: #0f172a; font-weight: 600; line-height: 20px; word-break: break-word; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${item.value}</p>
+    </td>`;
+  };
+
+  // Render Grid Cards in 2 columns (classic Outlook table layout)
+  let gridTableHtml = '';
+  if (gridLines.length > 0) {
+    let rowsHtml = '';
+    for (let i = 0; i < gridLines.length; i += 2) {
+      const itemA = gridLines[i];
+      const itemB = gridLines[i + 1];
+
+      rowsHtml += '<tr>';
+      if (itemB) {
+        rowsHtml += renderCRMGridCell(itemA, '48%');
+        rowsHtml += '<td width="4%" style="font-size:1px; line-height:1px;">&nbsp;</td>';
+        rowsHtml += renderCRMGridCell(itemB, '48%');
+      } else {
+        rowsHtml += renderCRMGridCell(itemA, '48%');
+        rowsHtml += '<td width="4%" style="font-size:1px; line-height:1px;">&nbsp;</td>';
+        rowsHtml += '<td width="48%" style="font-size:1px; line-height:1px;">&nbsp;</td>';
+      }
+      rowsHtml += '</tr>';
+      if (i + 2 < gridLines.length) {
+        rowsHtml += '<tr><td colspan="3" height="10" style="font-size:1px; line-height:10px;">&nbsp;</td></tr>';
+      }
+    }
+
+    gridTableHtml = `<table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom: 20px; table-layout: fixed;">
+      <colgroup>
+        <col width="48%">
+        <col width="4%">
+        <col width="48%">
+      </colgroup>
+      ${rowsHtml}
+    </table>`;
+  }
+
+  // Render Details & Notes Callout Blocks (Classic Outlook compatible)
+  let detailBlocksHtml = '';
+  if (detailLines.length > 0) {
+    detailBlocksHtml = `<table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+      ${detailLines.map((line, idx) => `
+        <tr>
+          <td style="border-left: 3.5px solid ${accentColor}; background-color: #f8fafc; border-radius: 0 8px 8px 0; padding: 12px 16px; ${idx < detailLines.length - 1 ? 'margin-bottom: 12px;' : ''}">
+            <p style="margin: 0 0 4px 0; font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${line.key}</p>
+            <p style="margin: 0; font-size: 14px; color: #334155; line-height: 22px; word-break: break-word; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${line.value.replace(/\n/g, '<br/>')}</p>
+          </td>
+        </tr>
+        ${idx < detailLines.length - 1 ? '<tr><td height="10" style="font-size:1px; line-height:10px;">&nbsp;</td></tr>' : ''}
+      `).join('')}
+    </table>`;
+  }
+
+  const getCRMBadgeText = () => {
+    if (type === 'WIN_OPP') return '🎉 DEAL CLOSED WON';
+    if (type === 'LOST_OPP') return '✕ OPPORTUNITY CLOSED LOST';
+    return '💼 NEW CRM OPPORTUNITY';
+  };
+
+  const badgeText = getCRMBadgeText();
+
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>${title}</title>
+    <!--[if gte mso 9]>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:AllowPNG/>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+    <![endif]-->
+    <style type="text/css">
+      body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+      body { margin: 0; padding: 0; width: 100% !important; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f1f5f9; padding: 20px 10px;">
+        <tr>
+            <td align="center" valign="top">
+                <!-- Main Card Container (Classic Outlook & Webmail Compatible) -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,0.06); border: 2px solid ${accentColor}; border-top: 6px solid ${accentColor};">
+                    
+                    <!-- Header Section -->
+                    <tr>
+                        <td align="center" style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                            <div style="margin-bottom: 10px;">
+                              <span style="background-color: ${accentColor}; color: #ffffff; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; padding: 4px 14px; border-radius: 20px; display: inline-block; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                ${badgeText}
+                              </span>
+                            </div>
+                            <h1 style="color: #0f172a; margin: 0; font-size: 20px; font-weight: 700; line-height: 26px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                              ${title}
+                            </h1>
+                        </td>
+                    </tr>
+
+                    <!-- Body Content Area -->
+                    <tr>
+                        <td style="padding: 25px;">
+                            ${introParagraphsHtml}
+
+                            ${gridTableHtml}
+
+                            ${detailBlocksHtml}
+
+                            ${signoffHtml}
+                        </td>
+                    </tr>
+
+                    <!-- Corporate Footer -->
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0;">
+                            <p style="margin: 0 0 6px 0; font-size: 12px; color: #64748b; line-height: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                This is an automated corporate notification dispatched from Ommax CRM.
+                            </p>
+                            <p style="margin: 0; font-size: 11px; color: #94a3b8; line-height: 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                &copy; ${new Date().getFullYear()} Ommax Electric Pvt. Ltd. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>`;
+}
+

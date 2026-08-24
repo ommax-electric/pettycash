@@ -57,6 +57,29 @@ import HRMSPlaceholderView from './components/hrms/HRMSPlaceholderView';
 export type ParentModule = 'CRM' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
 export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS';
 
+export interface AppModuleConfig {
+  id: ParentModule;
+  label: string;
+  defaultTab: NavigationTab;
+  hasSubmenu: boolean;
+}
+
+export const APP_MODULES: AppModuleConfig[] = [
+  { id: 'CRM', label: 'CRM', defaultTab: 'CRM_DASHBOARD', hasSubmenu: true },
+  { id: 'HRMS', label: 'HRMS', defaultTab: 'HRMS', hasSubmenu: false },
+  { id: 'CASH_BOOK', label: 'Cash Book', defaultTab: 'CASHBOOK_DASHBOARD', hasSubmenu: true },
+];
+
+export const getDefaultModuleState = (): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
+  const savedMod = (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_default_module') : null) as ParentModule | null;
+  const targetMod = savedMod || 'CRM';
+  const found = APP_MODULES.find(m => m.id === targetMod) || APP_MODULES[0];
+  return {
+    defaultTab: found.defaultTab,
+    defaultParent: found.id
+  };
+};
+
 type NavigationTab = 
   | 'CRM_DASHBOARD'
   | 'CRM_ACCOUNTS'
@@ -121,9 +144,10 @@ const getActiveTabClass = (tabId: NavigationTab) => {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  // Navigation State - Accordion & Tabs
-  const [activeTab, setActiveTab] = useState<NavigationTab>('CRM_DASHBOARD');
-  const [openParentModule, setOpenParentModule] = useState<ParentModule | null>(null);
+  // Navigation State - Accordion & Tabs (initialized from user preference)
+  const initialNav = getDefaultModuleState();
+  const [activeTab, setActiveTab] = useState<NavigationTab>(initialNav.defaultTab);
+  const [openParentModule, setOpenParentModule] = useState<ParentModule | null>(initialNav.defaultParent);
   
   // Admin sub tab state
   const [adminSubTab, setAdminSubTab] = useState<AdminTab>('APP_SETTINGS');
@@ -477,8 +501,9 @@ export default function App() {
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
-    setActiveTab('CRM_DASHBOARD');
-    setOpenParentModule(null);
+    const initialNav = getDefaultModuleState();
+    setActiveTab(initialNav.defaultTab);
+    setOpenParentModule(initialNav.defaultParent);
   };
 
   // Handler: Secure Logout
@@ -1911,7 +1936,7 @@ export default function App() {
           </div>
           <p className="text-[11px] text-slate-400 mt-0.5 font-medium leading-normal">
             {/* CRM Descriptions */}
-            {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of your business, sales, and daily activities'}
+            {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of Sales & Opportunities'}
             {activeTab === 'CRM_ACCOUNTS' && 'Manage customer companies, business details and account relationships'}
             {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
             {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
@@ -2142,7 +2167,7 @@ export default function App() {
             </div>
             <p className="text-xs text-slate-400 mt-0.5 font-medium">
               {/* CRM Descriptions */}
-              {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of your business, sales, and daily activities'}
+              {activeTab === 'CRM_DASHBOARD' && 'Get a complete overview of Sales & Opportunities'}
               {activeTab === 'CRM_ACCOUNTS' && 'Manage customer companies, business details and account relationships'}
               {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
               {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
@@ -2298,6 +2323,9 @@ export default function App() {
                   currentUser={currentUser} 
                   onUpdateUser={handleUpdateUser} 
                   crmSettings={crmSettings}
+                  appSettings={appSettings}
+                  onUpdateAppSettings={handleUpdateAppSettings}
+                  availableModules={APP_MODULES.map(m => ({ id: m.id, label: m.label }))}
                 />
               )}
 

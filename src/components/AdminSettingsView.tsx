@@ -55,8 +55,8 @@ import {
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
 import { CRMSettings, DEFAULT_CRM_SETTINGS, STANDARD_COUNTRY_CODES, getCountryFromCode, getAllCountryCodes, CountryCodeConfig } from '../crm/types';
 import { formatTimestampInTimezone } from '../utils';
-import { sendEmailNotification, calculateCashBalance } from '../services/notificationService';
-import { substituteSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText } from '../utils/emailTemplate';
+import { sendEmailNotification, sendCRMEmailNotification, calculateCashBalance } from '../services/notificationService';
+import { substituteSampleTags, substituteCRMSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText, buildModernCRMEmailFromText } from '../utils/emailTemplate';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, testCloudinaryConnection } from '../services/fileAttachmentService';
 import { db, doc, updateDoc } from '../firebase';
 
@@ -314,6 +314,16 @@ export default function AdminSettingsView({
 
   const toggleEmailAccordion = (key: string) => {
     setOpenEmailAccordions(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const [openCrmAccordions, setOpenCrmAccordions] = useState<Record<string, boolean>>({
+    newOpp: true,
+    winOpp: false,
+    lostOpp: false
+  });
+
+  const toggleCrmAccordion = (key: string) => {
+    setOpenCrmAccordions(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   // Integration Sub-tab switcher state ('STORAGE' | 'EMAIL')
@@ -577,7 +587,44 @@ export default function AdminSettingsView({
     return integrationSettings?.msSenderName || localStorage.getItem('ms_graph_sender_name') || 'Petty Cash';
   });
   const [emailRecipients, setEmailRecipients] = useState<string>(() => {
-    return integrationSettings?.emailRecipients || localStorage.getItem('petty_cash_email_recipients') || 'info@ommaxelectric.com, admin@ommaxelectric.com';
+    return integrationSettings?.pettyCashRecipients || integrationSettings?.emailRecipients || localStorage.getItem('petty_cash_email_recipients') || 'info@ommaxelectric.com, admin@ommaxelectric.com';
+  });
+  const [pettyCashRecipients, setPettyCashRecipients] = useState<string>(() => {
+    return integrationSettings?.pettyCashRecipients || integrationSettings?.emailRecipients || localStorage.getItem('petty_cash_email_recipients') || 'info@ommaxelectric.com, admin@ommaxelectric.com';
+  });
+  const [crmRecipients, setCrmRecipients] = useState<string>(() => {
+    return integrationSettings?.crmRecipients || localStorage.getItem('crm_email_recipients') || 'sales@ommaxelectric.com, crm@ommaxelectric.com';
+  });
+
+  // CRM Email Templates: New Opportunity, Win Opportunity, Lost Opportunity
+  const DEFAULT_CRM_SUBJECT_NEW_OPP = '[CRM Alert] New Opportunity Created: {opportunity_title} - {amount} ({account_name})';
+  const DEFAULT_CRM_BODY_NEW_OPP = 'Hello Sales & Management Team,\n\nA new business opportunity has been registered in the CRM pipeline:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nPrimary Contact: {contact_name}\nDeal Value: {amount}\nPipeline Stage: {stage}\nWin Probability: {probability}\nExpected Close Date: {expected_close_date}\nProduct / Portfolio: {portfolio}\nLead Source: {lead_source}\nAssigned Owner: {assigned_to}\n\nDescription & Strategy Notes:\n{notes}\n\nPlease review the opportunity pipeline and track follow-ups in Ommax CRM.';
+
+  const DEFAULT_CRM_SUBJECT_WIN_OPP = '🎉 [CRM Won] Deal Closed Won: {opportunity_title} - {amount} ({account_name})';
+  const DEFAULT_CRM_BODY_WIN_OPP = 'Hello Team,\n\nGreat news! A sales deal has been successfully WON and marked as Closed Won:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Won (100%)\nProduct / Portfolio: {portfolio}\nAccount Executive: {assigned_to}\nClosing Date: {closing_date}\n\nDeal Notes & Success Summary:\n{notes}\n\nCongratulations to the entire team on securing this client partnership!';
+
+  const DEFAULT_CRM_SUBJECT_LOST_OPP = '[CRM Update] Opportunity Marked Closed Lost: {opportunity_title} - {amount} ({account_name})';
+  const DEFAULT_CRM_BODY_LOST_OPP = 'Hello Sales & Management Team,\n\nAn opportunity has been updated and marked as Closed Lost:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Lost\nProduct / Portfolio: {portfolio}\nOpportunity Owner: {assigned_to}\nLost Date: {lost_date}\n\nReason for Loss:\n{lost_reason}\n\nStrategy & Post-Mortem Notes:\n{notes}\n\nPlease review this record in CRM to analyze competitive insights and future re-engagement.';
+
+  const [crmEmailSubjectNewOpp, setCrmEmailSubjectNewOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailSubjectNewOpp || localStorage.getItem('crm_email_subject_new_opp') || DEFAULT_CRM_SUBJECT_NEW_OPP;
+  });
+  const [crmEmailBodyNewOpp, setCrmEmailBodyNewOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailBodyNewOpp || localStorage.getItem('crm_email_body_new_opp') || DEFAULT_CRM_BODY_NEW_OPP;
+  });
+
+  const [crmEmailSubjectWinOpp, setCrmEmailSubjectWinOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailSubjectWinOpp || localStorage.getItem('crm_email_subject_win_opp') || DEFAULT_CRM_SUBJECT_WIN_OPP;
+  });
+  const [crmEmailBodyWinOpp, setCrmEmailBodyWinOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailBodyWinOpp || localStorage.getItem('crm_email_body_win_opp') || DEFAULT_CRM_BODY_WIN_OPP;
+  });
+
+  const [crmEmailSubjectLostOpp, setCrmEmailSubjectLostOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailSubjectLostOpp || localStorage.getItem('crm_email_subject_lost_opp') || DEFAULT_CRM_SUBJECT_LOST_OPP;
+  });
+  const [crmEmailBodyLostOpp, setCrmEmailBodyLostOpp] = useState<string>(() => {
+    return integrationSettings?.crmEmailBodyLostOpp || localStorage.getItem('crm_email_body_lost_opp') || DEFAULT_CRM_BODY_LOST_OPP;
   });
 
   // Email Templates: New Voucher, Voucher Modifications, Inward Deposit & Deposit Changes
@@ -673,7 +720,15 @@ export default function AdminSettingsView({
       setMsClientSecret(integrationSettings.msClientSecret || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz');
       setMsSenderEmail(integrationSettings.msSenderEmail || 'mail@ommaxelectric.com');
       setMsSenderName(integrationSettings.msSenderName || 'Petty Cash');
-      setEmailRecipients(integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
+      setEmailRecipients(integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
+      setPettyCashRecipients(integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
+      setCrmRecipients(integrationSettings.crmRecipients || 'sales@ommaxelectric.com, crm@ommaxelectric.com');
+      setCrmEmailSubjectNewOpp(integrationSettings.crmEmailSubjectNewOpp || DEFAULT_CRM_SUBJECT_NEW_OPP);
+      setCrmEmailBodyNewOpp(integrationSettings.crmEmailBodyNewOpp || DEFAULT_CRM_BODY_NEW_OPP);
+      setCrmEmailSubjectWinOpp(integrationSettings.crmEmailSubjectWinOpp || DEFAULT_CRM_SUBJECT_WIN_OPP);
+      setCrmEmailBodyWinOpp(integrationSettings.crmEmailBodyWinOpp || DEFAULT_CRM_BODY_WIN_OPP);
+      setCrmEmailSubjectLostOpp(integrationSettings.crmEmailSubjectLostOpp || DEFAULT_CRM_SUBJECT_LOST_OPP);
+      setCrmEmailBodyLostOpp(integrationSettings.crmEmailBodyLostOpp || DEFAULT_CRM_BODY_LOST_OPP);
       setEmailSubjectNew(integrationSettings.emailSubjectNew || '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})');
       setEmailBodyNew(integrationSettings.emailBodyNew || 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.');
       setEmailSubjectEdit(integrationSettings.emailSubjectEdit || '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}');
@@ -723,7 +778,8 @@ export default function AdminSettingsView({
       msClientSecret,
       msSenderEmail,
       msSenderName,
-      emailRecipients,
+      emailRecipients: pettyCashRecipients,
+      pettyCashRecipients,
       emailSubjectNew,
       emailBodyNew,
       emailSubjectEdit,
@@ -753,7 +809,7 @@ export default function AdminSettingsView({
       localStorage.setItem('ms_graph_client_secret', msClientSecret);
       localStorage.setItem('ms_graph_sender_email', msSenderEmail);
       localStorage.setItem('ms_graph_sender_name', msSenderName);
-      localStorage.setItem('petty_cash_email_recipients', emailRecipients);
+      localStorage.setItem('petty_cash_email_recipients', pettyCashRecipients);
       localStorage.setItem('petty_cash_email_subject_new', emailSubjectNew);
       localStorage.setItem('petty_cash_email_body_new', emailBodyNew);
       localStorage.setItem('petty_cash_email_subject_edit', emailSubjectEdit);
@@ -773,8 +829,129 @@ export default function AdminSettingsView({
       localStorage.setItem('petty_cash_email_subject_req_rerouted', emailSubjectReqRerouted);
       localStorage.setItem('petty_cash_email_body_req_rerouted', emailBodyReqRerouted);
     }
-    setIntegrationSuccess('Microsoft Graph API configuration & templates saved successfully to Firestore!');
+    setIntegrationSuccess('Petty Cash email settings & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleSaveCRMTemplateSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updated: IntegrationSettings = {
+      ...integrationSettings,
+      crmRecipients,
+      crmEmailSubjectNewOpp,
+      crmEmailBodyNewOpp,
+      crmEmailSubjectWinOpp,
+      crmEmailBodyWinOpp,
+      crmEmailSubjectLostOpp,
+      crmEmailBodyLostOpp
+    };
+
+    if (onUpdateIntegrationSettings) {
+      onUpdateIntegrationSettings(updated);
+    } else {
+      localStorage.setItem('crm_email_recipients', crmRecipients);
+      localStorage.setItem('crm_email_subject_new_opp', crmEmailSubjectNewOpp);
+      localStorage.setItem('crm_email_body_new_opp', crmEmailBodyNewOpp);
+      localStorage.setItem('crm_email_subject_win_opp', crmEmailSubjectWinOpp);
+      localStorage.setItem('crm_email_body_win_opp', crmEmailBodyWinOpp);
+      localStorage.setItem('crm_email_subject_lost_opp', crmEmailSubjectLostOpp);
+      localStorage.setItem('crm_email_body_lost_opp', crmEmailBodyLostOpp);
+    }
+    setIntegrationSuccess('CRM Opportunity email templates saved successfully to Firestore!');
+    setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleResetCRMDefaults = () => {
+    setCrmEmailSubjectNewOpp(DEFAULT_CRM_SUBJECT_NEW_OPP);
+    setCrmEmailBodyNewOpp(DEFAULT_CRM_BODY_NEW_OPP);
+    setCrmEmailSubjectWinOpp(DEFAULT_CRM_SUBJECT_WIN_OPP);
+    setCrmEmailBodyWinOpp(DEFAULT_CRM_BODY_WIN_OPP);
+    setCrmEmailSubjectLostOpp(DEFAULT_CRM_SUBJECT_LOST_OPP);
+    setCrmEmailBodyLostOpp(DEFAULT_CRM_BODY_LOST_OPP);
+    setIntegrationSuccess('CRM Opportunity email templates reset to corporate defaults.');
+    setTimeout(() => setIntegrationSuccess(''), 3500);
+  };
+
+  const handleTestCRMEmail = async (testType: 'NEW_OPP' | 'WIN_OPP' | 'LOST_OPP' = 'NEW_OPP') => {
+    localStorage.setItem('crm_email_recipients', crmRecipients);
+    localStorage.setItem('ms_graph_tenant_id', msTenantId);
+    localStorage.setItem('ms_graph_client_id', msClientId);
+    localStorage.setItem('ms_graph_client_secret', msClientSecret);
+    localStorage.setItem('ms_graph_sender_email', msSenderEmail);
+    localStorage.setItem('ms_graph_sender_name', msSenderName);
+
+    if (!msTenantId.trim() || !msClientId.trim() || !msClientSecret.trim()) {
+      setTestNotificationModal({
+        title: 'Microsoft Graph API Credentials Required',
+        type: 'EMAIL',
+        content: `Please enter your Directory (Tenant) ID, Application (Client) ID, and Client Secret in Admin Settings > Integrations > Email Gateway before testing email dispatch.\n\nSender Email: ${msSenderEmail}\nCRM Recipients: ${crmRecipients}`
+      });
+      return;
+    }
+
+    if (!crmRecipients.trim()) {
+      setTestNotificationModal({
+        title: 'CRM Recipients Required',
+        type: 'EMAIL',
+        content: 'Please provide at least one CRM recipient email address in the CRM Recipient Email Addresses field above.'
+      });
+      return;
+    }
+
+    const currentIntegrationSettings: IntegrationSettings = {
+      ...integrationSettings,
+      emailEnabled: true,
+      msTenantId,
+      msClientId,
+      msClientSecret,
+      msSenderEmail,
+      msSenderName: msSenderName || 'Ommax CRM',
+      crmRecipients,
+      crmEmailSubjectNewOpp,
+      crmEmailBodyNewOpp,
+      crmEmailSubjectWinOpp,
+      crmEmailBodyWinOpp,
+      crmEmailSubjectLostOpp,
+      crmEmailBodyLostOpp
+    };
+
+    setIntegrationSuccess('Connecting to Microsoft Graph API & dispatching CRM opportunity email...');
+
+    const result = await sendCRMEmailNotification(
+      testType,
+      {
+        opportunityTitle: 'Commercial Rooftop Solar 250kW',
+        accountName: 'Apex Industries Ltd',
+        contactName: 'Vikramaditya Verma',
+        amount: 4500000,
+        stage: testType === 'WIN_OPP' ? 'Closed Won' : testType === 'LOST_OPP' ? 'Closed Lost' : 'Proposal / Quotation',
+        probability: testType === 'WIN_OPP' ? 100 : testType === 'LOST_OPP' ? 0 : 80,
+        expectedCloseDate: '15-09-2026',
+        closingDate: '28-08-2026',
+        lostDate: '28-08-2026',
+        portfolio: 'Commercial & Industrial Solar',
+        leadSource: 'Direct Inbound / Referral',
+        assignedTo: 'Rajesh Sharma',
+        createdBy: currentUser ? currentUser.fullName : 'Anita Roy',
+        wonBy: 'Rajesh Sharma',
+        lostReason: 'Client delayed capital expenditure to next financial year due to internal plant restructuring.',
+        notes: testType === 'WIN_OPP'
+          ? 'Client signed 250kW Turnkey EPC agreement. Advance payment of 20% approved by finance director.'
+          : testType === 'LOST_OPP'
+          ? 'Decision postponed by client management; stay in touch for next quarter CAPEX review.'
+          : 'Initial site survey completed. Detailed engineering proposal & ROI calculation submitted for executive review.'
+      },
+      currentUser,
+      appSettings,
+      currentIntegrationSettings
+    );
+
+    setTestNotificationModal({
+      title: result.success ? 'Microsoft Graph Modern CRM Email Dispatched!' : 'Microsoft Graph CRM Email Dispatch Result',
+      type: 'EMAIL',
+      content: `Microsoft 365 Tenant ID: ${msTenantId}\nClient ID: ${msClientId}\nFrom Sender: ${msSenderName || 'Ommax CRM'} <${msSenderEmail}>\nTo CRM Recipients: ${crmRecipients}\nTemplate Type: ${testType}\nFormat: HTML Only (Modern Classic-Outlook Card Layout)\n\n========================================\nGRAPH API RESPONSE:\n${result.message}`
+    });
+    setIntegrationSuccess('');
   };
 
   const handleResetEmailDefaults = () => {
@@ -3319,19 +3496,11 @@ export default function AdminSettingsView({
                           />
                         </div>
 
-                        <div className="md:col-span-2 space-y-1.5">
-                          <label className="block text-xs font-bold text-slate-700">
-                            Recipient Email Addresses (Finance Team / Auditors)
-                          </label>
-                          <input
-                            type="text"
-                            value={emailRecipients}
-                            onChange={(e) => setEmailRecipients(e.target.value)}
-                            placeholder="cfo@company.com, auditor@company.com, admin@company.com"
-                            className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                            required
-                          />
-                          <span className="text-[10px] text-slate-400">Separate multiple recipient email addresses with commas</span>
+                        <div className="md:col-span-2 p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 flex items-start gap-2.5">
+                          <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-amber-900 leading-relaxed">
+                            <span className="font-bold">Module-Specific Recipients:</span> Recipient email addresses are configured individually inside each module's templates tab (<span className="font-semibold">Petty Cash Templates</span> for Finance/Auditors and <span className="font-semibold">CRM Templates</span> for Sales/Management).
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -3406,8 +3575,9 @@ export default function AdminSettingsView({
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                 }`}
               >
+                <Briefcase className="w-4 h-4 text-sky-600 shrink-0" />
                 <span>CRM Templates</span>
-                <span className="text-[10px] bg-slate-200 text-slate-500 px-2 py-0.5 rounded-md font-bold">Coming Soon</span>
+                <span className="text-[10px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md font-extrabold">3 Active</span>
               </button>
 
               <button
@@ -3443,6 +3613,28 @@ export default function AdminSettingsView({
 
                 {/* Templates Form */}
                 <form onSubmit={handleSaveEmailSettings} className="space-y-4">
+                  {/* RECIPIENT EMAIL ADDRESSES (PETTY CASH) */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-800">Petty Cash Recipient Email Addresses</h4>
+                        <p className="text-[11px] text-slate-500">Finance team, auditors, and custodians who receive automated petty cash voucher alerts and approval notifications.</p>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      value={pettyCashRecipients}
+                      onChange={(e) => setPettyCashRecipients(e.target.value)}
+                      placeholder="cfo@company.com, auditor@company.com, admin@company.com"
+                      className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-400">Separate multiple recipient email addresses with commas</span>
+                  </div>
+
                   {/* ACCORDION 1: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
                     <button
@@ -4397,58 +4589,356 @@ export default function AdminSettingsView({
             </div>
           )}
 
-          {/* SUBTAB 4.2: CRM TEMPLATES (UPCOMING) */}
+          {/* SUBTAB 4.2: CRM TEMPLATES */}
           {templatesSubTab === 'CRM' && (
             <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                      <Briefcase className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-base text-slate-900">CRM Communication Templates</h3>
-                        <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-mono">
-                          PREPARING MODULE
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Automated customer correspondence, quotation dispatch, deal updates, and client onboarding templates.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-slate-600" />
-                      <h4 className="font-bold text-xs text-slate-800">Lead Welcome & Quotations</h4>
-                    </div>
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      Custom HTML email templates with dynamic price estimation tables and PDF quote attachments.
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-sky-600" />
+                      CRM Communication & Opportunity Email Templates
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Customize corporate email subjects and classic Outlook-compatible HTML layouts dispatched automatically upon new opportunity creation, deal win, or closed lost status.
                     </p>
-                  </div>
-
-                  <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-slate-600" />
-                      <h4 className="font-bold text-xs text-slate-800">Deal Progress & Reminders</h4>
-                    </div>
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      Automated milestone reminders, contract signing notifications, and payment invoice dispatches.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100 flex items-center justify-between text-xs text-blue-900">
-                  <div className="flex items-center gap-2.5">
-                    <Info className="w-4 h-4 text-blue-600 shrink-0" />
-                    <span>CRM email and notification templates will automatically unlock when the CRM module is enabled.</span>
                   </div>
                 </div>
               </div>
+
+              {/* CRM Templates Form */}
+              <form onSubmit={handleSaveCRMTemplateSettings} className="space-y-4">
+                {/* RECIPIENT EMAIL ADDRESSES (CRM) */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-xs text-slate-800">CRM Recipient Email Addresses</h4>
+                      <p className="text-[11px] text-slate-500">Sales leadership, executives, and CRM managers who receive automated pipeline and deal updates.</p>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={crmRecipients}
+                    onChange={(e) => setCrmRecipients(e.target.value)}
+                    placeholder="saleshead@ommaxelectric.com, director@ommaxelectric.com, crm@ommaxelectric.com"
+                    className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl text-xs font-mono"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-400">Separate multiple recipient email addresses with commas</span>
+                </div>
+
+                {/* ACCORDION 1: NEW OPPORTUNITY EMAIL TEMPLATE */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleCrmAccordion('newOpp')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+                        <Briefcase className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">1. New Opportunity Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Corporate email subject & body sent when a new sales deal is registered in the CRM pipeline</p>
+                      </div>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${openCrmAccordions.newOpp ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {openCrmAccordions.newOpp && (
+                    <div className="p-6 border-t border-slate-100 space-y-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Editor Column */}
+                        <div className="lg:col-span-7 space-y-4">
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                            <input
+                              type="text"
+                              value={crmEmailSubjectNewOpp}
+                              onChange={(e) => setCrmEmailSubjectNewOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl text-xs font-mono"
+                              required
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-xs font-bold text-slate-700">Email Body Template (Outlook Compatible)</label>
+                              <span className="text-[10px] text-slate-400 font-medium">Plaintext / Tag Markup</span>
+                            </div>
+                            <textarea
+                              rows={11}
+                              value={crmEmailBodyNewOpp}
+                              onChange={(e) => setCrmEmailBodyNewOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                              required
+                            />
+                          </div>
+
+                          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                            <span className="text-[11px] font-bold text-slate-600 block">Available Dynamic Variables:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {['{opportunity_title}', '{account_name}', '{contact_name}', '{amount}', '{stage}', '{probability}', '{expected_close_date}', '{portfolio}', '{lead_source}', '{assigned_to}', '{created_by}', '{date}', '{notes}'].map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setCrmEmailBodyNewOpp(prev => prev + ' ' + tag)}
+                                  className="text-[10px] font-mono bg-white hover:bg-sky-50 hover:text-sky-700 border border-slate-200 px-2 py-0.5 rounded-md text-slate-600 cursor-pointer transition-colors"
+                                >
+                                  {tag}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Live Outlook-Compatible Preview Column */}
+                        <div className="lg:col-span-5 flex flex-col space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5 text-sky-600" />
+                              Live Outlook Card Preview
+                            </span>
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">Sample Data</span>
+                          </div>
+                          <div className="flex-1 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden shadow-inner min-h-[360px] flex flex-col">
+                            <iframe
+                              title="New Opportunity Email Preview"
+                              className="w-full h-full flex-1 border-0 bg-white"
+                              srcDoc={buildModernCRMEmailFromText(
+                                substituteCRMSampleTags(crmEmailSubjectNewOpp, appSettings?.currencySymbol || '₹', 'NEW_OPP'),
+                                substituteCRMSampleTags(crmEmailBodyNewOpp, appSettings?.currencySymbol || '₹', 'NEW_OPP'),
+                                '#0284c7',
+                                'NEW_OPP'
+                              )}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 2: WIN OPPORTUNITY EMAIL TEMPLATE */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleCrmAccordion('winOpp')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <Star className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">2. Win Opportunity Template & Preview (Closed Won 100%)</h4>
+                        <p className="text-xs text-slate-400">Celebratory deal victory alert sent when an opportunity is successfully closed won</p>
+                      </div>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${openCrmAccordions.winOpp ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {openCrmAccordions.winOpp && (
+                    <div className="p-6 border-t border-slate-100 space-y-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Editor Column */}
+                        <div className="lg:col-span-7 space-y-4">
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                            <input
+                              type="text"
+                              value={crmEmailSubjectWinOpp}
+                              onChange={(e) => setCrmEmailSubjectWinOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl text-xs font-mono"
+                              required
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-xs font-bold text-slate-700">Email Body Template (Outlook Compatible)</label>
+                              <span className="text-[10px] text-slate-400 font-medium">Plaintext / Tag Markup</span>
+                            </div>
+                            <textarea
+                              rows={11}
+                              value={crmEmailBodyWinOpp}
+                              onChange={(e) => setCrmEmailBodyWinOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                              required
+                            />
+                          </div>
+
+                          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                            <span className="text-[11px] font-bold text-slate-600 block">Available Dynamic Variables:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {['{opportunity_title}', '{account_name}', '{contact_name}', '{amount}', '{stage}', '{closing_date}', '{portfolio}', '{assigned_to}', '{won_by}', '{date}', '{notes}'].map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setCrmEmailBodyWinOpp(prev => prev + ' ' + tag)}
+                                  className="text-[10px] font-mono bg-white hover:bg-emerald-50 hover:text-emerald-700 border border-slate-200 px-2 py-0.5 rounded-md text-slate-600 cursor-pointer transition-colors"
+                                >
+                                  {tag}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Live Outlook-Compatible Preview Column */}
+                        <div className="lg:col-span-5 flex flex-col space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                              Live Outlook Card Preview
+                            </span>
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">Sample Data</span>
+                          </div>
+                          <div className="flex-1 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden shadow-inner min-h-[360px] flex flex-col">
+                            <iframe
+                              title="Win Opportunity Email Preview"
+                              className="w-full h-full flex-1 border-0 bg-white"
+                              srcDoc={buildModernCRMEmailFromText(
+                                substituteCRMSampleTags(crmEmailSubjectWinOpp, appSettings?.currencySymbol || '₹', 'WIN_OPP'),
+                                substituteCRMSampleTags(crmEmailBodyWinOpp, appSettings?.currencySymbol || '₹', 'WIN_OPP'),
+                                '#10b981',
+                                'WIN_OPP'
+                              )}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 3: LOST OPPORTUNITY EMAIL TEMPLATE */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleCrmAccordion('lostOpp')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">3. Lost Opportunity Template & Preview (Closed Lost)</h4>
+                        <p className="text-xs text-slate-400">Post-mortem notification sent when an opportunity is marked closed lost</p>
+                      </div>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${openCrmAccordions.lostOpp ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {openCrmAccordions.lostOpp && (
+                    <div className="p-6 border-t border-slate-100 space-y-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Editor Column */}
+                        <div className="lg:col-span-7 space-y-4">
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                            <input
+                              type="text"
+                              value={crmEmailSubjectLostOpp}
+                              onChange={(e) => setCrmEmailSubjectLostOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-rose-500 focus:bg-white rounded-xl text-xs font-mono"
+                              required
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-xs font-bold text-slate-700">Email Body Template (Outlook Compatible)</label>
+                              <span className="text-[10px] text-slate-400 font-medium">Plaintext / Tag Markup</span>
+                            </div>
+                            <textarea
+                              rows={11}
+                              value={crmEmailBodyLostOpp}
+                              onChange={(e) => setCrmEmailBodyLostOpp(e.target.value)}
+                              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-rose-500 focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                              required
+                            />
+                          </div>
+
+                          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                            <span className="text-[11px] font-bold text-slate-600 block">Available Dynamic Variables:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {['{opportunity_title}', '{account_name}', '{contact_name}', '{amount}', '{stage}', '{lost_reason}', '{portfolio}', '{assigned_to}', '{lost_date}', '{date}', '{notes}'].map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setCrmEmailBodyLostOpp(prev => prev + ' ' + tag)}
+                                  className="text-[10px] font-mono bg-white hover:bg-rose-50 hover:text-rose-700 border border-slate-200 px-2 py-0.5 rounded-md text-slate-600 cursor-pointer transition-colors"
+                                >
+                                  {tag}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Live Outlook-Compatible Preview Column */}
+                        <div className="lg:col-span-5 flex flex-col space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5 text-rose-600" />
+                              Live Outlook Card Preview
+                            </span>
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">Sample Data</span>
+                          </div>
+                          <div className="flex-1 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden shadow-inner min-h-[360px] flex flex-col">
+                            <iframe
+                              title="Lost Opportunity Email Preview"
+                              className="w-full h-full flex-1 border-0 bg-white"
+                              srcDoc={buildModernCRMEmailFromText(
+                                substituteCRMSampleTags(crmEmailSubjectLostOpp, appSettings?.currencySymbol || '₹', 'LOST_OPP'),
+                                substituteCRMSampleTags(crmEmailBodyLostOpp, appSettings?.currencySymbol || '₹', 'LOST_OPP'),
+                                '#ef4444',
+                                'LOST_OPP'
+                              )}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Actions Bar for CRM Templates */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResetCRMDefaults}
+                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                    Reset to Corporate Defaults
+                  </button>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => handleTestCRMEmail('NEW_OPP')}
+                      className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5 text-sky-600" />
+                      Test Opportunity Email Payload
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto bg-[#f7b944] hover:bg-[#e0a330] text-slate-950 font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save CRM Templates
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
           )}
 

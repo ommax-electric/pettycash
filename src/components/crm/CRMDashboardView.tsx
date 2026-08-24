@@ -22,14 +22,14 @@ import {
   TrendingUp, 
   ArrowUpRight, 
   CheckCircle2, 
-  DollarSign, 
+  IndianRupee, 
   Clock, 
   ChevronRight,
   Filter,
   Calendar
 } from 'lucide-react';
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings } from '../../crm/types';
-import { User, AppSettings } from '../../types';
+import { User, AppSettings, formatDateToDMY } from '../../types';
 
 interface CRMDashboardViewProps {
   accounts: CRMAccount[];
@@ -63,10 +63,11 @@ export default function CRMDashboardView({
       .reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
   }, [opportunities]);
 
-  const weightedPipelineValue = useMemo(() => {
-    return opportunities
-      .filter(o => o.stage !== 'CLOSED_LOST')
-      .reduce((sum, o) => sum + ((Number(o.amount) || 0) * (Number(o.probability) || 0)) / 100, 0);
+  const averageDealValue = useMemo(() => {
+    const activeOpps = opportunities.filter(o => o.stage !== 'CLOSED_LOST');
+    if (activeOpps.length === 0) return 0;
+    const sum = activeOpps.reduce((acc, o) => acc + (Number(o.amount) || 0), 0);
+    return Math.round(sum / activeOpps.length);
   }, [opportunities]);
 
   const wonDealsValue = useMemo(() => {
@@ -122,7 +123,7 @@ export default function CRMDashboardView({
     }));
   }, [opportunities]);
 
-  // Recent 5 Opportunities (Sorted by latest createdAt/date)
+  // Recent 10 Opportunities (Sorted by latest createdAt/date)
   const recentOpportunities = useMemo(() => {
     return [...opportunities]
       .sort((a, b) => {
@@ -131,7 +132,7 @@ export default function CRMDashboardView({
         if (timeB !== timeA) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       })
-      .slice(0, 5);
+      .slice(0, 10);
   }, [opportunities]);
 
   return (
@@ -158,20 +159,20 @@ export default function CRMDashboardView({
           </div>
         </div>
 
-        {/* Weighted Forecast */}
+        {/* Average Deal Value */}
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-400">Weighted Forecast</span>
+            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-400">Average Deal Value</span>
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600">
-              <TrendingUp className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              <IndianRupee className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </div>
           </div>
           <div className="mt-2 sm:mt-3">
             <h3 className="text-lg sm:text-2xl font-black tracking-tight text-slate-900 truncate">
-              {currencySymbol}{Math.round(weightedPipelineValue).toLocaleString('en-IN')}
+              {currencySymbol}{averageDealValue.toLocaleString('en-IN')}
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1 font-medium truncate">
-              Expected revenue
+              Across active pipeline
             </p>
           </div>
         </div>
@@ -315,26 +316,82 @@ export default function CRMDashboardView({
       </div>
 
       {/* 3. RECENT DEALS & HIGH PRIORITY PIPELINE */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center justify-between gap-2 mb-4">
           <div>
-            <h3 className="font-extrabold text-base text-slate-900">Recent Opportunities</h3>
-            <p className="text-xs text-slate-400 mt-0.5 font-medium">Latest active sales deals and pipeline additions</p>
+            <h3 className="font-extrabold text-sm sm:text-base text-slate-900">Recent Opportunities</h3>
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 font-medium">Latest active sales deals and pipeline additions</p>
           </div>
           <button
             onClick={onNavigateToOpportunities}
-            className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+            className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer shrink-0"
           >
             All Opportunities ({opportunities.length})
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile View: Responsive Cards List */}
+        <div className="space-y-3 sm:hidden">
+          {recentOpportunities.length === 0 ? (
+            <div className="text-center py-6 text-slate-400 font-medium text-xs">
+              No recent opportunities found.
+            </div>
+          ) : (
+            recentOpportunities.map(opp => {
+              const stageConfig = crmSettings.pipelineStages.find(s => s.id === opp.stage);
+              return (
+                <div 
+                  key={opp.id} 
+                  className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 text-xs truncate">{opp.title}</p>
+                      <span className="text-[10px] font-mono text-slate-400">{opp.id}</span>
+                    </div>
+                    <span 
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold font-mono shrink-0"
+                      style={{ 
+                        backgroundColor: `${stageConfig?.color || '#64748b'}15`,
+                        color: stageConfig?.color || '#64748b',
+                        border: `1px solid ${stageConfig?.color || '#64748b'}30`
+                      }}
+                    >
+                      {stageConfig?.label || opp.stage}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-2 border-t border-slate-200/60">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-slate-400 block font-medium">Account & Contact</span>
+                      <p className="font-bold text-slate-800 truncate">{opp.accountName}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{opp.contactName || 'Direct'}</p>
+                    </div>
+                    <div className="text-right min-w-0">
+                      <span className="text-[10px] text-slate-400 block font-medium">Deal Value</span>
+                      <p className="font-bold text-slate-900 font-mono text-xs truncate">
+                        {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
+                      </p>
+                      <p className="text-[10px] text-slate-500">{opp.probability}% prob.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+                    <span>Target Close: <strong className="text-slate-600 font-medium">{opp.expectedCloseDate ? formatDateToDMY(opp.expectedCloseDate) : 'TBD'}</strong></span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop / Tablet View: Table with smooth horizontal scroll container */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
                 <th className="pb-3 px-3">Opportunity / Project</th>
-                <th className="pb-3 px-3">Account & Stakeholder</th>
+                <th className="pb-3 px-3">Account & Contact</th>
                 <th className="pb-3 px-3">Stage</th>
                 <th className="pb-3 px-3 text-right">Value ({currencySymbol})</th>
                 <th className="pb-3 px-3 text-center">Probability</th>
@@ -342,42 +399,50 @@ export default function CRMDashboardView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {recentOpportunities.map(opp => {
-                const stageConfig = crmSettings.pipelineStages.find(s => s.id === opp.stage);
-                return (
-                  <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-3">
-                      <p className="font-bold text-slate-900">{opp.title}</p>
-                      <span className="text-[10px] font-mono text-slate-400">{opp.id}</span>
-                    </td>
-                    <td className="py-3 px-3">
-                      <p className="font-bold text-slate-800">{opp.accountName}</p>
-                      <p className="text-[10px] text-slate-400">{opp.contactName || 'Direct'}</p>
-                    </td>
-                    <td className="py-3 px-3">
-                      <span 
-                        className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold font-mono"
-                        style={{ 
-                          backgroundColor: `${stageConfig?.color || '#64748b'}15`,
-                          color: stageConfig?.color || '#64748b',
-                          border: `1px solid ${stageConfig?.color || '#64748b'}30`
-                        }}
-                      >
-                        {stageConfig?.label || opp.stage}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-slate-900 font-mono">
-                      {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
-                    </td>
-                    <td className="py-3 px-3 text-center font-bold text-slate-700">
-                      {opp.probability}%
-                    </td>
-                    <td className="py-3 px-3 text-slate-500 font-medium">
-                      {opp.expectedCloseDate || 'TBD'}
-                    </td>
-                  </tr>
-                );
-              })}
+              {recentOpportunities.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-6 text-slate-400 font-medium text-xs">
+                    No recent opportunities found.
+                  </td>
+                </tr>
+              ) : (
+                recentOpportunities.map(opp => {
+                  const stageConfig = crmSettings.pipelineStages.find(s => s.id === opp.stage);
+                  return (
+                    <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-3">
+                        <p className="font-bold text-slate-900">{opp.title}</p>
+                        <span className="text-[10px] font-mono text-slate-400">{opp.id}</span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <p className="font-bold text-slate-800">{opp.accountName}</p>
+                        <p className="text-[10px] text-slate-400">{opp.contactName || 'Direct'}</p>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span 
+                          className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold font-mono"
+                          style={{ 
+                            backgroundColor: `${stageConfig?.color || '#64748b'}15`,
+                            color: stageConfig?.color || '#64748b',
+                            border: `1px solid ${stageConfig?.color || '#64748b'}30`
+                          }}
+                        >
+                          {stageConfig?.label || opp.stage}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-slate-900 font-mono">
+                        {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-slate-700">
+                        {opp.probability}%
+                      </td>
+                      <td className="py-3 px-3 text-slate-500 font-medium">
+                        {opp.expectedCloseDate ? formatDateToDMY(opp.expectedCloseDate) : 'TBD'}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
