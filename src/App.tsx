@@ -31,7 +31,7 @@ import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserR
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
-import { sendEmailNotification } from './services/notificationService';
+import { sendEmailNotification, sendCRMEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl, deleteFileFromCloudinary } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
 import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
@@ -939,24 +939,32 @@ export default function App() {
 
     // Save to local storage for local cache
     localStorage.setItem('petty_cash_email_enabled', String(newSettings.emailEnabled));
-    localStorage.setItem('ms_graph_tenant_id', newSettings.msTenantId);
-    localStorage.setItem('ms_graph_client_id', newSettings.msClientId);
-    localStorage.setItem('ms_graph_client_secret', newSettings.msClientSecret);
-    localStorage.setItem('ms_graph_sender_email', newSettings.msSenderEmail);
-    localStorage.setItem('ms_graph_sender_name', newSettings.msSenderName);
-    localStorage.setItem('petty_cash_email_recipients', newSettings.emailRecipients);
-    localStorage.setItem('petty_cash_email_subject_new', newSettings.emailSubjectNew);
-    localStorage.setItem('petty_cash_email_body_new', newSettings.emailBodyNew);
-    localStorage.setItem('petty_cash_email_subject_edit', newSettings.emailSubjectEdit);
-    localStorage.setItem('petty_cash_email_body_edit', newSettings.emailBodyEdit);
-    localStorage.setItem('petty_cash_email_subject_inward', newSettings.emailSubjectInward);
-    localStorage.setItem('petty_cash_email_body_inward', newSettings.emailBodyInward);
+    if (newSettings.msTenantId) localStorage.setItem('ms_graph_tenant_id', newSettings.msTenantId);
+    if (newSettings.msClientId) localStorage.setItem('ms_graph_client_id', newSettings.msClientId);
+    if (newSettings.msClientSecret) localStorage.setItem('ms_graph_client_secret', newSettings.msClientSecret);
+    if (newSettings.msSenderEmail) localStorage.setItem('ms_graph_sender_email', newSettings.msSenderEmail);
+    if (newSettings.msSenderName) localStorage.setItem('ms_graph_sender_name', newSettings.msSenderName);
+    if (newSettings.emailRecipients) localStorage.setItem('petty_cash_email_recipients', newSettings.emailRecipients);
+    if (newSettings.pettyCashRecipients) localStorage.setItem('petty_cash_email_recipients', newSettings.pettyCashRecipients);
+    if (newSettings.crmRecipients) localStorage.setItem('crm_email_recipients', newSettings.crmRecipients);
+    if (newSettings.emailSubjectNew) localStorage.setItem('petty_cash_email_subject_new', newSettings.emailSubjectNew);
+    if (newSettings.emailBodyNew) localStorage.setItem('petty_cash_email_body_new', newSettings.emailBodyNew);
+    if (newSettings.emailSubjectEdit) localStorage.setItem('petty_cash_email_subject_edit', newSettings.emailSubjectEdit);
+    if (newSettings.emailBodyEdit) localStorage.setItem('petty_cash_email_body_edit', newSettings.emailBodyEdit);
+    if (newSettings.emailSubjectInward) localStorage.setItem('petty_cash_email_subject_inward', newSettings.emailSubjectInward);
+    if (newSettings.emailBodyInward) localStorage.setItem('petty_cash_email_body_inward', newSettings.emailBodyInward);
     if (newSettings.emailSubjectInwardEdit) {
       localStorage.setItem('petty_cash_email_subject_inward_edit', newSettings.emailSubjectInwardEdit);
     }
     if (newSettings.emailBodyInwardEdit) {
       localStorage.setItem('petty_cash_email_body_inward_edit', newSettings.emailBodyInwardEdit);
     }
+    if (newSettings.crmEmailSubjectNewOpp) localStorage.setItem('crm_email_subject_new_opp', newSettings.crmEmailSubjectNewOpp);
+    if (newSettings.crmEmailBodyNewOpp) localStorage.setItem('crm_email_body_new_opp', newSettings.crmEmailBodyNewOpp);
+    if (newSettings.crmEmailSubjectWinOpp) localStorage.setItem('crm_email_subject_win_opp', newSettings.crmEmailSubjectWinOpp);
+    if (newSettings.crmEmailBodyWinOpp) localStorage.setItem('crm_email_body_win_opp', newSettings.crmEmailBodyWinOpp);
+    if (newSettings.crmEmailSubjectLostOpp) localStorage.setItem('crm_email_subject_lost_opp', newSettings.crmEmailSubjectLostOpp);
+    if (newSettings.crmEmailBodyLostOpp) localStorage.setItem('crm_email_body_lost_opp', newSettings.crmEmailBodyLostOpp);
 
     // Persist to Firestore for multi-domain, multi-session synchronization
     setDoc(doc(db, 'app_settings', 'integrations'), newSettings).catch(e => console.warn(e));
@@ -1337,16 +1345,139 @@ export default function App() {
     try {
       await setDoc(doc(db, 'crm_opportunities', id), newOpp);
       addLog('CREATE_OPPORTUNITY', `Created CRM Opportunity: ${opp.title} (${id})`);
+
+      // Dispatch Email Notification based on opportunity stage
+      try {
+        if (newOpp.stage === 'CLOSED_WON') {
+          sendCRMEmailNotification(
+            'WIN_OPP',
+            {
+              opportunityTitle: newOpp.title,
+              accountName: newOpp.accountName,
+              contactName: newOpp.contactName,
+              amount: newOpp.amount,
+              stage: 'Closed Won',
+              probability: 100,
+              closingDate: new Date().toISOString().split('T')[0],
+              portfolio: newOpp.portfolio,
+              leadSource: newOpp.leadSource,
+              assignedTo: newOpp.assignedTo,
+              wonBy: currentUser?.fullName || newOpp.assignedTo,
+              notes: newOpp.notes
+            },
+            currentUser,
+            appSettings,
+            integrationSettings
+          );
+        } else if (newOpp.stage === 'CLOSED_LOST') {
+          sendCRMEmailNotification(
+            'LOST_OPP',
+            {
+              opportunityTitle: newOpp.title,
+              accountName: newOpp.accountName,
+              contactName: newOpp.contactName,
+              amount: newOpp.amount,
+              stage: 'Closed Lost',
+              probability: 0,
+              lostDate: new Date().toISOString().split('T')[0],
+              portfolio: newOpp.portfolio,
+              leadSource: newOpp.leadSource,
+              assignedTo: newOpp.assignedTo,
+              lostReason: newOpp.lostReason || 'N/A',
+              notes: newOpp.notes
+            },
+            currentUser,
+            appSettings,
+            integrationSettings
+          );
+        } else {
+          sendCRMEmailNotification(
+            'NEW_OPP',
+            {
+              opportunityTitle: newOpp.title,
+              accountName: newOpp.accountName,
+              contactName: newOpp.contactName,
+              amount: newOpp.amount,
+              stage: newOpp.stage,
+              probability: newOpp.probability,
+              expectedCloseDate: newOpp.expectedCloseDate,
+              portfolio: newOpp.portfolio,
+              leadSource: newOpp.leadSource,
+              assignedTo: newOpp.assignedTo,
+              createdBy: currentUser?.fullName || 'CRM System',
+              notes: newOpp.notes
+            },
+            currentUser,
+            appSettings,
+            integrationSettings
+          );
+        }
+      } catch (emailErr) {
+        console.warn('CRM New Opportunity Email dispatch notice:', emailErr);
+      }
     } catch (err) {
       console.error('Error adding CRM opportunity:', err);
     }
   };
 
   const handleUpdateCRMOpportunity = async (opp: CRMOpportunity) => {
+    const prevOpp = crmOpportunities.find(o => o.id === opp.id);
     setCrmOpportunities(prev => prev.map(o => o.id === opp.id ? opp : o));
     try {
       await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
       addLog('UPDATE_OPPORTUNITY', `Updated CRM Opportunity: ${opp.title} (${opp.id})`);
+
+      // Dispatch Email Notification on Won / Lost stage transition
+      try {
+        const isStageChanged = !prevOpp || prevOpp.stage !== opp.stage;
+        if (isStageChanged) {
+          if (opp.stage === 'CLOSED_WON') {
+            sendCRMEmailNotification(
+              'WIN_OPP',
+              {
+                opportunityTitle: opp.title,
+                accountName: opp.accountName,
+                contactName: opp.contactName,
+                amount: opp.amount,
+                stage: 'Closed Won',
+                probability: 100,
+                closingDate: new Date().toISOString().split('T')[0],
+                portfolio: opp.portfolio,
+                leadSource: opp.leadSource,
+                assignedTo: opp.assignedTo,
+                wonBy: currentUser?.fullName || opp.assignedTo,
+                notes: opp.notes
+              },
+              currentUser,
+              appSettings,
+              integrationSettings
+            );
+          } else if (opp.stage === 'CLOSED_LOST') {
+            sendCRMEmailNotification(
+              'LOST_OPP',
+              {
+                opportunityTitle: opp.title,
+                accountName: opp.accountName,
+                contactName: opp.contactName,
+                amount: opp.amount,
+                stage: 'Closed Lost',
+                probability: 0,
+                lostDate: new Date().toISOString().split('T')[0],
+                portfolio: opp.portfolio,
+                leadSource: opp.leadSource,
+                assignedTo: opp.assignedTo,
+                lostReason: opp.lostReason || 'N/A',
+                notes: opp.notes
+              },
+              currentUser,
+              appSettings,
+              integrationSettings
+            );
+          }
+        }
+      } catch (emailErr) {
+        console.warn('CRM Opportunity Update Email dispatch notice:', emailErr);
+      }
     } catch (err) {
       console.error('Error updating CRM opportunity:', err);
     }

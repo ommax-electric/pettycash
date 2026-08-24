@@ -528,16 +528,17 @@ export async function sendCRMEmailNotification(
       return { success: false, message: 'Corporate Email alerts disabled in settings.' };
     }
 
-    const rawRecipients = integrationSettings
-      ? (integrationSettings.crmRecipients || '')
-      : (localStorage.getItem('crm_email_recipients') || '');
-    const recipientList = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
+    const rawRecipients = (
+      integrationSettings?.crmRecipients ||
+      localStorage.getItem('crm_email_recipients') ||
+      integrationSettings?.emailRecipients ||
+      localStorage.getItem('petty_cash_email_recipients') ||
+      'sales@ommaxelectric.com, crm@ommaxelectric.com'
+    );
+    let recipientList = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
 
     if (recipientList.length === 0) {
-      return {
-        success: false,
-        message: 'No CRM email recipients configured. Please specify email addresses in CRM Templates settings.'
-      };
+      recipientList = ['sales@ommaxelectric.com', 'crm@ommaxelectric.com'];
     }
 
     const tenantId = (integrationSettings?.msTenantId || localStorage.getItem('ms_graph_tenant_id') || 'a63883ba-4173-48a2-a29d-247ca0c8e59a').trim();
@@ -607,12 +608,14 @@ export async function sendCRMEmailNotification(
       clientSecret,
       senderEmail,
       senderName,
+      recipients: recipientList,
       to: recipientList,
       subject: finalSubject,
       body: emailHtml
     };
 
     // 1. Server proxy
+    let serverErrorMsg = '';
     try {
       const serverRes = await fetch('/api/send-email', {
         method: 'POST',
@@ -624,8 +627,11 @@ export async function sendCRMEmailNotification(
       try { serverData = JSON.parse(responseText); } catch { serverData = null; }
       if (serverRes.ok && serverData && serverData.success) {
         return { success: true, message: serverData.message || 'CRM email sent successfully via server proxy' };
+      } else if (serverData && (serverData.error || serverData.message)) {
+        serverErrorMsg = serverData.error || serverData.message;
       }
-    } catch (e) {
+    } catch (e: any) {
+      serverErrorMsg = e.message || 'Server proxy connection error';
       console.warn('[CRMEmailAlert] Server proxy exception:', e);
     }
 
@@ -664,13 +670,17 @@ export async function sendCRMEmailNotification(
         });
         if (mailRes.ok || mailRes.status === 202) {
           return { success: true, message: 'CRM notification email dispatched directly via Microsoft Graph API' };
+        } else {
+          const mailErr = await mailRes.text();
+          return { success: false, message: `Microsoft Graph sendMail failed: ${mailErr || mailRes.statusText}` };
         }
+      } else {
+        return { success: false, message: `OAuth token failure: ${tokenData.error_description || tokenData.error || 'Invalid credentials'}` };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[CRMEmailAlert] Direct dispatch exception:', err);
+      return { success: false, message: serverErrorMsg || err.message || 'Direct dispatch failed' };
     }
-
-    return { success: true, message: 'CRM Email notification processed.' };
   } catch (err: any) {
     console.error('[CRMEmailAlert] Exception:', err);
     return { success: false, message: err.message || 'Failed to dispatch CRM email' };

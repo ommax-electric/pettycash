@@ -598,13 +598,13 @@ export default function AdminSettingsView({
 
   // CRM Email Templates: New Opportunity, Win Opportunity, Lost Opportunity
   const DEFAULT_CRM_SUBJECT_NEW_OPP = '[CRM Alert] New Opportunity Created: {opportunity_title} - {amount} ({account_name})';
-  const DEFAULT_CRM_BODY_NEW_OPP = 'Hello Sales & Management Team,\n\nA new business opportunity has been registered in the CRM pipeline:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nPrimary Contact: {contact_name}\nDeal Value: {amount}\nPipeline Stage: {stage}\nWin Probability: {probability}\nExpected Close Date: {expected_close_date}\nProduct / Portfolio: {portfolio}\nLead Source: {lead_source}\nAssigned Owner: {assigned_to}\n\nDescription & Strategy Notes:\n{notes}\n\nPlease review the opportunity pipeline and track follow-ups in Ommax CRM.';
+  const DEFAULT_CRM_BODY_NEW_OPP = 'Hello Sales & Management Team,\n\nA new business opportunity has been registered in the CRM pipeline:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nPrimary Contact: {contact_name}\nDeal Value: {amount}\nPipeline Stage: {stage}\nWin Probability: {probability}\nExpected Close Date: {expected_close_date}\nProduct / Portfolio: {portfolio}\nLead Source: {lead_source}\nAssigned Owner: {assigned_to}\n\nCommercial Scope & Notes:\n{notes}\n\nPlease review the opportunity pipeline and track follow-ups in Ommax CRM.';
 
   const DEFAULT_CRM_SUBJECT_WIN_OPP = '🎉 [CRM Won] Deal Closed Won: {opportunity_title} - {amount} ({account_name})';
   const DEFAULT_CRM_BODY_WIN_OPP = 'Hello Team,\n\nGreat news! A sales deal has been successfully WON and marked as Closed Won:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Won (100%)\nProduct / Portfolio: {portfolio}\nAccount Executive: {assigned_to}\nClosing Date: {closing_date}\n\nDeal Notes & Success Summary:\n{notes}\n\nCongratulations to the entire team on securing this client partnership!';
 
   const DEFAULT_CRM_SUBJECT_LOST_OPP = '[CRM Update] Opportunity Marked Closed Lost: {opportunity_title} - {amount} ({account_name})';
-  const DEFAULT_CRM_BODY_LOST_OPP = 'Hello Sales & Management Team,\n\nAn opportunity has been updated and marked as Closed Lost:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Lost\nProduct / Portfolio: {portfolio}\nOpportunity Owner: {assigned_to}\nLost Date: {lost_date}\n\nReason for Loss:\n{lost_reason}\n\nStrategy & Post-Mortem Notes:\n{notes}\n\nPlease review this record in CRM to analyze competitive insights and future re-engagement.';
+  const DEFAULT_CRM_BODY_LOST_OPP = 'Hello Sales & Management Team,\n\nAn opportunity has been updated and marked as Closed Lost:\n\nOpportunity: {opportunity_title}\nAccount / Client: {account_name}\nDeal Value: {amount}\nPrimary Contact: {contact_name}\nClosed Stage: Closed Lost\nProduct / Portfolio: {portfolio}\nOpportunity Owner: {assigned_to}\nLost Date: {lost_date}\n\nReason for Loss:\n{lost_reason}\n\nClosure Remarks & Notes:\n{notes}\n\nPlease review this record in CRM to analyze competitive insights and future re-engagement.';
 
   const [crmEmailSubjectNewOpp, setCrmEmailSubjectNewOpp] = useState<string>(() => {
     return integrationSettings?.crmEmailSubjectNewOpp || localStorage.getItem('crm_email_subject_new_opp') || DEFAULT_CRM_SUBJECT_NEW_OPP;
@@ -4829,7 +4829,7 @@ export default function AdminSettingsView({
                       </div>
                       <div>
                         <h4 className="font-bold text-sm text-slate-800">3. Lost Opportunity Template & Preview (Closed Lost)</h4>
-                        <p className="text-xs text-slate-400">Post-mortem notification sent when an opportunity is marked closed lost</p>
+                        <p className="text-xs text-slate-400">Closure notification sent when an opportunity is marked closed lost</p>
                       </div>
                     </div>
                     <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${openCrmAccordions.lostOpp ? 'rotate-180' : ''}`} />

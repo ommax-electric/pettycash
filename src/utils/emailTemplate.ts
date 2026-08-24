@@ -555,7 +555,8 @@ export function buildModernCRMEmailFromText(
           k.includes('summary') ||
           k.includes('strategy') ||
           k.includes('description') ||
-          k.includes('remark')
+          k.includes('remark') ||
+          k.includes('closure')
         ) {
           detailLines.push(line);
         } else {
@@ -727,7 +728,7 @@ export function buildModernCRMEmailFromText(
                     <tr>
                         <td style="background-color: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0;">
                             <p style="margin: 0 0 6px 0; font-size: 12px; color: #64748b; line-height: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                                This is an automated corporate notification dispatched from Ommax CRM.
+                                This is an automated notification from the Administration Department.
                             </p>
                             <p style="margin: 0; font-size: 11px; color: #94a3b8; line-height: 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
                                 &copy; ${new Date().getFullYear()} Ommax Electric Pvt. Ltd. All rights reserved.

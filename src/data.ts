@@ -26,6 +26,7 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   msSenderEmail: 'mail@ommaxelectric.com',
   msSenderName: 'Petty Cash',
   emailRecipients: 'info@ommaxelectric.com, admin@ommaxelectric.com',
+  crmRecipients: 'sales@ommaxelectric.com, crm@ommaxelectric.com',
   emailSubjectNew: '[Petty Cash Alert] New Voucher #{voucher_id} - {amount} ({category})',
   emailBodyNew: 'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.',
   emailSubjectEdit: '[Petty Cash Changes Alert] Voucher #{voucher_id} Modified ({changed_fields}) - {amount}',

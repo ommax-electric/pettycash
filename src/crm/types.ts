@@ -148,6 +148,15 @@ export interface OpportunityEditHistoryEntry {
   }[];
 }
 
+export interface OpportunityStageNote {
+  id: string;
+  stage: OpportunityStage;
+  stageLabel: string;
+  note: string;
+  timestamp: string;
+  author: string;
+}
+
 export interface CRMOpportunity {
   id: string;
   title: string;
@@ -166,6 +175,7 @@ export interface CRMOpportunity {
   updatedAt?: string;
   notes?: string;
   lostReason?: string;
+  stageNotes?: OpportunityStageNote[];
   editHistory?: OpportunityEditHistoryEntry[];
 }
 

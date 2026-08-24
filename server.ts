@@ -13,7 +13,8 @@ async function startServer() {
   // API Route: Send Email via Microsoft Graph API (OAuth Client Credentials Flow for Office 365 / Shared Mailbox)
   app.post("/api/send-email", async (req, res) => {
     try {
-      const { tenantId, clientId, clientSecret, senderEmail, senderName, recipients, subject, body } = req.body;
+      const { tenantId, clientId, clientSecret, senderEmail, senderName, subject, body } = req.body;
+      const rawRecipientsInput = req.body.recipients || req.body.to;
 
       if (!tenantId || !clientId || !clientSecret || !senderEmail) {
         return res.status(400).json({
@@ -21,13 +22,13 @@ async function startServer() {
         });
       }
 
-      if (!recipients || (Array.isArray(recipients) && recipients.length === 0)) {
+      if (!rawRecipientsInput || (Array.isArray(rawRecipientsInput) && rawRecipientsInput.length === 0)) {
         return res.status(400).json({ error: "No recipient email addresses provided" });
       }
 
-      const rawRecipients = Array.isArray(recipients)
-        ? recipients.map((r: string) => String(r).trim()).filter(Boolean)
-        : String(recipients).split(",").map((r: string) => r.trim()).filter(Boolean);
+      const rawRecipients = Array.isArray(rawRecipientsInput)
+        ? rawRecipientsInput.map((r: string) => String(r).trim()).filter(Boolean)
+        : String(rawRecipientsInput).split(",").map((r: string) => r.trim()).filter(Boolean);
 
       const uniqueRecipientsSet = new Set<string>();
       const recipientList: string[] = [];

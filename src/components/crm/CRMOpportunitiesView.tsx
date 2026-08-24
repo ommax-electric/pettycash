@@ -33,7 +33,13 @@ import {
   Mail,
   Globe,
   Briefcase,
-  CheckCircle2
+  CheckCircle2,
+  MessageSquare,
+  Send,
+  Clock,
+  ShieldCheck,
+  Check,
+  Activity
 } from 'lucide-react';
 import { 
   CRMOpportunity, 
@@ -42,6 +48,7 @@ import {
   CRMSettings, 
   OpportunityStage, 
   OpportunityEditHistoryEntry,
+  OpportunityStageNote,
   ContactStatus,
   formatCRMIDate, 
   formatCRMIDateTime,
@@ -135,49 +142,87 @@ export default function CRMOpportunitiesView({
     return oppAssigned === userIdentifier || (currentUser.username && oppAssigned === currentUser.username.trim().toLowerCase());
   };
 
-  const handleQuickStageChange = async (opp: CRMOpportunity, newStage: OpportunityStage) => {
-    const oldStageConfig = getStageConfig(opp.stage);
-    const newStageConfig = pipelineStagesList.find(s => s.id === newStage) || {
+  const handleQuickStageChange = (opp: CRMOpportunity, newStage: OpportunityStage) => {
+    if (opp.stage === newStage) return;
+    const targetStageConfig = pipelineStagesList.find(s => s.id === newStage) || {
       id: newStage,
       label: newStage,
       probability: 10,
       color: '#64748b'
     };
-    const newProb = newStageConfig.probability;
+
+    setStageTransitionModal({
+      opp,
+      newStage,
+      targetStageConfig,
+      notes: '',
+      lostReason: newStage === 'CLOSED_LOST' ? '' : undefined
+    });
+  };
+
+  const handleConfirmStageTransition = async () => {
+    if (!stageTransitionModal) return;
+    const { opp, newStage, targetStageConfig, notes, lostReason } = stageTransitionModal;
+    
+    if (!notes.trim()) return;
+    if (newStage === 'CLOSED_LOST' && !lostReason?.trim()) return;
+
+    const oldStageConfig = getStageConfig(opp.stage);
+    const newProb = targetStageConfig.probability;
     const now = new Date().toISOString();
     const actor = currentUser.fullName || currentUser.username || 'User';
+
+    const changes: { field: string; oldValue: string; newValue: string }[] = [
+      { field: 'Pipeline Stage', oldValue: oldStageConfig.label, newValue: targetStageConfig.label },
+      { field: 'Win Probability', oldValue: `${opp.probability}%`, newValue: `${newProb}%` },
+      { field: `${targetStageConfig.label} Notes`, oldValue: opp.notes || 'None', newValue: notes.trim() }
+    ];
+
+    if (newStage === 'CLOSED_LOST' && lostReason?.trim()) {
+      changes.push({ field: 'Loss Reason', oldValue: opp.lostReason || 'None', newValue: lostReason.trim() });
+    }
 
     const historyEntry: OpportunityEditHistoryEntry = {
       timestamp: now,
       changedBy: actor,
       action: 'STAGE_CHANGED',
-      details: `Stage updated from "${oldStageConfig.label}" to "${newStageConfig.label}"`,
+      details: `Stage updated from "${oldStageConfig.label}" to "${targetStageConfig.label}": ${notes.trim()}`,
       oldStage: oldStageConfig.label,
-      newStage: newStageConfig.label,
-      changes: [
-        { field: 'Pipeline Stage', oldValue: oldStageConfig.label, newValue: newStageConfig.label },
-        { field: 'Win Probability', oldValue: `${opp.probability}%`, newValue: `${newProb}%` }
-      ]
+      newStage: targetStageConfig.label,
+      changes
     };
     const updatedHistory = opp.editHistory ? [historyEntry, ...opp.editHistory] : [historyEntry];
 
+    const newStageNote: OpportunityStageNote = {
+      id: `NOTE-${Date.now()}`,
+      stage: newStage,
+      stageLabel: targetStageConfig.label,
+      note: notes.trim(),
+      timestamp: now,
+      author: actor
+    };
+    const updatedStageNotes = opp.stageNotes ? [newStageNote, ...opp.stageNotes] : [newStageNote];
+
     try {
-      await onUpdateOpportunity({
+      const updatedOpp: CRMOpportunity = {
         ...opp,
         stage: newStage,
         probability: newProb,
+        notes: notes.trim(),
+        ...(newStage === 'CLOSED_LOST' ? { lostReason: lostReason?.trim() } : {}),
+        stageNotes: updatedStageNotes,
         updatedAt: now,
         editHistory: updatedHistory
-      });
+      };
+
+      await onUpdateOpportunity(updatedOpp);
       if (viewingOpp && viewingOpp.id === opp.id) {
-        setViewingOpp({
-          ...viewingOpp,
-          stage: newStage,
-          probability: newProb,
-          updatedAt: now,
-          editHistory: updatedHistory
-        });
+        setViewingOpp(updatedOpp);
       }
+      if (auditHistoryOpp && auditHistoryOpp.id === opp.id) {
+        setAuditHistoryOpp(updatedOpp);
+      }
+      setStageTransitionModal(null);
     } catch (err) {
       console.error('Error updating stage:', err);
     }
@@ -223,8 +268,85 @@ export default function CRMOpportunitiesView({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingOpp, setEditingOpp] = useState<CRMOpportunity | null>(null);
   const [viewingOpp, setViewingOpp] = useState<CRMOpportunity | null>(null);
+  const [auditHistoryOpp, setAuditHistoryOpp] = useState<CRMOpportunity | null>(null);
   const [deletingOppId, setDeletingOppId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Quick View Add Stage Note State
+  const [quickNoteText, setQuickNoteText] = useState('');
+  const [isAddingQuickNote, setIsAddingQuickNote] = useState(false);
+
+  const handleAddStageNote = async () => {
+    if (!viewingOpp || !quickNoteText.trim()) return;
+    setIsAddingQuickNote(true);
+    try {
+      const stageConfig = getStageConfig(viewingOpp.stage);
+      const now = new Date().toISOString();
+      const actor = currentUser.fullName || currentUser.username || 'User';
+
+      const newStageNote: OpportunityStageNote = {
+        id: `NOTE-${Date.now()}`,
+        stage: viewingOpp.stage,
+        stageLabel: stageConfig.label,
+        note: quickNoteText.trim(),
+        timestamp: now,
+        author: actor
+      };
+
+      const existingNotes = viewingOpp.stageNotes && viewingOpp.stageNotes.length > 0
+        ? viewingOpp.stageNotes
+        : (viewingOpp.notes ? [{
+            id: `INIT-${Date.now()}`,
+            stage: viewingOpp.stage,
+            stageLabel: stageConfig.label,
+            note: viewingOpp.notes,
+            timestamp: viewingOpp.createdAt,
+            author: viewingOpp.assignedTo || actor
+          }] : []);
+
+      const updatedStageNotes = [newStageNote, ...existingNotes];
+
+      const historyEntry: OpportunityEditHistoryEntry = {
+        timestamp: now,
+        changedBy: actor,
+        action: 'UPDATED',
+        details: `Added note in stage [${stageConfig.label}]: ${quickNoteText.trim()}`,
+        changes: [{
+          field: `${stageConfig.label} Stage Note`,
+          oldValue: viewingOpp.notes || 'None',
+          newValue: quickNoteText.trim()
+        }]
+      };
+
+      const updatedOpp: CRMOpportunity = {
+        ...viewingOpp,
+        notes: quickNoteText.trim(),
+        stageNotes: updatedStageNotes,
+        updatedAt: now,
+        editHistory: viewingOpp.editHistory ? [historyEntry, ...viewingOpp.editHistory] : [historyEntry]
+      };
+
+      await onUpdateOpportunity(updatedOpp);
+      setViewingOpp(updatedOpp);
+      if (auditHistoryOpp && auditHistoryOpp.id === viewingOpp.id) {
+        setAuditHistoryOpp(updatedOpp);
+      }
+      setQuickNoteText('');
+    } catch (err) {
+      console.error('Error adding stage note:', err);
+    } finally {
+      setIsAddingQuickNote(false);
+    }
+  };
+
+  // Stage Transition Modal State
+  const [stageTransitionModal, setStageTransitionModal] = useState<{
+    opp: CRMOpportunity;
+    newStage: OpportunityStage;
+    targetStageConfig: { id: string; label: string; probability: number; color: string };
+    notes: string;
+    lostReason?: string;
+  } | null>(null);
 
   // Form State - Empty strings as placeholders for dropdowns
   const [formData, setFormData] = useState({
@@ -753,7 +875,8 @@ export default function CRMOpportunitiesView({
       !formData.stage || 
       !formData.portfolio || 
       !formData.leadSource || 
-      !formData.assignedTo
+      !formData.assignedTo ||
+      !formData.notes.trim()
     ) {
       return;
     }
@@ -841,12 +964,30 @@ export default function CRMOpportunitiesView({
         };
         const updatedHistory = editingOpp.editHistory ? [historyEntry, ...editingOpp.editHistory] : [historyEntry];
 
+        let updatedStageNotes = editingOpp.stageNotes || [];
+        const isNoteChanged = (editingOpp.notes || '').trim() !== (formData.notes || '').trim();
+        const isStageChanged = editingOpp.stage !== formData.stage;
+        const currentStageConfig = getStageConfig(formData.stage);
+
+        if ((isNoteChanged && formData.notes.trim()) || isStageChanged) {
+          const newStageNote: OpportunityStageNote = {
+            id: `NOTE-${Date.now()}`,
+            stage: formData.stage,
+            stageLabel: currentStageConfig.label,
+            note: formData.notes.trim(),
+            timestamp: now,
+            author: actor
+          };
+          updatedStageNotes = [newStageNote, ...updatedStageNotes];
+        }
+
         const updatedOpportunity: CRMOpportunity = {
           ...editingOpp,
           ...formData,
           amount: Number(formData.amount) || 0,
           accountName: accName,
           contactName: conName,
+          stageNotes: updatedStageNotes,
           updatedAt: now,
           editHistory: updatedHistory
         };
@@ -854,6 +995,9 @@ export default function CRMOpportunitiesView({
         await onUpdateOpportunity(updatedOpportunity);
         if (viewingOpp && viewingOpp.id === editingOpp.id) {
           setViewingOpp(updatedOpportunity);
+        }
+        if (auditHistoryOpp && auditHistoryOpp.id === editingOpp.id) {
+          setAuditHistoryOpp(updatedOpportunity);
         }
       } else {
         const historyEntry: OpportunityEditHistoryEntry = {
@@ -863,11 +1007,22 @@ export default function CRMOpportunitiesView({
           details: 'Initial opportunity created in sales pipeline'
         };
 
+        const currentStageConfig = getStageConfig(formData.stage);
+        const initialStageNote: OpportunityStageNote | null = formData.notes.trim() ? {
+          id: `NOTE-${Date.now()}`,
+          stage: formData.stage,
+          stageLabel: currentStageConfig.label,
+          note: formData.notes.trim(),
+          timestamp: now,
+          author: actor
+        } : null;
+
         await onAddOpportunity({
           ...formData,
           amount: Number(formData.amount) || 0,
           accountName: accName,
           contactName: conName,
+          stageNotes: initialStageNote ? [initialStageNote] : [],
           editHistory: [historyEntry]
         });
       }
@@ -1977,16 +2132,21 @@ export default function CRMOpportunitiesView({
 
                 return (
                   <tr key={opp.id} className="hover:bg-slate-50/90 transition-colors group">
-                    {/* Opportunity Title & ID */}
+                    {/* Opportunity Title & ID - Clicking shows Audit History */}
                     <td className="py-3.5 px-4 max-w-[200px]">
-                      <p className="font-extrabold text-slate-900 leading-snug truncate" title={opp.title}>
-                        {opp.title}
-                      </p>
                       <button
                         type="button"
-                        onClick={() => setViewingOpp(opp)}
+                        onClick={() => setAuditHistoryOpp(opp)}
+                        className="font-extrabold text-slate-900 leading-snug truncate text-left block w-full hover:text-amber-700 hover:underline cursor-pointer"
+                        title="Click Title to view Audit & Field History"
+                      >
+                        {opp.title}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAuditHistoryOpp(opp)}
                         className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200/80 transition-colors cursor-pointer hover:underline inline-flex items-center gap-1 mt-0.5"
-                        title="Click to view Opportunity Details & Edit History"
+                        title="Click ID to view Audit & Field History"
                       >
                         <span>{opp.id}</span>
                         <History className="w-2.5 h-2.5 opacity-60" />
@@ -2090,7 +2250,7 @@ export default function CRMOpportunitiesView({
                         <button
                           onClick={() => setViewingOpp(opp)}
                           className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
-                          title="View Opportunity & Edit History"
+                          title="Quick View Opportunity & Stage Notes"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
@@ -2155,9 +2315,9 @@ export default function CRMOpportunitiesView({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setViewingOpp(opp)}
+                        onClick={() => setAuditHistoryOpp(opp)}
                         className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100 cursor-pointer flex items-center gap-1"
-                        title="Click to view Opportunity & History"
+                        title="Click ID to view Audit & Field History"
                       >
                         <span>{opp.id}</span>
                         <History className="w-2.5 h-2.5 opacity-60" />
@@ -2199,16 +2359,21 @@ export default function CRMOpportunitiesView({
                         </span>
                       )}
                     </div>
-                    <h4 className="font-extrabold text-xs text-slate-900 mt-1 leading-snug">
+                    <button
+                      type="button"
+                      onClick={() => setAuditHistoryOpp(opp)}
+                      className="font-extrabold text-xs text-slate-900 mt-1 leading-snug text-left hover:text-amber-700 hover:underline cursor-pointer block w-full"
+                      title="Click Title to view Audit & Field History"
+                    >
                       {opp.title}
-                    </h4>
+                    </button>
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => setViewingOpp(opp)}
                       className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg cursor-pointer"
-                      title="View Opportunity & History"
+                      title="Quick View Opportunity & Stage Notes"
                     >
                       <Eye className="w-3.5 h-3.5" />
                     </button>
@@ -2633,12 +2798,13 @@ export default function CRMOpportunitiesView({
                   )}
                 </div>
 
-                {/* Commercial Scope & Notes (Optional) */}
+                {/* Commercial Scope & Notes (Required) */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Commercial Scope & Notes <span className="text-[10px] font-normal text-slate-400">(Optional)</span>
+                    Commercial Scope & Notes *
                   </label>
                   <textarea
+                    required
                     rows={3}
                     placeholder="Project delivery milestones, quotation revisions, payment schedule..."
                     value={formData.notes}
@@ -2669,10 +2835,10 @@ export default function CRMOpportunitiesView({
         )}
       </AnimatePresence>
 
-      {/* 6. OPPORTUNITY DETAIL & EDIT HISTORY MODAL (Matching Existing Accounts UI Pattern) */}
+      {/* 6. OPPORTUNITY QUICK VIEW & STAGE NOTES MODAL */}
       <AnimatePresence>
         {viewingOpp && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2685,65 +2851,104 @@ export default function CRMOpportunitiesView({
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[90vh] flex flex-col"
+              className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[92vh] flex flex-col"
             >
               {/* Header */}
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600">
+              <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 shrink-0">
                     <Target className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
                         {viewingOpp.id}
                       </span>
-                      <h3 className="font-extrabold text-base text-slate-900 truncate max-w-[280px] sm:max-w-md">
+                      <h3 className="font-extrabold text-base text-slate-900 truncate max-w-[240px] sm:max-w-md">
                         {viewingOpp.title}
                       </h3>
+                      {(() => {
+                        const st = getStageConfig(viewingOpp.stage);
+                        return (
+                          <span 
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold font-mono"
+                            style={{
+                              backgroundColor: `${st.color}15`,
+                              color: st.color,
+                              border: `1px solid ${st.color}35`
+                            }}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.color }} />
+                            {st.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Created: {formatCRMIDateTime(viewingOpp.createdAt)}
+                      Created on {formatCRMIDateTime(viewingOpp.createdAt)} | Assigned to {viewingOpp.assignedTo || 'Unassigned'}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setViewingOpp(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0 ml-2"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {/* Modal Body */}
-              <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-xs">
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-6 text-xs">
                 
-                {/* Top Quick Status Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-                  <div>
-                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Pipeline Stage</span>
-                    {(() => {
-                      const st = getStageConfig(viewingOpp.stage);
-                      return (
-                        <span 
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-extrabold font-mono mt-1"
-                          style={{
-                            backgroundColor: `${st.color}15`,
-                            color: st.color,
-                            border: `1px solid ${st.color}35`
-                          }}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.color }} />
-                          {st.label}
-                        </span>
-                      );
-                    })()}
+                {/* Pipeline Stages Progress Stepper */}
+                <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Pipeline Progression
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-slate-500">
+                      Win Probability: {viewingOpp.probability}%
+                    </span>
                   </div>
+                  <div className="flex items-center justify-between gap-1 sm:gap-2 overflow-x-auto py-1">
+                    {pipelineStagesList.map((st, idx) => {
+                      const currentStageIdx = pipelineStagesList.findIndex(s => s.id === viewingOpp.stage);
+                      const isPast = idx < currentStageIdx;
+                      const isCurrent = idx === currentStageIdx;
 
+                      return (
+                        <div key={st.id} className="flex-1 min-w-[75px] flex flex-col items-center text-center">
+                          <div className="w-full flex items-center mb-1">
+                            <div className={`h-1 flex-1 ${idx === 0 ? 'invisible' : isPast || isCurrent ? 'bg-amber-400' : 'bg-slate-200'}`} />
+                            <div 
+                              className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 transition-all ${
+                                isCurrent 
+                                  ? 'ring-2 ring-amber-400 ring-offset-2 text-white font-extrabold shadow-xs' 
+                                  : isPast 
+                                  ? 'bg-amber-500 text-white' 
+                                  : 'bg-slate-200 text-slate-500'
+                              }`}
+                              style={{ backgroundColor: isCurrent || isPast ? st.color : undefined }}
+                            >
+                              {isPast ? <Check className="w-3 h-3" /> : idx + 1}
+                            </div>
+                            <div className={`h-1 flex-1 ${idx === pipelineStagesList.length - 1 ? 'invisible' : isPast ? 'bg-amber-400' : 'bg-slate-200'}`} />
+                          </div>
+                          <span className={`text-[10px] font-bold truncate max-w-full block ${isCurrent ? 'text-slate-900 font-extrabold' : 'text-slate-500'}`}>
+                            {st.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Top Metrics Row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-amber-50/40 p-3.5 rounded-2xl border border-amber-100/70">
                   <div>
                     <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Commercial Value</span>
-                    <span className="font-mono font-black text-slate-900 text-sm block mt-0.5">
+                    <span className="font-mono font-black text-slate-900 text-sm sm:text-base block mt-0.5">
                       {currencySymbol}{Number(viewingOpp.amount).toLocaleString('en-IN')}
                     </span>
                   </div>
@@ -2752,7 +2957,7 @@ export default function CRMOpportunitiesView({
                     <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Win Probability</span>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="font-bold text-xs text-slate-800">{viewingOpp.probability}%</span>
-                      <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                         <div 
                           className="h-full bg-amber-500 rounded-full" 
                           style={{ width: `${viewingOpp.probability}%` }}
@@ -2762,172 +2967,372 @@ export default function CRMOpportunitiesView({
                   </div>
 
                   <div>
-                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Expected Close</span>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Target Close</span>
                     <span className="font-mono text-slate-700 font-semibold block mt-1">
                       {viewingOpp.expectedCloseDate ? formatCRMIDate(viewingOpp.expectedCloseDate) : '—'}
                     </span>
                   </div>
-                </div>
 
-                {/* Details Section */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Contact Person</span>
-                    <div className="flex items-center gap-2 font-bold text-slate-900 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <Users className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>{viewingOpp.contactName ? viewingOpp.contactName : 'Direct Account'}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Client Account</span>
-                    <div className="flex items-center gap-2 font-bold text-slate-900 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
-                      <span>{viewingOpp.accountName}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Portfolio (Product / Service)</span>
-                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Portfolio / Scope</span>
+                    <span className="text-slate-700 font-semibold truncate block mt-1" title={viewingOpp.portfolio}>
                       {viewingOpp.portfolio || '—'}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Lead Source</span>
-                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      {viewingOpp.leadSource || 'Direct Referral'}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Assigned Account</span>
-                    <div className="font-semibold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      {viewingOpp.assignedTo || '—'}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-slate-400 text-[11px] block font-bold">Last Updated (IST)</span>
-                    <div className="font-mono text-slate-700 font-semibold bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      {formatCRMIDateTime(viewingOpp.updatedAt || viewingOpp.createdAt)}
-                    </div>
+                    </span>
                   </div>
                 </div>
 
-                {/* Scope & Notes */}
-                {viewingOpp.notes && (
-                  <div className="space-y-1 pt-1 border-t border-slate-100">
-                    <span className="text-slate-400 text-[11px] block font-bold">Commercial Scope & Notes</span>
-                    <p className="text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed whitespace-pre-wrap">
-                      {viewingOpp.notes}
-                    </p>
-                  </div>
-                )}
-
-                {/* EDIT HISTORY & ACTIVITY TRAIL (Matching Existing Accounts Pattern) */}
-                <div className="border-t border-slate-100 pt-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-amber-600">
-                      <History className="w-4 h-4 text-amber-500" />
-                      <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                        Opportunity Edit & Activity History
-                      </span>
+                {/* 2-Column Split: Deal Attributes vs Stage Notes History */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  
+                  {/* Left Column: Deal Corporate Attributes (5 Cols) */}
+                  <div className="lg:col-span-5 space-y-4">
+                    <div className="flex items-center gap-1.5 text-slate-900 font-extrabold text-xs uppercase tracking-wider">
+                      <Building2 className="w-4 h-4 text-amber-600" />
+                      <span>Corporate & Deal Details</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-medium">All timestamps in IST</span>
-                  </div>
 
-                  {!viewingOpp.editHistory || viewingOpp.editHistory.length === 0 ? (
-                    <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
-                      <span className="text-[11px] font-medium italic">
-                        Original opportunity entry created on {formatCRMIDateTime(viewingOpp.createdAt)} by {viewingOpp.assignedTo || 'Admin'}. No edits or stage transitions have been recorded yet.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 max-h-[240px] overflow-y-auto pr-1">
-                      {viewingOpp.editHistory.map((entry, eIdx) => (
-                        <div key={eIdx} className="relative pl-5 border-l-2 border-amber-200 py-0.5 text-[11px] sm:text-xs">
-                          {/* Timeline dot */}
-                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-amber-500 border border-white"></div>
-                          
-                          {/* Log Header */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
-                            <span className="font-bold text-slate-800">
-                              <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                                entry.action === 'CREATED'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : entry.action === 'STAGE_CHANGED'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
-                              }`}>
-                                {entry.action.replace('_', ' ')}
-                              </span>
-                              by <span className="text-amber-700 font-semibold">{entry.changedBy}</span>
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono font-semibold">
-                              {formatCRMIDateTime(entry.timestamp)}
-                            </span>
-                          </div>
-
-                          {/* Details Box / Granular Changes (Matching Existing Expense & Accounts Pattern) */}
-                          {entry.changes && entry.changes.length > 0 ? (
-                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
-                              {entry.changes.map((change, cIdx) => {
-                                const displayOld = (!change.oldValue || change.oldValue === 'None') ? '(Blank)' : change.oldValue;
-                                const displayNew = (!change.newValue || change.newValue === 'None') ? '(Blank)' : change.newValue;
-                                return (
-                                  <div key={cIdx} className="grid grid-cols-1 sm:grid-cols-3 gap-1">
-                                    <span className="font-bold text-slate-400 text-[10px] uppercase tracking-wider truncate">
-                                      {change.field}
-                                    </span>
-                                    <span className="sm:col-span-2 text-slate-700 flex flex-wrap items-center gap-1.5 break-all">
-                                      <span className="font-medium bg-red-50 text-red-700 px-1.5 py-0.5 rounded-md text-[10px] line-through decoration-red-400">
-                                        {displayOld}
-                                      </span>
-                                      <span className="text-slate-400 text-[10px] font-bold">→</span>
-                                      <span className="font-extrabold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md text-[10px]">
-                                        {displayNew}
-                                      </span>
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
-                              <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
-                                {entry.details || 'Opportunity details or pipeline stage modified'}
-                              </p>
-                            </div>
-                          )}
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-3">
+                      <div>
+                        <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Contact Person</span>
+                        <div className="flex items-center gap-2 font-bold text-slate-900 mt-1">
+                          <Users className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>{viewingOpp.contactName ? viewingOpp.contactName : 'Direct Account'}</span>
                         </div>
-                      ))}
+                      </div>
+
+                      <div>
+                        <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Client Account</span>
+                        <div className="flex items-center gap-2 font-bold text-slate-900 mt-1">
+                          <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          <span>{viewingOpp.accountName}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60">
+                        <div>
+                          <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Lead Source</span>
+                          <span className="text-slate-700 font-semibold block mt-0.5">{viewingOpp.leadSource || 'Direct'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Assigned Owner</span>
+                          <span className="text-slate-700 font-semibold block mt-0.5">{viewingOpp.assignedTo || '—'}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-200/60">
+                        <span className="text-slate-400 text-[10px] block font-bold uppercase tracking-wider">Last Modified (IST)</span>
+                        <span className="font-mono text-slate-600 text-[11px] block mt-0.5">
+                          {formatCRMIDateTime(viewingOpp.updatedAt || viewingOpp.createdAt)}
+                        </span>
+                      </div>
                     </div>
-                  )}
+
+                    {/* Loss Reason Alert (if Closed Lost) */}
+                    {viewingOpp.stage === 'CLOSED_LOST' && viewingOpp.lostReason && (
+                      <div className="bg-rose-50 p-3.5 rounded-2xl border border-rose-200 space-y-1">
+                        <div className="flex items-center gap-1.5 text-rose-700 font-bold text-[11px]">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Reason for Deal Loss</span>
+                        </div>
+                        <p className="text-rose-900 text-xs font-semibold leading-relaxed">
+                          {viewingOpp.lostReason}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Stage Notes & Activity Feed (7 Cols) */}
+                  <div className="lg:col-span-7 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-slate-900 font-extrabold text-xs uppercase tracking-wider">
+                        <MessageSquare className="w-4 h-4 text-amber-600" />
+                        <span>Stage Notes & Deal Log</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium">Recorded at each stage</span>
+                    </div>
+
+                    {/* Add Stage Note Input Box for Current Stage */}
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: getStageConfig(viewingOpp.stage).color }} 
+                          />
+                          Add note for <strong className="text-slate-900">[{getStageConfig(viewingOpp.stage).label}]</strong>
+                        </span>
+                        <span className="text-[10px] text-slate-400">Current Stage</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <textarea
+                          rows={2}
+                          value={quickNoteText}
+                          onChange={(e) => setQuickNoteText(e.target.value)}
+                          placeholder="Add progress note, client discussion, meeting summary, or next action..."
+                          className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 transition-colors"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddStageNote}
+                          disabled={isAddingQuickNote || !quickNoteText.trim()}
+                          className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 self-end"
+                          title="Save Stage Note"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline text-xs">{isAddingQuickNote ? 'Saving...' : 'Post Note'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Stage Notes Timeline */}
+                    <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+                      {(() => {
+                        const notesToDisplay: OpportunityStageNote[] = viewingOpp.stageNotes && viewingOpp.stageNotes.length > 0
+                          ? viewingOpp.stageNotes
+                          : (viewingOpp.notes ? [{
+                              id: 'INITIAL_NOTE',
+                              stage: viewingOpp.stage,
+                              stageLabel: getStageConfig(viewingOpp.stage).label,
+                              note: viewingOpp.notes,
+                              timestamp: viewingOpp.createdAt,
+                              author: viewingOpp.assignedTo || 'Deal Creator'
+                            }] : []);
+
+                        if (notesToDisplay.length === 0) {
+                          return (
+                            <div className="bg-slate-50 p-6 rounded-2xl text-center text-slate-400 border border-slate-100">
+                              <MessageSquare className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
+                              <p className="text-xs font-semibold text-slate-600">No stage notes recorded yet</p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">Use the box above to post the first update for this stage.</p>
+                            </div>
+                          );
+                        }
+
+                        return notesToDisplay.map((sn, snIdx) => {
+                          const noteStageCfg = getStageConfig(sn.stage);
+                          return (
+                            <div 
+                              key={sn.id || snIdx} 
+                              className="relative pl-4 border-l-2 py-1 space-y-1 text-xs"
+                              style={{ borderColor: noteStageCfg.color }}
+                            >
+                              <div 
+                                className="absolute -left-[5px] top-2 w-2 h-2 rounded-full border border-white"
+                                style={{ backgroundColor: noteStageCfg.color }}
+                              />
+                              <div className="flex flex-wrap items-center justify-between gap-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span 
+                                    className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md"
+                                    style={{
+                                      backgroundColor: `${noteStageCfg.color}15`,
+                                      color: noteStageCfg.color,
+                                      border: `1px solid ${noteStageCfg.color}35`
+                                    }}
+                                  >
+                                    {sn.stageLabel || noteStageCfg.label}
+                                  </span>
+                                  <span className="font-bold text-slate-800 text-[11px]">{sn.author}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {formatCRMIDateTime(sn.timestamp)}
+                                </span>
+                              </div>
+                              <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 text-slate-800 text-xs whitespace-pre-wrap leading-relaxed">
+                                {sn.note}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
                 </div>
 
               </div>
 
               {/* Modal Footer */}
-              <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const opp = viewingOpp;
-                      setViewingOpp(null);
-                      handleOpenEdit(opp);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    <span>Edit Opportunity</span>
-                  </button>
-                )}
+              <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setViewingOpp(null)}
+                  onClick={() => {
+                    const current = viewingOpp;
+                    setViewingOpp(null);
+                    setAuditHistoryOpp(current);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                  title="View full audit trail and field change log"
+                >
+                  <History className="w-3.5 h-3.5 text-slate-500" />
+                  <span>View Audit History</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const opp = viewingOpp;
+                        setViewingOpp(null);
+                        handleOpenEdit(opp);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit Opportunity</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setViewingOpp(null)}
+                    className="px-5 py-2 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all text-xs cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. DEDICATED OPPORTUNITY AUDIT & FIELD HISTORY MODAL (Opened on Title / ID Click) */}
+      <AnimatePresence>
+        {auditHistoryOpp && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAuditHistoryOpp(null)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 shrink-0">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                        {auditHistoryOpp.id}
+                      </span>
+                      <h3 className="font-extrabold text-base text-slate-900 truncate max-w-[260px] sm:max-w-md">
+                        {auditHistoryOpp.title}
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Field change history & modification audit trail (IST)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAuditHistoryOpp(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body: Full Audit Log */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+                {!auditHistoryOpp.editHistory || auditHistoryOpp.editHistory.length === 0 ? (
+                  <div className="bg-slate-50 p-6 rounded-2xl text-center text-slate-400 border border-slate-100">
+                    <History className="w-6 h-6 mx-auto mb-2 text-slate-300" />
+                    <p className="text-xs font-semibold text-slate-700">Initial Opportunity Record</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Created on {formatCRMIDateTime(auditHistoryOpp.createdAt)} by {auditHistoryOpp.assignedTo || 'Admin'}. No edits or stage transitions have been recorded yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                    {auditHistoryOpp.editHistory.map((entry, eIdx) => (
+                      <div key={eIdx} className="relative pl-5 border-l-2 border-amber-200 py-0.5 text-[11px] sm:text-xs">
+                        {/* Timeline dot */}
+                        <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-amber-500 border border-white"></div>
+                        
+                        {/* Log Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] mb-1.5">
+                          <span className="font-bold text-slate-800">
+                            <span className={`inline-block mr-1.5 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                              entry.action === 'CREATED'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : entry.action === 'STAGE_CHANGED'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}>
+                              {entry.action.replace('_', ' ')}
+                            </span>
+                            by <span className="text-amber-700 font-semibold">{entry.changedBy}</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                            {formatCRMIDateTime(entry.timestamp)}
+                          </span>
+                        </div>
+
+                        {/* Details Box / Granular Changes */}
+                        {entry.changes && entry.changes.length > 0 ? (
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                            {entry.changes.map((change, cIdx) => {
+                              const displayOld = (!change.oldValue || change.oldValue === 'None') ? '(Blank)' : change.oldValue;
+                              const displayNew = (!change.newValue || change.newValue === 'None') ? '(Blank)' : change.newValue;
+                              return (
+                                <div key={cIdx} className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                                  <span className="font-bold text-slate-400 text-[10px] uppercase tracking-wider truncate">
+                                    {change.field}
+                                  </span>
+                                  <span className="sm:col-span-2 text-slate-700 flex flex-wrap items-center gap-1.5 break-all">
+                                    <span className="font-medium bg-red-50 text-red-700 px-1.5 py-0.5 rounded-md text-[10px] line-through decoration-red-400">
+                                      {displayOld}
+                                    </span>
+                                    <span className="text-slate-400 text-[10px] font-bold">→</span>
+                                    <span className="font-extrabold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md text-[10px]">
+                                      {displayNew}
+                                    </span>
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                            <p className="text-slate-700 font-medium text-[11px] leading-relaxed">
+                              {entry.details || 'Opportunity details modified'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const opp = auditHistoryOpp;
+                    setAuditHistoryOpp(null);
+                    setViewingOpp(opp);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-bold hover:bg-amber-100 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Open Quick View & Stage Notes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditHistoryOpp(null)}
                   className="px-5 py-2 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all text-xs cursor-pointer ml-auto"
                 >
                   Close
@@ -3905,6 +4310,149 @@ export default function CRMOpportunitiesView({
                   </div>
                 </div>
 
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* STAGE TRANSITION REQUIRED NOTES MODAL */}
+      <AnimatePresence>
+        {stageTransitionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setStageTransitionModal(null)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-10 text-xs"
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm"
+                    style={{ 
+                      backgroundColor: `${stageTransitionModal.targetStageConfig.color}20`,
+                      color: stageTransitionModal.targetStageConfig.color 
+                    }}
+                  >
+                    <ArrowRight className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-slate-900 leading-tight">
+                      Update Stage: {stageTransitionModal.targetStageConfig.label}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      {stageTransitionModal.opp.title} ({stageTransitionModal.opp.accountName})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStageTransitionModal(null)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form Content */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleConfirmStageTransition();
+                }}
+                className="p-6 space-y-4"
+              >
+                {/* Stage Badge & Probability Summary */}
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Stage:</span>
+                    <span 
+                      className="px-2.5 py-0.5 rounded-md font-extrabold font-mono text-[11px]"
+                      style={{ 
+                        backgroundColor: `${stageTransitionModal.targetStageConfig.color}20`,
+                        color: stageTransitionModal.targetStageConfig.color 
+                      }}
+                    >
+                      {stageTransitionModal.targetStageConfig.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Win Probability:</span>
+                    <span className="font-black text-slate-900 font-mono text-xs">
+                      {stageTransitionModal.targetStageConfig.probability}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Reason for Loss (If Closed Lost) */}
+                {stageTransitionModal.newStage === 'CLOSED_LOST' && (
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1.5 text-xs">
+                      Reason for Loss *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Budget constraints, Competitor chosen, Project deferred..."
+                      value={stageTransitionModal.lostReason || ''}
+                      onChange={(e) => setStageTransitionModal({
+                        ...stageTransitionModal,
+                        lostReason: e.target.value
+                      })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-rose-500 focus:bg-white transition-colors text-xs"
+                    />
+                  </div>
+                )}
+
+                {/* Dynamic Notes Field with Dynamic Heading */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1.5 text-xs">
+                    {stageTransitionModal.targetStageConfig.label} Notes *
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    placeholder={`Enter key notes, strategy update, or summary for ${stageTransitionModal.targetStageConfig.label.toLowerCase()}...`}
+                    value={stageTransitionModal.notes}
+                    onChange={(e) => setStageTransitionModal({
+                      ...stageTransitionModal,
+                      notes: e.target.value
+                    })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                    Notes will be logged to the opportunity audit history and CRM notifications.
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setStageTransitionModal(null)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all cursor-pointer text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!stageTransitionModal.notes.trim() || (stageTransitionModal.newStage === 'CLOSED_LOST' && !stageTransitionModal.lostReason?.trim())}
+                    className="px-5 py-2 rounded-xl bg-slate-900 text-white font-extrabold hover:bg-slate-800 transition-all shadow-xs cursor-pointer text-xs disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <span>Confirm Stage Update</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </form>
             </motion.div>
           </div>
