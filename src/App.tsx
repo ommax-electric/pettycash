@@ -532,10 +532,23 @@ export default function App() {
     if (!currentUser || currentUser.role === 'AUDITOR') return;
 
     const newTxnId = `TXN-2026-${Date.now().toString().slice(-4)}`;
+    const now = new Date().toISOString();
+    const initialWorkflowHistory: WorkflowHistoryEntry[] = [
+      ...(newTxnData.workflowHistory || []),
+      {
+        id: String(Date.now()),
+        timestamp: now,
+        action: 'CREATED',
+        actor: newTxnData.requestedBy || currentUser.fullName,
+        target: newTxnData.approverName
+      }
+    ];
+
     const newTxn: Transaction = {
       ...newTxnData,
       id: newTxnId,
-      recordedBy: currentUser.fullName
+      recordedBy: currentUser.fullName,
+      workflowHistory: initialWorkflowHistory
     };
 
     const updatedTxnsList = [newTxn, ...transactions];
@@ -802,12 +815,21 @@ export default function App() {
 
     const realApprover = resolveRealPersonName(approverName, currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER');
     const now = new Date().toISOString();
+    const existingWorkflowHistory = targetTxn.workflowHistory || [];
+    const newWorkflowStep: WorkflowHistoryEntry = {
+      id: String(Date.now()),
+      timestamp: now,
+      action: 'APPROVED',
+      actor: realApprover
+    };
+
     const updatedTxn: Transaction = {
       ...targetTxn,
       status: 'APPROVED',
       approvedAt: now,
       approverName: realApprover,
-      approvedBy: realApprover
+      approvedBy: realApprover,
+      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
     };
 
     setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
@@ -826,11 +848,20 @@ export default function App() {
 
     const realPayer = resolveRealPersonName(paidBy, currentUser.role === 'CUSTODIAN' ? 'CUSTODIAN' : 'ADMIN');
     const now = new Date().toISOString();
+    const existingWorkflowHistory = targetTxn.workflowHistory || [];
+    const newWorkflowStep: WorkflowHistoryEntry = {
+      id: String(Date.now()),
+      timestamp: now,
+      action: 'PAID',
+      actor: realPayer
+    };
+
     const updatedTxn: Transaction = {
       ...targetTxn,
       status: 'PAID',
       paidAt: now,
-      paidBy: realPayer
+      paidBy: realPayer,
+      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
     };
 
     // Deduct from Category limit / add to spent
@@ -860,12 +891,22 @@ export default function App() {
 
     const realRejecter = resolveRealPersonName(rejectedBy, currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER');
     const now = new Date().toISOString();
+    const existingWorkflowHistory = targetTxn.workflowHistory || [];
+    const newWorkflowStep: WorkflowHistoryEntry = {
+      id: String(Date.now()),
+      timestamp: now,
+      action: 'REJECTED',
+      actor: realRejecter,
+      reason: reason
+    };
+
     const updatedTxn: Transaction = {
       ...targetTxn,
       status: 'REJECTED',
       rejectedAt: now,
       rejectedBy: realRejecter,
-      rejectionReason: reason
+      rejectionReason: reason,
+      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
     };
 
     setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));

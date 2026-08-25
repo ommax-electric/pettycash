@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react';
+import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, DollarSign, Ban, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
@@ -447,6 +447,7 @@ export default function RegisterView({
   } | null>(null);
 
   const [selectedDetailTransaction, setSelectedDetailTransaction] = useState<Transaction | null>(null);
+  const [viewingQuickViewTxn, setViewingQuickViewTxn] = useState<Transaction | null>(null);
   const [viewingAttachment, setViewingAttachment] = useState<Transaction | null>(null);
   const [attachmentBlobUrl, setAttachmentBlobUrl] = useState<string | null>(null);
 
@@ -456,6 +457,16 @@ export default function RegisterView({
       const updated = transactions.find(t => t.id === selectedDetailTransaction.id);
       if (updated) {
         setSelectedDetailTransaction(updated);
+      }
+    }
+  }, [transactions]);
+
+  // Synchronize quick view modal with latest transaction state
+  useEffect(() => {
+    if (viewingQuickViewTxn) {
+      const updated = transactions.find(t => t.id === viewingQuickViewTxn.id);
+      if (updated) {
+        setViewingQuickViewTxn(updated);
       }
     }
   }, [transactions]);
@@ -2759,16 +2770,512 @@ export default function RegisterView({
 
   const renderDetailModals = () => (
     <>
-      {/* Unified Transaction Details & Edit History Modal */}
+      {/* 1. Quick View & Workflow Stage Progression Modal (Eye Icon) */}
+      <AnimatePresence>
+        {viewingQuickViewTxn && (() => {
+          const txn = viewingQuickViewTxn;
+          const isDeposit = txn.type === 'IN';
+          const st = txn.status || 'PAID';
+
+          // Helper to extract sequential workflow steps
+          const workflowSteps: Array<{
+            id: string;
+            stage: 'CREATED' | 'REROUTED' | 'APPROVED' | 'REJECTED' | 'PAID' | 'DELETED' | 'PENDING_APPROVAL' | 'PENDING_PAYMENT';
+            title: string;
+            timestamp?: string;
+            actor?: string;
+            target?: string;
+            reason?: string;
+            details?: string;
+            isCompleted: boolean;
+            isCurrent: boolean;
+          }> = [];
+
+          // 1. User / Requester Creation Step
+          const creatorName = txn.requestedBy || txn.recordedBy || 'Requester';
+          workflowSteps.push({
+            id: 'step-creation',
+            stage: 'CREATED',
+            title: isDeposit ? 'Deposit Cash Inflow Recorded' : 'Expense Request Submitted',
+            timestamp: txn.date,
+            actor: creatorName,
+            target: txn.approverName,
+            details: isDeposit 
+              ? `Deposit entry logged into cash register by ${creatorName}`
+              : (txn.approverName ? `Requested by ${creatorName} & submitted for manager review to ${txn.approverName}` : `Requested and recorded by ${creatorName}`),
+            isCompleted: true,
+            isCurrent: st === 'PENDING' && (!txn.workflowHistory || txn.workflowHistory.length <= 1) && !txn.reRoutedBy,
+          });
+
+          // 2. Chained Manager Re-Route Steps (handles multiple sequential re-routes)
+          if (txn.workflowHistory && txn.workflowHistory.length > 0) {
+            txn.workflowHistory.forEach((wf, wfIdx) => {
+              if (wf.action === 'RE_ROUTED') {
+                workflowSteps.push({
+                  id: `step-reroute-${wf.id || wfIdx}`,
+                  stage: 'REROUTED',
+                  title: `Re-Routed to ${wf.target || 'Manager'}`,
+                  timestamp: wf.timestamp,
+                  actor: wf.actor,
+                  target: wf.target,
+                  reason: wf.reason,
+                  details: `Manager ${wf.actor} re-routed approval responsibility to ${wf.target || 'another manager'}`,
+                  isCompleted: true,
+                  isCurrent: st === 'PENDING' && wfIdx === (txn.workflowHistory?.length || 0) - 1,
+                });
+              }
+            });
+          } else if (txn.reRoutedBy) {
+            // Legacy single re-route fallback
+            workflowSteps.push({
+              id: 'step-reroute-legacy',
+              stage: 'REROUTED',
+              title: `Re-Routed to ${txn.approverName || 'Manager'}`,
+              timestamp: txn.reRoutedAt,
+              actor: txn.reRoutedBy,
+              target: txn.approverName,
+              reason: txn.reRouteReason,
+              details: `Manager ${txn.reRoutedBy} re-routed approval responsibility to ${txn.approverName || 'another manager'}`,
+              isCompleted: true,
+              isCurrent: st === 'PENDING',
+            });
+          }
+
+          // 3. Manager Review / Decision Step
+          if (st === 'REJECTED' || txn.rejectedBy || txn.rejectedAt) {
+            workflowSteps.push({
+              id: 'step-rejected',
+              stage: 'REJECTED',
+              title: 'Request Rejected',
+              timestamp: txn.rejectedAt,
+              actor: txn.rejectedBy || 'Manager / Admin',
+              reason: txn.rejectionReason,
+              details: `Expense request was rejected by ${txn.rejectedBy || 'Manager / Admin'}`,
+              isCompleted: true,
+              isCurrent: true,
+            });
+          } else if (st === 'APPROVED' || st === 'PAID' || txn.approvedBy || txn.approvedAt) {
+            const approver = txn.approvedBy || txn.approverName || 'Department Manager';
+            workflowSteps.push({
+              id: 'step-approved',
+              stage: 'APPROVED',
+              title: 'Manager Approved',
+              timestamp: txn.approvedAt,
+              actor: approver,
+              details: `Approved by ${approver} for cash voucher disbursement`,
+              isCompleted: true,
+              isCurrent: st === 'APPROVED',
+            });
+          } else if (st === 'PENDING') {
+            workflowSteps.push({
+              id: 'step-pending-approval',
+              stage: 'PENDING_APPROVAL',
+              title: 'Awaiting Manager Approval',
+              actor: txn.approverName || 'Designated Approver',
+              details: `Pending review and approval action by ${txn.approverName || 'Designated Approver'}`,
+              isCompleted: false,
+              isCurrent: true,
+            });
+          }
+
+          // 4. Cash Issuance / Payment Step (Admin or Custodian)
+          if (st === 'PAID' || txn.paidBy || txn.paidAt) {
+            workflowSteps.push({
+              id: 'step-paid',
+              stage: 'PAID',
+              title: isDeposit ? 'Cash Received & Reconciled' : 'Cash Issued & Disbursed',
+              timestamp: txn.paidAt,
+              actor: txn.paidBy || 'Administrator / Custodian',
+              details: isDeposit 
+                ? `Deposit funds reconciled in register`
+                : `Petty cash payment disbursed by ${txn.paidBy || 'Administrator / Custodian'}`,
+              isCompleted: true,
+              isCurrent: st === 'PAID',
+            });
+          } else if (st === 'APPROVED') {
+            workflowSteps.push({
+              id: 'step-pending-payment',
+              stage: 'PENDING_PAYMENT',
+              title: 'Pending Cash Handover',
+              details: `Manager approved; ready for cash disbursement by Administrator / Custodian`,
+              isCompleted: false,
+              isCurrent: false,
+            });
+          }
+
+          // 5. Voided / Cancelled (if deleted)
+          if (st === 'DELETED' || txn.deletedBy || txn.deletedAt) {
+            workflowSteps.push({
+              id: 'step-deleted',
+              stage: 'DELETED',
+              title: 'Voucher Voided / Cancelled',
+              timestamp: txn.deletedAt,
+              actor: txn.deletedBy || 'Administrator',
+              reason: txn.deleteReason,
+              details: `Transaction voided by ${txn.deletedBy || 'Administrator'}`,
+              isCompleted: true,
+              isCurrent: true,
+            });
+          }
+
+          // Stepper stages
+          const isCreationDone = true;
+          const isApprovalDone = st === 'APPROVED' || st === 'PAID';
+          const isApprovalRejected = st === 'REJECTED';
+          const isPaymentDone = st === 'PAID';
+
+          return (
+            <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.16 }}
+                className="bg-white rounded-[24px] shadow-2xl border border-slate-100 max-w-3xl w-full max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col text-slate-800 my-auto"
+              >
+                {/* Header */}
+                <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs ${
+                      isDeposit ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'
+                    }`}>
+                      {isDeposit ? <ArrowDownLeft className="w-5 h-5 font-bold" /> : <ArrowUpRight className="w-5 h-5 font-bold" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-extrabold text-slate-900 text-sm sm:text-base font-mono tracking-tight">
+                          {txn.reference || txn.id}
+                        </h3>
+                        {/* Live Status Pill */}
+                        {st === 'DELETED' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
+                            Voided
+                          </span>
+                        ) : st === 'PENDING' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            Pending Approval
+                          </span>
+                        ) : st === 'APPROVED' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                            Approved - Awaiting Cash
+                          </span>
+                        ) : st === 'PAID' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            Paid & Disbursed
+                          </span>
+                        ) : st === 'REJECTED' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            Rejected
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        {isDeposit ? 'Deposit Cash Inflow' : `Paid To: ${txn.merchant}`}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setViewingQuickViewTxn(null)}
+                    className="p-2 hover:bg-slate-200/60 rounded-full transition-colors cursor-pointer text-slate-400 hover:text-slate-700 focus:outline-hidden"
+                    title="Close Quick View"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Body Content */}
+                <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-700 text-xs sm:text-sm">
+                  {/* Stepper Pipeline Banner */}
+                  {!isDeposit && (
+                    <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3">Workflow Lifecycle Pipeline</p>
+                      <div className="flex items-center justify-between relative">
+                        {/* Connecting Line */}
+                        <div className="absolute left-6 right-6 top-4 h-0.5 bg-slate-200 -z-0"></div>
+
+                        {/* Step 1: Created */}
+                        <div className="relative z-10 flex flex-col items-center text-center">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs ${
+                            isCreationDone ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            <Check className="w-4 h-4" />
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-800 mt-1.5">Request Created</span>
+                          <span className="text-[10px] text-slate-400">{txn.requestedBy || txn.recordedBy}</span>
+                        </div>
+
+                        {/* Step 2: Manager Review */}
+                        <div className="relative z-10 flex flex-col items-center text-center">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs ${
+                            isApprovalDone ? 'bg-emerald-600 text-white' : isApprovalRejected ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white animate-pulse'
+                          }`}>
+                            {isApprovalDone ? <Check className="w-4 h-4" /> : isApprovalRejected ? <Ban className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-800 mt-1.5">
+                            {isApprovalRejected ? 'Rejected' : isApprovalDone ? 'Approved' : 'Manager Review'}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {txn.approvedBy || txn.approverName || 'Department Manager'}
+                          </span>
+                        </div>
+
+                        {/* Step 3: Cash Disbursed */}
+                        <div className="relative z-10 flex flex-col items-center text-center">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs ${
+                            isPaymentDone ? 'bg-emerald-600 text-white' : isApprovalDone ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-slate-200 text-slate-400'
+                          }`}>
+                            {isPaymentDone ? <Check className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-800 mt-1.5">
+                            {isPaymentDone ? 'Cash Issued' : 'Disbursement'}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {isPaymentDone ? (txn.paidBy || 'Admin') : isApprovalDone ? 'Awaiting Cash' : 'Pending Approval'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top 4 Financial Metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        {isDeposit ? 'Deposit Amount' : 'Disbursement'}
+                      </span>
+                      <span className={`text-base sm:text-lg font-black ${isDeposit ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Payment Mode</span>
+                      <span className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                        (txn.paymentType || 'CASH') === 'ONLINE' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {txn.paymentType || 'CASH'}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Category</span>
+                      <span className="text-[11px] font-bold text-slate-800 truncate block" title={txn.category}>
+                        {txn.category}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        {isDeposit ? 'Deposited By' : 'Paid To'}
+                      </span>
+                      <span className="text-[11px] font-bold text-slate-800 truncate block" title={txn.merchant}>
+                        {txn.merchant}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Two-Column Grid: Timeline & Particulars */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Left Column: Stage Progression & Lifecycle Timeline */}
+                    <div className="lg:col-span-7 space-y-3">
+                      <div className="flex items-center gap-2 text-indigo-600">
+                        <Clock className="w-4 h-4 text-indigo-500" />
+                        <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
+                          Workflow Stage & Progression Timeline
+                        </span>
+                      </div>
+
+                      <div className="space-y-3 border-l-2 border-slate-200 pl-4 ml-2">
+                        {workflowSteps.map((step, sIdx) => {
+                          const isReroute = step.stage === 'REROUTED';
+                          const isApproved = step.stage === 'APPROVED';
+                          const isRejected = step.stage === 'REJECTED';
+                          const isPaid = step.stage === 'PAID';
+                          const isDeleted = step.stage === 'DELETED';
+                          const isPending = step.stage === 'PENDING_APPROVAL' || step.stage === 'PENDING_PAYMENT';
+
+                          return (
+                            <div key={sIdx} className="relative py-1 text-xs">
+                              {/* Dot on timeline */}
+                              <div className={`absolute -left-[23px] top-1.5 w-3 h-3 rounded-full border-2 border-white shadow-xs ${
+                                isApproved || isPaid ? 'bg-emerald-500' : isRejected || isDeleted ? 'bg-rose-500' : isReroute ? 'bg-amber-500' : isPending ? 'bg-blue-400 animate-pulse' : 'bg-indigo-500'
+                              }`}></div>
+
+                              <div className={`p-3 rounded-xl border ${
+                                isReroute ? 'bg-amber-50/50 border-amber-200' : isApproved ? 'bg-emerald-50/40 border-emerald-200' : isRejected ? 'bg-rose-50/40 border-rose-200' : isPaid ? 'bg-emerald-50/30 border-emerald-100' : isDeleted ? 'bg-rose-50/60 border-rose-200' : 'bg-slate-50/70 border-slate-200/80'
+                              }`}>
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-1.5">
+                                    {isReroute ? (
+                                      <ArrowRightLeft className="w-3.5 h-3.5 text-amber-600" />
+                                    ) : isApproved || isPaid ? (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    ) : isRejected ? (
+                                      <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                    ) : isDeleted ? (
+                                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                                    ) : (
+                                      <Clock className="w-3.5 h-3.5 text-slate-500" />
+                                    )}
+                                    <span className="font-bold text-slate-900 text-xs">{step.title}</span>
+                                  </div>
+                                  {step.timestamp && (
+                                    <span className="text-[10px] text-slate-400 font-mono font-medium">
+                                      {formatVoidDateTime(step.timestamp)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">{step.details}</p>
+
+                                {step.actor && (
+                                  <div className="mt-1.5 text-[10px] font-semibold text-slate-500">
+                                    Action by: <span className="text-slate-800 font-bold">{step.actor}</span>
+                                    {step.target && <span> → Assigned to: <span className="text-indigo-600 font-bold">{step.target}</span></span>}
+                                  </div>
+                                )}
+
+                                {step.reason && (
+                                  <div className="mt-2 bg-white/90 p-2 rounded-lg border border-slate-200 text-[11px] font-medium text-slate-700 italic">
+                                    "{step.reason}"
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Right Column: Particulars & Attachment */}
+                    <div className="lg:col-span-5 space-y-4">
+                      {/* Particulars Card */}
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Particulars / Purpose</span>
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 font-medium text-slate-800 text-xs leading-relaxed">
+                          {txn.description}
+                        </div>
+                      </div>
+
+                      {/* Project Ref No */}
+                      {txn.projectRefNo && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Project Ref. No.</span>
+                          <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 inline-block text-xs">
+                            {txn.projectRefNo}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Remarks */}
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Remarks / Notes</span>
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-600 leading-relaxed min-h-[36px]">
+                          {(txn.remarks && txn.remarks.trim()) ? txn.remarks.trim() : <span className="text-slate-400 italic">N/A</span>}
+                        </div>
+                      </div>
+
+                      {/* Attachment Document Preview Card */}
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Attachment Receipt</span>
+                        {txn.receiptName ? (
+                          <div 
+                            onClick={() => setViewingAttachment(txn)}
+                            className="group border border-slate-200 hover:border-indigo-400 bg-slate-50 hover:bg-indigo-50/20 p-3 rounded-2xl flex items-center justify-between cursor-pointer transition-all gap-2"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                              <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 border border-amber-200/60 flex items-center justify-center shrink-0 font-bold group-hover:scale-105 transition-transform">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-slate-800 text-xs truncate" title={txn.receiptName}>
+                                  {txn.receiptName}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  {txn.receiptSize || 'Attachment'}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="text-slate-900 font-bold text-xs flex items-center gap-1 shrink-0 bg-[#f7b944] hover:bg-[#e0a330] px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              View
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="border border-dashed border-slate-200 p-3.5 rounded-2xl text-center text-slate-400 bg-slate-50/50">
+                            <Paperclip className="w-4 h-4 mx-auto text-slate-300 mb-1" />
+                            <p className="text-[11px] font-medium">No attachment uploaded for this voucher.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/40 flex items-center justify-between gap-3 flex-wrap">
+                  {/* Switch to detailed Audit Trail & Field History modal */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentTxn = txn;
+                      setViewingQuickViewTxn(null);
+                      setSelectedDetailTransaction(currentTxn);
+                    }}
+                    className="inline-flex items-center gap-1.5 font-bold py-2 px-3.5 rounded-xl text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all cursor-pointer"
+                    title="Open Detailed Audit Trail & Field Modification History"
+                  >
+                    <History className="w-3.5 h-3.5 text-slate-500" />
+                    Audit Trail & Field Edits
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!isPrintableVoucher(txn)}
+                      onClick={() => handlePrintSingleVoucher(txn)}
+                      className={`inline-flex items-center gap-1.5 font-bold py-2 px-3.5 rounded-xl text-xs transition-all ${
+                        !isPrintableVoucher(txn)
+                          ? 'bg-slate-100 text-slate-400 border border-slate-200 opacity-40 cursor-not-allowed'
+                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer'
+                      }`}
+                      title={!isPrintableVoucher(txn) ? "Print available only after marked Paid or Void" : "Print Cash Voucher"}
+                    >
+                      <Printer className="w-3.5 h-3.5 text-indigo-600" />
+                      Print Voucher
+                    </button>
+                    <button
+                      onClick={() => setViewingQuickViewTxn(null)}
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 px-5 rounded-xl text-xs transition-all cursor-pointer shadow-md hover:shadow-lg"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* 2. Detailed Audit Trail & Field Modification History Modal (Clicking ID link) */}
       <AnimatePresence>
         {selectedDetailTransaction && (
-          <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.15 }}
-              className="bg-white rounded-[24px] shadow-2xl border border-slate-100 max-w-lg w-full max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col text-slate-800"
+              className="bg-white rounded-[24px] shadow-2xl border border-slate-100 max-w-lg w-full max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col text-slate-800 my-auto"
             >
               {/* Header */}
               <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
@@ -2787,7 +3294,7 @@ export default function RegisterView({
                       {selectedDetailTransaction.reference || selectedDetailTransaction.id}
                     </h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                      {selectedDetailTransaction.type === 'IN' ? 'Deposit Cash Receipt' : 'Expense Disbursement Voucher'}
+                      Voucher Audit Trail & Field Modification History
                     </p>
                   </div>
                 </div>
@@ -2817,6 +3324,7 @@ export default function RegisterView({
                     </div>
                   </div>
                 )}
+                
                 {/* Main Amount Card */}
                 <div className={`p-5 rounded-2xl flex items-center justify-between border ${
                   selectedDetailTransaction.type === 'IN' 
@@ -2937,16 +3445,16 @@ export default function RegisterView({
                   <div className="flex items-center gap-2 text-amber-600">
                     <History className="w-4 h-4 text-amber-500" />
                     <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                      Voucher Edit History
+                      Field Modification History
                     </span>
                   </div>
 
                   {!selectedDetailTransaction.editHistory || selectedDetailTransaction.editHistory.length === 0 ? (
                     <div className="bg-slate-50 p-4 rounded-2xl text-center text-slate-400 border border-slate-100">
-                      <span className="text-[11px] font-medium italic">Original entry. No edits have been performed yet.</span>
+                      <span className="text-[11px] font-medium italic">Original entry. No field modifications have been recorded yet.</span>
                     </div>
                   ) : (
-                    <div className="space-y-4 max-h-[160px] overflow-y-auto pr-1">
+                    <div className="space-y-4 max-h-[180px] overflow-y-auto pr-1">
                       {selectedDetailTransaction.editHistory.map((entry, eIdx) => (
                         <div key={eIdx} className="relative pl-5 border-l-2 border-indigo-100 py-0.5 text-[11px] sm:text-xs">
                           {/* Timeline dot */}
@@ -3002,27 +3510,42 @@ export default function RegisterView({
               </div>
 
               {/* Footer Actions */}
-              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between">
+              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between gap-2 flex-wrap">
                 <button
                   type="button"
-                  disabled={!selectedDetailTransaction || !isPrintableVoucher(selectedDetailTransaction)}
-                  onClick={() => selectedDetailTransaction && handlePrintSingleVoucher(selectedDetailTransaction)}
-                  className={`inline-flex items-center gap-2 font-bold py-2.5 px-4 rounded-xl text-xs transition-all ${
-                    selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction)
-                      ? 'bg-slate-100 text-slate-400 border border-slate-200 opacity-40 cursor-not-allowed'
-                      : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer'
-                  }`}
-                  title={selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction) ? "Print available only after marked Paid or Void" : "Print Cash Voucher"}
+                  onClick={() => {
+                    const currentTxn = selectedDetailTransaction;
+                    setSelectedDetailTransaction(null);
+                    setViewingQuickViewTxn(currentTxn);
+                  }}
+                  className="inline-flex items-center gap-1.5 font-bold py-2 px-3 rounded-xl text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all cursor-pointer"
+                  title="View Workflow Stages"
                 >
-                  <Printer className="w-4 h-4 text-indigo-600" />
-                  Print Cash Voucher
+                  <Eye className="w-3.5 h-3.5" />
+                  Quick View Stages
                 </button>
-                <button
-                  onClick={() => setSelectedDetailTransaction(null)}
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-xl text-xs transition-all cursor-pointer shadow-md hover:shadow-lg"
-                >
-                  Close Panel
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!selectedDetailTransaction || !isPrintableVoucher(selectedDetailTransaction)}
+                    onClick={() => selectedDetailTransaction && handlePrintSingleVoucher(selectedDetailTransaction)}
+                    className={`inline-flex items-center gap-1.5 font-bold py-2 px-3 rounded-xl text-xs transition-all ${
+                      selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction)
+                        ? 'bg-slate-100 text-slate-400 border border-slate-200 opacity-40 cursor-not-allowed'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer'
+                    }`}
+                    title={selectedDetailTransaction && !isPrintableVoucher(selectedDetailTransaction) ? "Print available only after marked Paid or Void" : "Print Cash Voucher"}
+                  >
+                    <Printer className="w-3.5 h-3.5 text-slate-600" />
+                    Print Voucher
+                  </button>
+                  <button
+                    onClick={() => setSelectedDetailTransaction(null)}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 px-5 rounded-xl text-xs transition-all cursor-pointer shadow-md hover:shadow-lg"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -3447,9 +3970,9 @@ export default function RegisterView({
                         <td className="py-4 px-6 text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
-                              onClick={() => setSelectedDetailTransaction(txn)}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-all cursor-pointer"
-                              title="View Details & Edit History"
+                              onClick={() => setViewingQuickViewTxn(txn)}
+                              className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-400 hover:text-indigo-600 transition-all cursor-pointer"
+                              title="Quick View Workflow Stage Progression"
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
@@ -3539,11 +4062,12 @@ export default function RegisterView({
 
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => setSelectedDetailTransaction(txn)}
-                          className="inline-flex items-center gap-1 py-1 px-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
+                          onClick={() => setViewingQuickViewTxn(txn)}
+                          className="inline-flex items-center gap-1 py-1 px-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
+                          title="Quick View Stages"
                         >
                           <Eye className="w-3 h-3" />
-                          Details
+                          Stages
                         </button>
                         {txn.status === 'DELETED' ? (
                           <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
@@ -4290,6 +4814,16 @@ export default function RegisterView({
                             );
                           })()}
 
+                          {/* Quick View (Eye Icon) Stage Progression Modal */}
+                          <button
+                            type="button"
+                            onClick={() => setViewingQuickViewTxn(txn)}
+                            className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-400 hover:text-indigo-600 transition-all cursor-pointer"
+                            title="Quick View Workflow Stage Progression"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* Print action (accessible to all, including auditors) */}
                           <button
                             type="button"
@@ -4404,7 +4938,17 @@ export default function RegisterView({
                   </div>
 
                   {/* Actions Row */}
-                  <div className="flex items-center justify-end gap-2 pt-1">
+                  <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setViewingQuickViewTxn(txn)}
+                      className="inline-flex items-center gap-1.5 py-1.5 px-3 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-bold transition-all h-8 cursor-pointer"
+                      title="Quick View Stages"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Stages
+                    </button>
+
                     <button
                       type="button"
                       disabled={!isPrintableVoucher(txn)}
