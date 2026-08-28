@@ -25,10 +25,14 @@ import {
   Users2,
   Target,
   UserCheck,
-  TrendingUp
+  TrendingUp,
+  FileSpreadsheet,
+  Wrench
 } from 'lucide-react';
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
+import { SolarQuotation, QuotationStatus } from './quotation/types';
+import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
 import { sendEmailNotification, sendCRMEmailNotification } from './services/notificationService';
@@ -54,7 +58,12 @@ import CRMOpportunitiesView from './components/crm/CRMOpportunitiesView';
 // HRMS Subcomponent
 import HRMSPlaceholderView from './components/hrms/HRMSPlaceholderView';
 
-export type ParentModule = 'CRM' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
+// Quotation Subcomponents
+import QuotationDashboardView from './components/quotation/QuotationDashboardView';
+import QuotationToolsView from './components/quotation/QuotationToolsView';
+import LiveQuotationCanvas from './components/quotation/LiveQuotationCanvas';
+
+export type ParentModule = 'CRM' | 'QUOTATION' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
 export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS';
 
 export interface AppModuleConfig {
@@ -66,6 +75,7 @@ export interface AppModuleConfig {
 
 export const APP_MODULES: AppModuleConfig[] = [
   { id: 'CRM', label: 'CRM', defaultTab: 'CRM_DASHBOARD', hasSubmenu: true },
+  { id: 'QUOTATION', label: 'Quotation', defaultTab: 'QUOTATION_PROPOSAL', hasSubmenu: true },
   { id: 'HRMS', label: 'HRMS', defaultTab: 'HRMS', hasSubmenu: false },
   { id: 'CASH_BOOK', label: 'Cash Book', defaultTab: 'CASHBOOK_DASHBOARD', hasSubmenu: true },
 ];
@@ -86,6 +96,8 @@ type NavigationTab =
   | 'CRM_CONTACTS'
   | 'CRM_OPPORTUNITIES'
   | 'CRM_SETTINGS'
+  | 'QUOTATION_PROPOSAL'
+  | 'QUOTATION_TOOLS'
   | 'HRMS'
   | 'CASHBOOK_DASHBOARD'
   | 'CASHBOOK_INWARD'
@@ -115,6 +127,12 @@ const getActiveTabClass = (tabId: NavigationTab) => {
       return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
     case 'CRM_SETTINGS':
       return 'bg-slate-700 text-white shadow-md shadow-slate-950/20';
+
+    // Quotation
+    case 'QUOTATION_PROPOSAL':
+      return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
+    case 'QUOTATION_TOOLS':
+      return 'bg-[#f7b944] text-slate-950 font-extrabold shadow-md shadow-amber-950/20';
 
     // HRMS
     case 'HRMS':
@@ -167,6 +185,10 @@ export default function App() {
   const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>([]);
   const [crmSettings, setCrmSettings] = useState<CRMSettings>(DEFAULT_CRM_SETTINGS);
 
+  // Quotation States
+  const [quotations, setQuotations] = useState<SolarQuotation[]>([]);
+  const [activeEditingQuotation, setActiveEditingQuotation] = useState<SolarQuotation | null>(null);
+
   // Mobile navigation drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -218,6 +240,11 @@ export default function App() {
               await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
             }
             await setDoc(doc(db, 'crm_settings', 'config'), DEFAULT_CRM_SETTINGS);
+
+            // Seed Solar Quotation initial records
+            for (const quo of INITIAL_SOLAR_QUOTATIONS) {
+              await setDoc(doc(db, 'solar_quotations', quo.id), quo);
+            }
           } else {
             localStorage.setItem('petty_cash_db_seeded', 'true');
           }
@@ -385,7 +412,19 @@ export default function App() {
           }
         }, (err) => console.warn('CRM settings sync notice:', err));
 
-        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings];
+        // 10. Solar Quotations Sync
+        const unsubQuos = onSnapshot(collection(db, 'solar_quotations'), (snapshot) => {
+          if (snapshot.empty) {
+            setQuotations([]);
+          } else {
+            const list: SolarQuotation[] = [];
+            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as SolarQuotation));
+            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setQuotations(list);
+          }
+        }, (err) => console.warn('Solar quotations sync notice:', err));
+
+        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos];
       } catch (err) {
         console.error('Firebase sync setup error:', err);
       }
@@ -1197,6 +1236,12 @@ export default function App() {
     { id: 'CRM_OPPORTUNITIES', label: 'Opportunity', icon: Target, badge: crmOpportunities.length }
   ];
 
+  // Quotation Sub Tabs
+  const quotationSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = useMemo(() => [
+    { id: 'QUOTATION_PROPOSAL', label: 'Proposal', icon: FileSpreadsheet, badge: quotations.length },
+    { id: 'QUOTATION_TOOLS', label: 'Tools', icon: Wrench }
+  ], [quotations.length]);
+
   // Cash Book Sub Tabs
   const cashBookSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = useMemo(() => {
     const tabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
@@ -1544,6 +1589,81 @@ export default function App() {
     }
   };
 
+  // ==================== QUOTATION OPERATIONS ====================
+  const handleSaveQuotation = async (quotation: SolarQuotation, isSubmit?: boolean) => {
+    const finalQuo: SolarQuotation = {
+      ...quotation,
+      status: isSubmit ? 'SENT' : (quotation.status || 'DRAFT'),
+      sentAt: isSubmit ? new Date().toISOString() : quotation.sentAt
+    };
+
+    setQuotations(prev => {
+      const exists = prev.some(q => q.id === finalQuo.id);
+      if (exists) {
+        return prev.map(q => q.id === finalQuo.id ? finalQuo : q);
+      }
+      return [finalQuo, ...prev];
+    });
+
+    try {
+      await setDoc(doc(db, 'solar_quotations', finalQuo.id), finalQuo);
+      addLog(
+        isSubmit ? 'SUBMIT_QUOTATION' : 'SAVE_QUOTATION',
+        `${isSubmit ? 'Submitted' : 'Saved'} Solar Quotation ${finalQuo.quotationNo} (${finalQuo.revisionCode}) for ${finalQuo.clientName} - ₹${(finalQuo.grandTotal || 0).toLocaleString('en-IN')}`
+      );
+    } catch (err) {
+      console.error('Error saving quotation to Firestore:', err);
+    }
+
+    setActiveEditingQuotation(null);
+    setActiveTab('QUOTATION_PROPOSAL');
+  };
+
+  const handleUpdateQuotationStatus = async (quotationId: string, status: QuotationStatus, reason?: string) => {
+    const target = quotations.find(q => q.id === quotationId);
+    if (!target) return;
+
+    const updated: SolarQuotation = {
+      ...target,
+      status,
+      lostReason: status === 'LOST' ? (reason || target.lostReason) : target.lostReason
+    };
+
+    setQuotations(prev => prev.map(q => q.id === quotationId ? updated : q));
+    try {
+      await setDoc(doc(db, 'solar_quotations', quotationId), updated);
+      addLog(
+        'UPDATE_QUOTATION_STATUS',
+        `Marked Quotation ${target.quotationNo} (${target.revisionCode}) as ${status}${reason ? ` - Reason: ${reason}` : ''}`
+      );
+    } catch (err) {
+      console.error('Error updating quotation status:', err);
+    }
+  };
+
+  const handleDeleteQuotation = async (quotationId: string) => {
+    const target = quotations.find(q => q.id === quotationId);
+    setQuotations(prev => prev.filter(q => q.id !== quotationId));
+    try {
+      await deleteDoc(doc(db, 'solar_quotations', quotationId));
+      addLog('DELETE_QUOTATION', `Deleted Quotation ${target?.quotationNo || quotationId}`);
+    } catch (err) {
+      console.error('Error deleting quotation:', err);
+    }
+  };
+
+  const handleNavigateToTools = (quotationToEdit?: SolarQuotation) => {
+    setActiveEditingQuotation(quotationToEdit || null);
+    if (quotationToEdit) {
+      // Editing or creating specific proposal -> Open live proposal builder directly
+      setActiveTab('QUOTATION_PROPOSAL');
+    } else {
+      // General Tools access -> Open master template studio
+      setActiveTab('QUOTATION_TOOLS');
+    }
+    setOpenParentModule('QUOTATION');
+  };
+
   // Guard: Redirect to secure login
   if (!currentUser) {
     return <LoginScreen onLoginSuccess={handleLogin} usersList={users} />;
@@ -1601,6 +1721,69 @@ export default function App() {
                     className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
                   >
                     {crmSubTabs.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isSubActive = activeTab === sub.id;
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => setActiveTab(sub.id)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                            isSubActive
+                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{sub.label}</span>
+                          </div>
+                          {sub.badge !== undefined && sub.badge > 0 && (
+                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
+                              isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {sub.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* MODULE: Quotation */}
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
+                  if (!activeTab.startsWith('QUOTATION_')) {
+                    setActiveTab('QUOTATION_PROPOSAL');
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                  activeTab.startsWith('QUOTATION_')
+                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileSpreadsheet className="w-4 h-4 text-[#f7b944] shrink-0" />
+                  <span className="tracking-wide">Quotation</span>
+                </div>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'QUOTATION' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {openParentModule === 'QUOTATION' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15, ease: 'easeInOut' }}
+                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                  >
+                    {quotationSubTabs.map((sub) => {
                       const SubIcon = sub.icon;
                       const isSubActive = activeTab === sub.id;
                       return (
@@ -1923,6 +2106,38 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* Mobile Quotation */}
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => {
+                          setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
+                          if (!activeTab.startsWith('QUOTATION_')) setActiveTab('QUOTATION_PROPOSAL');
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileSpreadsheet className="w-4 h-4 text-[#f7b944]" />
+                          <span>Quotation</span>
+                        </div>
+                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'QUOTATION' ? 'rotate-180' : ''}`} />
+                      </button>
+                      {openParentModule === 'QUOTATION' && (
+                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                          {quotationSubTabs.map(sub => (
+                            <button
+                              key={sub.id}
+                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                              }`}
+                            >
+                              {sub.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     {/* Mobile HRMS */}
                     <button
                       onClick={() => { setActiveTab('HRMS'); setOpenParentModule('HRMS'); setIsMobileMenuOpen(false); }}
@@ -2065,6 +2280,10 @@ export default function App() {
             {activeTab === 'CRM_CONTACTS' && <UsersIcon className="w-4 h-4 text-indigo-600" />}
             {activeTab === 'CRM_OPPORTUNITIES' && <Target className="w-4 h-4 text-amber-600" />}
             
+            {/* Quotation Icons */}
+            {activeTab === 'QUOTATION_PROPOSAL' && <FileSpreadsheet className="w-4 h-4 text-amber-500" />}
+            {activeTab === 'QUOTATION_TOOLS' && <Wrench className="w-4 h-4 text-[#f7b944]" />}
+
             {/* HRMS Icon */}
             {activeTab === 'HRMS' && <Users2 className="w-4 h-4 text-indigo-600" />}
 
@@ -2084,6 +2303,10 @@ export default function App() {
               {activeTab === 'CRM_ACCOUNTS' && 'Accounts & Client Directory'}
               {activeTab === 'CRM_CONTACTS' && 'Contacts'}
               {activeTab === 'CRM_OPPORTUNITIES' && 'Sales Pipeline & Opportunities'}
+
+              {/* Quotation Headers */}
+              {activeTab === 'QUOTATION_PROPOSAL' && 'Quotations & Proposals'}
+              {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Studio'}
 
               {/* HRMS Header */}
               {activeTab === 'HRMS' && 'Human Resources Management System'}
@@ -2113,6 +2336,10 @@ export default function App() {
             {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
             {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
             {activeTab === 'CRM_SETTINGS' && 'Manage CRM preferences and configurations'}
+
+            {/* Quotation Descriptions */}
+            {activeTab === 'QUOTATION_PROPOSAL' && 'Track quotation pipeline, conversions, values, revisions, and status'}
+            {activeTab === 'QUOTATION_TOOLS' && 'Configure pre-defined templates, component libraries, pricing structures, default terms, and header/footer specifications'}
 
             {/* HRMS Description */}
             {activeTab === 'HRMS' && 'Employee directory, attendance logging, leave approval workflows, and payroll integration.'}
@@ -2189,6 +2416,33 @@ export default function App() {
               onDeleteOpportunity={handleDeleteCRMOpportunity}
               onAddAccount={handleAddCRMAccount}
               onAddContact={handleAddCRMContact}
+            />
+          )}
+          {activeTab === 'QUOTATION_PROPOSAL' && (
+            <QuotationDashboardView
+              quotations={quotations}
+              opportunities={crmOpportunities}
+              accounts={crmAccounts}
+              contacts={crmContacts}
+              currentUser={currentUser}
+              users={users}
+              appSettings={appSettings}
+              onNavigateToTools={handleNavigateToTools}
+              onSaveQuotation={handleSaveQuotation}
+              onUpdateQuotationStatus={handleUpdateQuotationStatus}
+              onDeleteQuotation={handleDeleteQuotation}
+            />
+          )}
+          {activeTab === 'QUOTATION_TOOLS' && (
+            <QuotationToolsView
+              opportunities={crmOpportunities}
+              accounts={crmAccounts}
+              contacts={crmContacts}
+              currentUser={currentUser}
+              appSettings={appSettings}
+              onSaveQuotation={handleSaveQuotation}
+              activeEditingQuotation={activeEditingQuotation}
+              onClearActiveQuotation={() => setActiveEditingQuotation(null)}
             />
           )}
           {activeTab === 'HRMS' && (
@@ -2295,6 +2549,10 @@ export default function App() {
               {activeTab === 'CRM_OPPORTUNITIES' && <Target className="w-5 h-5 text-amber-600" />}
               {activeTab === 'CRM_SETTINGS' && <Sliders className="w-5 h-5 text-slate-600" />}
               
+              {/* Quotation Icons */}
+              {activeTab === 'QUOTATION_PROPOSAL' && <FileSpreadsheet className="w-5 h-5 text-amber-500" />}
+              {activeTab === 'QUOTATION_TOOLS' && <Wrench className="w-5 h-5 text-[#f7b944]" />}
+
               {/* HRMS Icon */}
               {activeTab === 'HRMS' && <Users2 className="w-5 h-5 text-indigo-600" />}
 
@@ -2315,6 +2573,10 @@ export default function App() {
                 {activeTab === 'CRM_CONTACTS' && 'Contacts'}
                 {activeTab === 'CRM_OPPORTUNITIES' && 'Sales Pipeline & Opportunities'}
                 {activeTab === 'CRM_SETTINGS' && 'CRM Module Settings'}
+
+                {/* Quotation Headers */}
+                {activeTab === 'QUOTATION_PROPOSAL' && 'Quotations & Proposals'}
+                {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Studio'}
 
                 {/* HRMS Header */}
                 {activeTab === 'HRMS' && 'Human Resources Management System'}
@@ -2344,6 +2606,10 @@ export default function App() {
               {activeTab === 'CRM_CONTACTS' && 'Organize customer contacts, communication details, and key information'}
               {activeTab === 'CRM_OPPORTUNITIES' && 'Track potential deals, sales stages, values, and conversion progress'}
               {activeTab === 'CRM_SETTINGS' && 'Manage CRM preferences and configurations'}
+
+              {/* Quotation Descriptions */}
+              {activeTab === 'QUOTATION_PROPOSAL' && 'Track quotation pipeline, conversions, values, revisions, and status'}
+              {activeTab === 'QUOTATION_TOOLS' && 'Configure pre-defined templates, component libraries, pricing structures, default terms, and header/footer specifications'}
 
               {/* HRMS Description */}
               {activeTab === 'HRMS' && 'Employee directory, attendance logging, leave approval workflows, and payroll integration.'}
@@ -2431,6 +2697,48 @@ export default function App() {
                   onDeleteOpportunity={handleDeleteCRMOpportunity}
                   onAddAccount={handleAddCRMAccount}
                   onAddContact={handleAddCRMContact}
+                />
+              )}
+
+              {/* QUOTATION VIEWS */}
+              {activeTab === 'QUOTATION_PROPOSAL' && (
+                activeEditingQuotation ? (
+                  <LiveQuotationCanvas
+                    initialQuotation={activeEditingQuotation}
+                    opportunities={crmOpportunities}
+                    accounts={crmAccounts}
+                    contacts={crmContacts}
+                    currentUser={currentUser}
+                    appSettings={appSettings}
+                    onSave={handleSaveQuotation}
+                    onCancel={() => setActiveEditingQuotation(null)}
+                  />
+                ) : (
+                  <QuotationDashboardView
+                    quotations={quotations}
+                    opportunities={crmOpportunities}
+                    accounts={crmAccounts}
+                    contacts={crmContacts}
+                    currentUser={currentUser}
+                    users={users}
+                    appSettings={appSettings}
+                    onNavigateToTools={handleNavigateToTools}
+                    onSaveQuotation={handleSaveQuotation}
+                    onUpdateQuotationStatus={handleUpdateQuotationStatus}
+                    onDeleteQuotation={handleDeleteQuotation}
+                  />
+                )
+              )}
+              {activeTab === 'QUOTATION_TOOLS' && (
+                <QuotationToolsView
+                  opportunities={crmOpportunities}
+                  accounts={crmAccounts}
+                  contacts={crmContacts}
+                  currentUser={currentUser}
+                  appSettings={appSettings}
+                  onSaveQuotation={handleSaveQuotation}
+                  activeEditingQuotation={activeEditingQuotation}
+                  onClearActiveQuotation={() => setActiveEditingQuotation(null)}
                 />
               )}
 

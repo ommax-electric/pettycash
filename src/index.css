@@ -25,3 +25,12 @@ html, body, #root {
   width: 100%;
 }
 
+@media print {
+  html, body, #root {
+    overflow: visible !important;
+    height: auto !important;
+    width: auto !important;
+    background: transparent !important;
+  }
+}
+
