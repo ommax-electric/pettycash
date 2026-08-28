@@ -63,19 +63,19 @@ export default function SettingsView({
 
   // Preference State
   const [defaultPaymentMode, setDefaultPaymentMode] = useState<'CASH' | 'ONLINE'>(() => {
-    return (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE') || 'CASH';
+    return currentUser.preferences?.defaultPaymentMode || (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE') || 'CASH';
   });
   const [dateFormat, setDateFormat] = useState<'DD-MM-YYYY' | 'DD/MM/YYYY'>(() => {
-    return (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY') || 'DD-MM-YYYY';
+    return currentUser.preferences?.dateFormat || (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY') || 'DD-MM-YYYY';
   });
   const [defaultModule, setDefaultModule] = useState<string>(() => {
-    return localStorage.getItem('ommax_pref_default_module') || 'CRM';
+    return currentUser.preferences?.defaultModule || localStorage.getItem('ommax_pref_default_module') || 'CRM';
   });
   const [defaultDateFilter, setDefaultDateFilter] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL'>(() => {
-    return (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
+    return currentUser.preferences?.defaultDateFilter || (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
   });
   const [defaultCountryCode, setDefaultCountryCode] = useState<string>(() => {
-    return localStorage.getItem('ommax_pref_country_code') || crmSettings?.defaultCountryCode || '+91';
+    return currentUser.preferences?.defaultCountryCode || localStorage.getItem('ommax_pref_country_code') || crmSettings?.defaultCountryCode || '+91';
   });
 
   const [prefSuccess, setPrefSuccess] = useState(false);
@@ -95,13 +95,13 @@ export default function SettingsView({
     return all.filter(c => allowedSet.has(c.code));
   }, [crmSettings]);
 
-  // Sync preferences on mount or when returning to tab or when crmSettings changes
+  // Sync preferences on mount or when returning to tab or when crmSettings/currentUser changes
   useEffect(() => {
-    const savedPaymentMode = localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE';
-    const savedDateFormat = localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY';
-    const savedDefaultModule = localStorage.getItem('ommax_pref_default_module');
-    const savedDateFilter = localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL';
-    const savedCountryCode = localStorage.getItem('ommax_pref_country_code');
+    const savedPaymentMode = currentUser.preferences?.defaultPaymentMode || (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE');
+    const savedDateFormat = currentUser.preferences?.dateFormat || (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY');
+    const savedDefaultModule = currentUser.preferences?.defaultModule || localStorage.getItem('ommax_pref_default_module');
+    const savedDateFilter = currentUser.preferences?.defaultDateFilter || (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL');
+    const savedCountryCode = currentUser.preferences?.defaultCountryCode || localStorage.getItem('ommax_pref_country_code');
 
     if (savedPaymentMode) setDefaultPaymentMode(savedPaymentMode);
     if (savedDateFormat) setDateFormat(savedDateFormat);
@@ -112,7 +112,7 @@ export default function SettingsView({
     } else if (crmSettings?.defaultCountryCode) {
       setDefaultCountryCode(crmSettings.defaultCountryCode);
     }
-  }, [crmSettings?.defaultCountryCode]);
+  }, [currentUser.preferences, crmSettings?.defaultCountryCode]);
 
   // Handle Change Password Form Submit
   const handleChangePassword = (e: React.FormEvent) => {
@@ -194,12 +194,26 @@ export default function SettingsView({
   const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Save to local storage for persistence
+    // Save to local storage for instant access
     localStorage.setItem('ommax_pref_payment_mode', defaultPaymentMode);
     localStorage.setItem('ommax_pref_date_format', dateFormat);
     localStorage.setItem('ommax_pref_default_module', defaultModule);
     localStorage.setItem('ommax_pref_date_filter', defaultDateFilter);
     localStorage.setItem('ommax_pref_country_code', defaultCountryCode);
+
+    // Save to Firestore user profile so settings persist across preview, published url, and all devices
+    if (onUpdateUser) {
+      onUpdateUser({
+        ...currentUser,
+        preferences: {
+          defaultPaymentMode,
+          dateFormat,
+          defaultModule,
+          defaultDateFilter,
+          defaultCountryCode
+        }
+      });
+    }
 
     if (onUpdateAppSettings && appSettings) {
       onUpdateAppSettings({

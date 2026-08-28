@@ -1,5 +1,13 @@
 export type UserRole = 'ADMIN' | 'MANAGER' | 'CUSTODIAN' | 'AUDITOR' | 'USER';
 
+export interface UserPreferences {
+  defaultPaymentMode?: 'CASH' | 'ONLINE';
+  dateFormat?: 'DD-MM-YYYY' | 'DD/MM/YYYY';
+  defaultModule?: string;
+  defaultDateFilter?: 'THIS_MONTH' | 'LAST_30' | 'ALL';
+  defaultCountryCode?: string;
+}
+
 export interface User {
   id?: string;
   username: string; // Login Username
@@ -11,6 +19,7 @@ export interface User {
   password?: string;
   reportingTo?: string; // Username/FullName of reporting manager
   isManager?: boolean;
+  preferences?: UserPreferences;
 }
 
 export interface AppSettings {

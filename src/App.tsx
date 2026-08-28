@@ -80,8 +80,8 @@ export const APP_MODULES: AppModuleConfig[] = [
   { id: 'CASH_BOOK', label: 'Cash Book', defaultTab: 'CASHBOOK_DASHBOARD', hasSubmenu: true },
 ];
 
-export const getDefaultModuleState = (): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
-  const savedMod = (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_default_module') : null) as ParentModule | null;
+export const getDefaultModuleState = (userPrefModule?: string): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
+  const savedMod = (userPrefModule || (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_default_module') : null)) as ParentModule | null;
   const targetMod = savedMod || 'CRM';
   const found = APP_MODULES.find(m => m.id === targetMod) || APP_MODULES[0];
   return {
@@ -347,7 +347,10 @@ export default function App() {
           } else {
             snapshot.forEach((d) => {
               if (d.id === 'config') {
-                setAppSettings(d.data() as AppSettings);
+                setAppSettings({
+                  ...DEFAULT_APP_SETTINGS,
+                  ...(d.data() as AppSettings)
+                });
               } else if (d.id === 'integrations') {
                 const fetched = d.data() as IntegrationSettings;
                 const merged: IntegrationSettings = {
@@ -540,7 +543,7 @@ export default function App() {
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
-    const initialNav = getDefaultModuleState();
+    const initialNav = getDefaultModuleState(user.preferences?.defaultModule);
     setActiveTab(initialNav.defaultTab);
     setOpenParentModule(initialNav.defaultParent);
   };
@@ -2503,6 +2506,9 @@ export default function App() {
               currentUser={currentUser} 
               onUpdateUser={handleUpdateUser} 
               crmSettings={crmSettings}
+              appSettings={appSettings}
+              onUpdateAppSettings={handleUpdateAppSettings}
+              availableModules={APP_MODULES.map(m => ({ id: m.id, label: m.label }))}
             />
           )}
           {activeTab === 'ADMIN_SETTINGS' && (
