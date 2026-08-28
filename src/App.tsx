@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
-import { SolarQuotation, QuotationStatus } from './quotation/types';
+import { SolarQuotation, QuotationStatus, QuotationMasterConfig, DEFAULT_QUOTATION_MASTER_CONFIG } from './quotation/types';
 import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
 import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
@@ -188,6 +188,13 @@ export default function App() {
   // Quotation States
   const [quotations, setQuotations] = useState<SolarQuotation[]>([]);
   const [activeEditingQuotation, setActiveEditingQuotation] = useState<SolarQuotation | null>(null);
+  const [quotationMasterConfig, setQuotationMasterConfig] = useState<QuotationMasterConfig>(() => {
+    try {
+      const saved = localStorage.getItem('ommax_solar_quotation_master_config');
+      if (saved) return { ...DEFAULT_QUOTATION_MASTER_CONFIG, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_QUOTATION_MASTER_CONFIG;
+  });
 
   // Mobile navigation drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -245,6 +252,7 @@ export default function App() {
             for (const quo of INITIAL_SOLAR_QUOTATIONS) {
               await setDoc(doc(db, 'solar_quotations', quo.id), quo);
             }
+            await setDoc(doc(db, 'quotation_settings', 'master_config'), DEFAULT_QUOTATION_MASTER_CONFIG);
           } else {
             localStorage.setItem('petty_cash_db_seeded', 'true');
           }
@@ -427,7 +435,24 @@ export default function App() {
           }
         }, (err) => console.warn('Solar quotations sync notice:', err));
 
-        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos];
+        // 11. Quotation Settings Sync
+        const unsubQuoSettings = onSnapshot(collection(db, 'quotation_settings'), (snapshot) => {
+          if (!snapshot.empty) {
+            snapshot.forEach(d => {
+              if (d.id === 'master_config') {
+                const fetched = d.data() as QuotationMasterConfig;
+                const merged: QuotationMasterConfig = {
+                  ...DEFAULT_QUOTATION_MASTER_CONFIG,
+                  ...fetched
+                };
+                setQuotationMasterConfig(merged);
+                localStorage.setItem('ommax_solar_quotation_master_config', JSON.stringify(merged));
+              }
+            });
+          }
+        }, (err) => console.warn('Quotation settings sync notice:', err));
+
+        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos, unsubQuoSettings];
       } catch (err) {
         console.error('Firebase sync setup error:', err);
       }
@@ -1655,6 +1680,17 @@ export default function App() {
     }
   };
 
+  const handleUpdateQuotationMasterConfig = async (newConfig: QuotationMasterConfig) => {
+    setQuotationMasterConfig(newConfig);
+    localStorage.setItem('ommax_solar_quotation_master_config', JSON.stringify(newConfig));
+    try {
+      await setDoc(doc(db, 'quotation_settings', 'master_config'), newConfig);
+      addLog('QUOTATION_SETTINGS_UPDATE', 'Updated Solar Quotation Master Configuration & Templates');
+    } catch (e) {
+      console.warn('Failed to save quotation master config to Firestore:', e);
+    }
+  };
+
   const handleNavigateToTools = (quotationToEdit?: SolarQuotation) => {
     setActiveEditingQuotation(quotationToEdit || null);
     if (quotationToEdit) {
@@ -2430,6 +2466,7 @@ export default function App() {
               currentUser={currentUser}
               users={users}
               appSettings={appSettings}
+              masterConfig={quotationMasterConfig}
               onNavigateToTools={handleNavigateToTools}
               onSaveQuotation={handleSaveQuotation}
               onUpdateQuotationStatus={handleUpdateQuotationStatus}
@@ -2443,6 +2480,8 @@ export default function App() {
               contacts={crmContacts}
               currentUser={currentUser}
               appSettings={appSettings}
+              masterConfig={quotationMasterConfig}
+              onUpdateMasterConfig={handleUpdateQuotationMasterConfig}
               onSaveQuotation={handleSaveQuotation}
               activeEditingQuotation={activeEditingQuotation}
               onClearActiveQuotation={() => setActiveEditingQuotation(null)}
@@ -2728,6 +2767,7 @@ export default function App() {
                     currentUser={currentUser}
                     users={users}
                     appSettings={appSettings}
+                    masterConfig={quotationMasterConfig}
                     onNavigateToTools={handleNavigateToTools}
                     onSaveQuotation={handleSaveQuotation}
                     onUpdateQuotationStatus={handleUpdateQuotationStatus}
@@ -2742,6 +2782,8 @@ export default function App() {
                   contacts={crmContacts}
                   currentUser={currentUser}
                   appSettings={appSettings}
+                  masterConfig={quotationMasterConfig}
+                  onUpdateMasterConfig={handleUpdateQuotationMasterConfig}
                   onSaveQuotation={handleSaveQuotation}
                   activeEditingQuotation={activeEditingQuotation}
                   onClearActiveQuotation={() => setActiveEditingQuotation(null)}

@@ -55,6 +55,8 @@ interface QuotationToolsViewProps {
   contacts?: CRMContact[];
   currentUser: User | null;
   appSettings: AppSettings;
+  masterConfig?: QuotationMasterConfig;
+  onUpdateMasterConfig?: (config: QuotationMasterConfig) => void;
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
   activeEditingQuotation?: SolarQuotation | null;
   onClearActiveQuotation?: () => void;
@@ -78,10 +80,13 @@ export type MasterConfigTab =
 
 export default function QuotationToolsView({
   currentUser,
-  appSettings
+  appSettings,
+  masterConfig,
+  onUpdateMasterConfig
 }: QuotationToolsViewProps) {
   // Master Config State
   const [config, setConfig] = useState<QuotationMasterConfig>(() => {
+    if (masterConfig) return masterConfig;
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -92,6 +97,13 @@ export default function QuotationToolsView({
     }
     return DEFAULT_QUOTATION_MASTER_CONFIG;
   });
+
+  // Sync state if masterConfig prop changes from Firestore
+  useEffect(() => {
+    if (masterConfig) {
+      setConfig(masterConfig);
+    }
+  }, [masterConfig]);
 
   const [activeTab, setActiveTab] = useState<MasterConfigTab>('GENERAL');
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -181,6 +193,9 @@ export default function QuotationToolsView({
   const handleSaveConfig = () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      if (onUpdateMasterConfig) {
+        onUpdateMasterConfig(config);
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err) {
@@ -192,6 +207,9 @@ export default function QuotationToolsView({
     if (window.confirm('Are you sure you want to reset all master configuration templates, dropdowns, and pricing to default values?')) {
       setConfig(DEFAULT_QUOTATION_MASTER_CONFIG);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_QUOTATION_MASTER_CONFIG));
+      if (onUpdateMasterConfig) {
+        onUpdateMasterConfig(DEFAULT_QUOTATION_MASTER_CONFIG);
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
     }

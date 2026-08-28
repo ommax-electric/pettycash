@@ -52,6 +52,7 @@ interface QuotationDashboardViewProps {
   currentUser: User | null;
   users?: User[];
   appSettings: AppSettings;
+  masterConfig?: QuotationMasterConfig;
   onNavigateToTools: (quotationToEdit?: SolarQuotation) => void;
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
   onUpdateQuotationStatus: (quotationId: string, status: QuotationStatus, reason?: string) => void;
@@ -70,8 +71,9 @@ const STANDARD_CAPACITIES = [2.22, 3.33, 4.95, 5.00, 5.50, 10.00, 15.00, 20.00];
 const PAGE_SIZE = 10;
 const MASTER_CONFIG_STORAGE_KEY = 'ommax_solar_quotation_master_config';
 
-// Helper to load live master configuration from Tools storage
-function getMasterConfig(): QuotationMasterConfig {
+// Helper to load live master configuration from Tools storage or prop
+function getMasterConfig(propConfig?: QuotationMasterConfig): QuotationMasterConfig {
+  if (propConfig) return propConfig;
   try {
     const raw = localStorage.getItem(MASTER_CONFIG_STORAGE_KEY);
     if (raw) {
@@ -471,6 +473,7 @@ export default function QuotationDashboardView({
   accounts,
   contacts,
   currentUser,
+  masterConfig: propMasterConfig,
   onNavigateToTools,
   onSaveQuotation,
   onUpdateQuotationStatus,
@@ -1115,7 +1118,7 @@ export default function QuotationDashboardView({
   };
 
   // Live master configuration options for dropdowns and defaults
-  const masterConfig = getMasterConfig();
+  const masterConfig = getMasterConfig(propMasterConfig);
 
   // Live pricing breakdown computation for the questionnaire modal preview
   const livePricingPreview = useMemo(() => {
