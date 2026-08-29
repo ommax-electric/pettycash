@@ -14,7 +14,10 @@ import {
   DEFAULT_TECHNICAL_ASSUMPTIONS,
   DEFAULT_EXCLUSIONS,
   DEFAULT_SAVINGS_BENEFITS,
-  SolarBenefitRow
+  SolarBenefitRow,
+  renderFormattedText,
+  interpolateOpeningText,
+  interpolateSubject
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -117,12 +120,12 @@ export default function LiveQuotationCanvas({
 
     const boq: BOQItem[] = [
       { id: 'boq-1', slNo: 1, itemDescription: `SERVOTEC HHV [550 Wp] Mono Perc DCR Panels`, quantity: `${defaultCapacity} kWp` },
-      { id: 'boq-2', slNo: 2, itemDescription: 'Battery Storage', quantity: 'Nill' },
-      { id: 'boq-3', slNo: 3, itemDescription: 'Table RCC Mounting Structure Elevation (Hot-Dip Galvanized)', quantity: '7 Feet' },
-      { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC', quantity: '1 Nos' },
-      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & MC4 Connectors', quantity: `${defaultCapacity} kWp` },
+      { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter Make: SERVOTEC', quantity: '1 Nos' },
+      { id: 'boq-3', slNo: 3, itemDescription: 'Nil', quantity: 'Nil' },
+      { id: 'boq-4', slNo: 4, itemDescription: 'Table RCC Elevated Structure', quantity: '7 Feet' },
+      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: `${defaultCapacity} kWp` },
       { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: `${defaultCapacity} kWp` },
-      { id: 'boq-7', slNo: 7, itemDescription: 'Installation, Testing & Grid Commissioning', quantity: `${defaultCapacity} kWp` }
+      { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: `${defaultCapacity} kWp` }
     ];
 
     return {
@@ -219,11 +222,11 @@ export default function LiveQuotationCanvas({
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [selectedOppId, setSelectedOppId] = useState<string>(formData.opportunityId || '');
 
-  // Helper getters for Scope Quantities
+  // Helper getters for Scope Quantities (a: Modules, b: Inverter, c: Battery, d: Structure)
   const moduleItem = formData.boqItems.find(i => i.slNo === 1);
-  const batteryItem = formData.boqItems.find(i => i.slNo === 2);
-  const structureItem = formData.boqItems.find(i => i.slNo === 3);
-  const inverterItem = formData.boqItems.find(i => i.slNo === 4);
+  const inverterItem = formData.boqItems.find(i => i.slNo === 2);
+  const batteryItem = formData.boqItems.find(i => i.slNo === 3);
+  const structureItem = formData.boqItems.find(i => i.slNo === 4);
 
   // Quick update helpers for BOQ item quantities and descriptions
   const updateBoqQuantity = (slNo: number, newQty: string) => {
@@ -249,7 +252,18 @@ export default function LiveQuotationCanvas({
     const acc = accounts.find(a => a.id === opp?.accountId);
     const con = contacts.find(c => c.id === opp?.contactId);
 
-    const clientName = con?.name || acc?.name || opp?.title || 'Valued Client';
+    let clientName = 'Valued Client';
+    if (con) {
+      const rawName = (con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || '').trim();
+      const sal = (con.salutation || '').trim();
+      if (sal && rawName && !rawName.toLowerCase().startsWith(sal.toLowerCase())) {
+        clientName = `${sal} ${rawName}`;
+      } else {
+        clientName = rawName || acc?.name || opp?.title || 'Valued Client';
+      }
+    } else {
+      clientName = acc?.name || opp?.title || 'Valued Client';
+    }
 
     // Construct full comprehensive postal address
     const addressParts: string[] = [];
@@ -300,11 +314,8 @@ export default function LiveQuotationCanvas({
       if (item.slNo === 1 || item.slNo === 5 || item.slNo === 6 || item.slNo === 7) {
         return { ...item, quantity: `${validCap} kWp` };
       }
-      if (item.slNo === 3 && item.itemDescription.includes('kW')) {
-        return { ...item, itemDescription: `Table RCC Mounting Structure Elevation for ${Math.ceil(validCap)} kW` };
-      }
-      if (item.slNo === 4 && item.itemDescription.includes('kVA')) {
-        return { ...item, itemDescription: `${Math.ceil(validCap)} kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC` };
+      if (item.slNo === 2 && item.itemDescription.includes('kVA')) {
+        return { ...item, itemDescription: `Solar Inverter – ${Math.ceil(validCap)} kVA Single Phase On-Grid Inverter Make: SERVOTEC` };
       }
       return item;
     });
@@ -799,14 +810,14 @@ export default function LiveQuotationCanvas({
                     2. Solar Inverter (Invertor Field)
                   </label>
                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                    Item 4
+                    Item 2
                   </span>
                 </div>
 
                 {/* Brand Quick Selector */}
                 <div className="flex flex-wrap gap-1">
                   {[
-                    { label: 'Servotec', full: 'On-Grid Solar Inverter – Make: SERVOTEC', brandName: 'Servotec' },
+                    { label: 'Servotec', full: 'On-Grid Solar Inverter Make: SERVOTEC', brandName: 'Servotec' },
                     { label: 'Growatt', full: 'Growatt On-Grid Smart Inverter with Dual MPPT & WiFi Monitoring', brandName: 'Growatt' },
                     { label: 'Solis', full: 'Solis High-Efficiency Dual MPPT Grid-Tie Solar Inverter', brandName: 'Solis' },
                     { label: 'Sungrow', full: 'Sungrow Commercial Three Phase Inverter with AFCI Protection', brandName: 'Sungrow' },
@@ -816,7 +827,7 @@ export default function LiveQuotationCanvas({
                       key={idx}
                       type="button"
                       onClick={() => {
-                        updateBoqDescription(4, inv.full);
+                        updateBoqDescription(2, inv.full);
                         setFormData(prev => ({
                           ...prev,
                           brandDeclarations: prev.brandDeclarations.map(b => 
@@ -841,7 +852,7 @@ export default function LiveQuotationCanvas({
                   <input
                     type="text"
                     value={inverterItem?.itemDescription || ''}
-                    onChange={(e) => updateBoqDescription(4, e.target.value)}
+                    onChange={(e) => updateBoqDescription(2, e.target.value)}
                     className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
                     placeholder="Inverter description..."
                   />
@@ -853,7 +864,7 @@ export default function LiveQuotationCanvas({
                     <input
                       type="text"
                       value={inverterItem?.quantity || '1 Nos'}
-                      onChange={(e) => updateBoqQuantity(4, e.target.value)}
+                      onChange={(e) => updateBoqQuantity(2, e.target.value)}
                       className="w-full text-xs font-mono font-black px-2.5 py-1.5 bg-white border-2 border-amber-400 rounded-lg text-slate-900"
                       placeholder="e.g. 1 Nos, 2 Nos"
                     />
@@ -883,16 +894,24 @@ export default function LiveQuotationCanvas({
                     3. Battery Storage (Battery Field)
                   </label>
                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                    Item 2
+                    Item 3
                   </span>
                 </div>
 
                 <select
-                  value={batteryItem?.itemDescription || 'Battery Storage'}
-                  onChange={(e) => updateBoqDescription(2, e.target.value)}
-                  className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium"
+                  value={batteryItem?.itemDescription || 'Nil'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateBoqDescription(3, val);
+                    if (val === 'Nil' || val.toLowerCase().includes('nil')) {
+                      updateBoqQuantity(3, 'Nil');
+                    } else if (batteryItem?.quantity === 'Nil' || !batteryItem?.quantity) {
+                      updateBoqQuantity(3, '1 Nos');
+                    }
+                  }}
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium cursor-pointer"
                 >
-                  <option value="Battery Storage (Nill - Direct Net-Metering)">Nill (Direct Net-Metering On-Grid)</option>
+                  <option value="Nil">Nil (Direct Net-Metering On-Grid)</option>
                   <option value="5.12 kWh LiFePO4 Lithium Solar Battery Pack">5.12 kWh LiFePO4 Lithium Solar Battery Pack</option>
                   <option value="10.24 kWh High-Capacity Lithium Iron Phosphate (LFP) Battery">10.24 kWh High-Capacity Lithium Iron Phosphate (LFP) Battery</option>
                   <option value="Tubular C10 Solar Deep-Cycle Lead Acid Batteries (48V Bank)">Tubular C10 Solar Deep-Cycle Lead Acid Batteries (48V Bank)</option>
@@ -904,16 +923,16 @@ export default function LiveQuotationCanvas({
                     <label className="block text-[10px] font-bold text-amber-900 uppercase">Battery Quantity (Qty) *</label>
                     <input
                       type="text"
-                      value={batteryItem?.quantity || 'Nill'}
-                      onChange={(e) => updateBoqQuantity(2, e.target.value)}
+                      value={batteryItem?.quantity || 'Nil'}
+                      onChange={(e) => updateBoqQuantity(3, e.target.value)}
                       className="w-full text-xs font-mono font-black px-2.5 py-1.5 bg-white border-2 border-amber-400 rounded-lg text-slate-900"
-                      placeholder="e.g. Nill, 1 Set, 2 Nos"
+                      placeholder="e.g. Nil, 1 Nos, 2 Nos"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-600 uppercase">Battery Status</label>
                     <span className="block text-xs font-bold text-slate-700 py-1.5 px-2 bg-slate-100 rounded-lg">
-                      {batteryItem?.quantity?.toLowerCase().includes('nill') ? 'On-Grid (No Battery)' : 'Hybrid / Storage Active'}
+                      {batteryItem?.quantity?.toLowerCase().includes('nil') || batteryItem?.itemDescription?.toLowerCase().includes('nil') ? 'On-Grid (No Battery)' : 'Hybrid / Storage Active'}
                     </span>
                   </div>
                 </div>
@@ -926,14 +945,14 @@ export default function LiveQuotationCanvas({
                     4. Mounting Structure & Elevation
                   </label>
                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                    Item 3
+                    Item 4
                   </span>
                 </div>
 
                 <input
                   type="text"
                   value={structureItem?.itemDescription || ''}
-                  onChange={(e) => updateBoqDescription(3, e.target.value)}
+                  onChange={(e) => updateBoqDescription(4, e.target.value)}
                   className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
                   placeholder="Mounting structure description..."
                 />
@@ -944,9 +963,9 @@ export default function LiveQuotationCanvas({
                     <input
                       type="text"
                       value={structureItem?.quantity || '7 Feet'}
-                      onChange={(e) => updateBoqQuantity(3, e.target.value)}
+                      onChange={(e) => updateBoqQuantity(4, e.target.value)}
                       className="w-full text-xs font-mono font-bold px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
-                      placeholder="e.g. 7 Feet or 1 Set"
+                      placeholder="e.g. 7 Feet or 7 to 10 Feet"
                     />
                   </div>
                   <div>
@@ -1720,8 +1739,20 @@ export default function LiveQuotationCanvas({
                 </div>
 
                 <div className="pt-2 mt-2 border-t border-slate-200">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Subject:</span>
-                  <div className="font-extrabold text-slate-900">{formData.subject}</div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">Subject:</span>
+                  <span className="text-slate-900 font-normal">
+                    {renderFormattedText(
+                      interpolateSubject(formData.subject, {
+                        capacityKw: formData.capacityKw,
+                        capacityKwp: formData.capacityKwp || formData.capacityKw,
+                        connectionType: formData.connectionType || formData.systemType,
+                        scheme: formData.scheme,
+                        clientName: formData.clientName,
+                        projectName: formData.projectName,
+                        location: formData.location
+                      })
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -1736,16 +1767,23 @@ export default function LiveQuotationCanvas({
                   Click to Edit Intro
                 </span>
                 <div className="font-bold text-slate-900 mb-1">{formData.salutation}</div>
-                <p className="text-slate-700 leading-relaxed text-justify">
-                  {masterConfig.introOpeningText || 'We thank you for giving us an opportunity to submit our proposal for setting up Solar PV Power Plant.'} We are pleased to submit our techno-commercial proposal for your esteemed{' '}
-                  <span className="font-bold text-slate-900 underline decoration-amber-500 decoration-2">
-                    {formData.capacityKwp} kWp {formData.systemType === 'ON_GRID' ? 'On Grid-Connected Solar PV Plant' : formData.systemType}
-                  </span>{' '}
-                  under the{' '}
-                  <span className="font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                    {formData.scheme}
-                  </span>.
-                </p>
+                <div className="text-slate-700 leading-relaxed text-justify space-y-2">
+                  {(() => {
+                    const rawIntro = formData.introOpeningText || masterConfig.introOpeningText;
+                    const interpolated = interpolateOpeningText(rawIntro, {
+                      connectionType: formData.connectionType,
+                      targetSegment: formData.targetSegment,
+                      scheme: formData.scheme,
+                      capacityKw: formData.capacityKw,
+                      clientName: formData.clientName,
+                      projectName: formData.projectName
+                    });
+                    const paragraphs = interpolated.split(/\r?\n+/).map(p => p.trim()).filter(Boolean);
+                    return paragraphs.map((para, pIdx) => (
+                      <p key={pIdx}>{renderFormattedText(para)}</p>
+                    ));
+                  })()}
+                </div>
               </div>
             </div>
 
@@ -1785,7 +1823,7 @@ export default function LiveQuotationCanvas({
                       </span>
                     </div>
                     <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {moduleItem?.itemDescription || 'SERVOTEC 550 Wp Mono Perc DCR'}
+                      {moduleItem?.itemDescription || 'Solar PV Modules – 550 Wp Mono Perc DCR'}
                     </span>
                   </div>
 
@@ -1794,24 +1832,24 @@ export default function LiveQuotationCanvas({
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold uppercase text-amber-900">Solar Inverter</span>
                       <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-200/80 px-1.5 py-0.2 rounded">
-                        Qty: {inverterItem?.quantity || '1 Nos'}
+                        Qty: {inverterItem?.quantity || '1 Set'}
                       </span>
                     </div>
                     <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {inverterItem?.itemDescription || 'SERVOTEC Grid Tied Inverter'}
+                      {inverterItem?.itemDescription || 'Solar Inverter – On-Grid Inverter'}
                     </span>
                   </div>
 
                   {/* Battery */}
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-slate-600">Battery Storage</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-600">Battery</span>
                       <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
-                        Qty: {batteryItem?.quantity || 'Nill'}
+                        Qty: {batteryItem?.quantity || 'Nil'}
                       </span>
                     </div>
                     <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {batteryItem?.itemDescription || 'Battery Storage (Nill)'}
+                      {batteryItem?.itemDescription && batteryItem.itemDescription !== 'Nil' ? batteryItem.itemDescription : 'Battery'}
                     </span>
                   </div>
 
@@ -1820,11 +1858,11 @@ export default function LiveQuotationCanvas({
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold uppercase text-slate-600">Mounting Structure</span>
                       <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
-                        Elevation: {structureItem?.quantity || '7 Feet'}
+                        Qty: {structureItem?.quantity || '7 Feet'}
                       </span>
                     </div>
                     <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {structureItem?.itemDescription || 'Table RCC Structure'}
+                      {structureItem?.itemDescription || 'Mounting Structure – Table RCC Structure'}
                     </span>
                   </div>
                 </div>
@@ -1835,7 +1873,7 @@ export default function LiveQuotationCanvas({
                     <span className="font-bold text-slate-800 block mb-1">Supply Includes ({formData.supplyIncludes.length}):</span>
                     <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
                       {formData.supplyIncludes.slice(0, 4).map((s, i) => (
-                        <li key={i} className="truncate">{s}</li>
+                        <li key={i} className="truncate">{renderFormattedText(s)}</li>
                       ))}
                       {formData.supplyIncludes.length > 4 && (
                         <li className="text-[10px] text-amber-700 font-semibold">+ {formData.supplyIncludes.length - 4} more items</li>
@@ -1846,7 +1884,7 @@ export default function LiveQuotationCanvas({
                     <span className="font-bold text-slate-800 block mb-1">Installation Includes ({formData.installationIncludes.length}):</span>
                     <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
                       {formData.installationIncludes.slice(0, 4).map((inst, i) => (
-                        <li key={i} className="truncate">{inst}</li>
+                        <li key={i} className="truncate">{renderFormattedText(inst)}</li>
                       ))}
                     </ul>
                   </div>

@@ -1,5 +1,12 @@
 import React from 'react';
-import { SolarQuotation, SolarBenefitRow, DEFAULT_SAVINGS_BENEFITS } from '../../quotation/types';
+import { 
+  SolarQuotation, 
+  SolarBenefitRow, 
+  DEFAULT_SAVINGS_BENEFITS,
+  renderFormattedText,
+  interpolateOpeningText,
+  interpolateSubject
+} from '../../quotation/types';
 import { Printer, Download, X, ZoomIn, ZoomOut, CheckCircle2, ShieldCheck, Phone, Mail, Globe, MapPin, QrCode, Edit3, Save, Send, ArrowLeft } from 'lucide-react';
 import { formatDateToDMY } from '../../types';
 
@@ -533,40 +540,41 @@ export default function Quotation5PagePrintView({
               </div>
 
               {/* Subject */}
-              <div className="text-xs font-bold text-slate-900 mb-5">
-                Subject : {quotation.subject || `Proposal for ${quotation.capacityKw} kWp Roof top Solar`}
+              <div className="text-xs text-slate-900 mb-5">
+                <span className="font-bold">Subject : </span>
+                <span className="font-normal">
+                  {renderFormattedText(
+                    interpolateSubject(quotation.subject || `Proposal for ${quotation.capacityKw} kWp Roof top Solar`, {
+                      capacityKw: quotation.capacityKw,
+                      capacityKwp: quotation.capacityKwp || quotation.capacityKw,
+                      connectionType: quotation.connectionType,
+                      scheme: quotation.scheme,
+                      clientName: quotation.clientName,
+                      projectName: quotation.projectName,
+                      location: quotation.location
+                    })
+                  )}
+                </span>
               </div>
 
               {/* Salutation & Intro */}
               <div className="text-xs text-slate-700 leading-relaxed mb-6 space-y-2.5">
                 <p className="font-semibold text-slate-800">{quotation.salutation || 'Dear Valued Customer,'}</p>
                 {(() => {
-                  const customIntro = quotation.introOpeningText || getToolsIntroText();
-                  if (customIntro && customIntro.trim()) {
-                    const interpolated = customIntro
-                      .replace(/\{\{systemType\}\}/g, quotation.connectionType || 'On Grid-Connected Solar PV Power Plant')
-                      .replace(/\{\{segmentPlace\}\}/g, segmentPlace)
-                      .replace(/\{\{scheme\}\}/g, quotation.scheme || '')
-                      .replace(/\{\{capacity\}\}/g, `${quotation.capacityKw} kWp`)
-                      .replace(/\{\{clientName\}\}/g, quotation.clientName || '')
-                      .replace(/\{\{projectName\}\}/g, quotation.projectName || '');
-                    
-                    const paragraphs = interpolated.split(/\n\s*\n/).filter(Boolean);
-                    return paragraphs.map((para, pIdx) => (
-                      <p key={pIdx}>{para.trim()}</p>
-                    ));
-                  }
-
-                  return (
-                    <>
-                      <p>
-                        In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of an {quotation.connectionType || 'On Grid-Connected Solar PV Power Plant'} at {segmentPlace} under the {quotation.scheme}.
-                      </p>
-                      <p>
-                        We look forward to supporting your sustainability goals through our trusted solar solutions.
-                      </p>
-                    </>
-                  );
+                  const rawIntro = quotation.introOpeningText || getToolsIntroText();
+                  const interpolated = interpolateOpeningText(rawIntro, {
+                    connectionType: quotation.connectionType,
+                    targetSegment: quotation.targetSegment,
+                    scheme: quotation.scheme,
+                    capacityKw: quotation.capacityKw,
+                    clientName: quotation.clientName,
+                    projectName: quotation.projectName
+                  });
+                  
+                  const paragraphs = interpolated.split(/\r?\n+/).map(p => p.trim()).filter(Boolean);
+                  return paragraphs.map((para, pIdx) => (
+                    <p key={pIdx}>{renderFormattedText(para)}</p>
+                  ));
                 })()}
               </div>
 
@@ -580,9 +588,54 @@ export default function Quotation5PagePrintView({
                 <div>
                   <div className="text-xs font-bold text-slate-800 mb-1.5">Supply Includes:</div>
                   <ul className="text-[11.5px] text-slate-700 space-y-1.5 list-disc pl-5 leading-snug">
-                    {quotation.supplyIncludes.map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
+                    {(() => {
+                      const isBoqBatteryNil = !quotation.boqItems?.some(b => (b.slNo === 3 || b.id === 'boq-3' || b.itemDescription?.toLowerCase().includes('battery')) && b.quantity && !b.quantity.toLowerCase().includes('nil') && b.quantity !== '0' && b.quantity !== '0 Nos');
+                      const isBoqStructureNil = !quotation.boqItems?.some(b => (b.slNo === 4 || b.id === 'boq-4' || b.itemDescription?.toLowerCase().includes('structure') || b.itemDescription?.toLowerCase().includes('mounting')) && b.quantity && !b.quantity.toLowerCase().includes('nil') && b.quantity !== '0' && b.quantity !== '0 Feet' && b.quantity !== '0 ft');
+
+                      let rawList = [...(quotation.supplyIncludes || [])];
+
+                      // If structure is active in BOQ (not Nil) and not present in supplyIncludes, dynamically inject it
+                      if (!isBoqStructureNil) {
+                        const hasStructureInSupply = rawList.some(item => {
+                          const lower = item.toLowerCase();
+                          return (lower.includes('structure') || lower.includes('mounting') || lower.includes('flush mount') || lower.includes('rcc')) && !lower.includes('nil');
+                        });
+                        if (!hasStructureInSupply) {
+                          const boqStruct = quotation.boqItems?.find(b => b.slNo === 4 || b.id === 'boq-4' || b.itemDescription?.toLowerCase().includes('structure') || b.itemDescription?.toLowerCase().includes('mounting'));
+                          const structText = boqStruct?.itemDescription || 'Mounting Structure (Hot-Dip Galvanized / Anodized)';
+                          // Insert after inverters/modules
+                          rawList.splice(2, 0, structText);
+                        }
+                      }
+
+                      return rawList
+                        .map((item) => {
+                          // Strip dropdown headings/prefixes so only chosen items are shown
+                          let cleanItem = item.replace(/^(?:solar\s*pv\s*modules?|grid-tied\s*\/\s*hybrid\s*solar\s*inverter|module\s*mounting\s*structures?|mounting\s*structures?|battery\s*energy\s*storage|battery\s*storage|battery)\s*[:–-]\s*/i, '').trim();
+                          // Remove redundant qty annotations from Supply Includes (quantity belongs in Item Description BOQ table only)
+                          cleanItem = cleanItem.replace(/\s*\((?:qty:\s*)?\d+\s*nos\)/gi, '').trim();
+                          cleanItem = cleanItem.replace(/\s*\(\s*nill?[^)]*\)/gi, '').trim();
+                          // Replace any remaining "Nill" with "Nil"
+                          cleanItem = cleanItem.replace(/\bNill\b/gi, 'Nil');
+                          return cleanItem;
+                        })
+                        .filter((cleanItem) => {
+                          if (!cleanItem || !cleanItem.trim()) return false;
+                          const lower = cleanItem.toLowerCase().trim();
+                          // Omit if it's "Nil", "0", or bare category names that denote zero/nil items
+                          if (lower === 'nil' || lower.includes('nill') || lower === '0' || lower === '0 nos' || lower === '0 feet') return false;
+                          
+                          // If BOQ indicates battery is Nil, omit any battery supply line
+                          if (isBoqBatteryNil && lower.includes('battery')) return false;
+                          // If BOQ indicates structure is Nil, omit any structure supply line
+                          if (isBoqStructureNil && (lower.includes('structure') || lower.includes('mounting'))) return false;
+
+                          return true;
+                        })
+                        .map((cleanItem, idx) => (
+                          <li key={idx}>{renderFormattedText(cleanItem)}</li>
+                        ));
+                    })()}
                   </ul>
                 </div>
 
@@ -591,7 +644,7 @@ export default function Quotation5PagePrintView({
                   <div className="text-xs font-bold text-slate-800 mb-1.5">Installation Includes:</div>
                   <ul className="text-[11.5px] text-slate-700 space-y-1.5 list-disc pl-5 leading-snug">
                     {quotation.installationIncludes.map((item, idx) => (
-                      <li key={idx}>{item}</li>
+                      <li key={idx}>{renderFormattedText(item)}</li>
                     ))}
                   </ul>
                 </div>
@@ -638,27 +691,60 @@ export default function Quotation5PagePrintView({
                 <thead>
                   <tr className="bg-slate-800 text-white text-[11px] font-bold">
                     <th className="border border-slate-500 py-1.5 px-2 w-12 text-center">SL No</th>
-                    <th className="border border-slate-500 py-1.5 px-3 text-left">Item Description</th>
+                    <th className="border border-slate-500 py-1.5 px-3 text-center">Item Description</th>
                     <th className="border border-slate-500 py-1.5 px-3 w-24 text-center">Quantity</th>
                     <th className="border border-slate-500 py-1.5 px-3 w-32 text-right">Total Price (Rs.)</th>
                   </tr>
                 </thead>
                 <tbody className="text-[11px]">
-                  {quotation.boqItems.map((item, index) => (
-                    <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                      <td className="border border-slate-300 py-1.5 px-2 text-center font-bold">{item.slNo}</td>
-                      <td className="border border-slate-300 py-1.5 px-3">{item.itemDescription}</td>
-                      <td className="border border-slate-300 py-1.5 px-3 text-center">{item.quantity}</td>
-                      {index === 0 && (
-                        <td 
-                          rowSpan={quotation.boqItems.length} 
-                          className="border border-slate-400 py-2 px-3 text-right font-black align-middle text-sm text-slate-900 bg-amber-50/30 tabular-nums"
-                        >
-                          {quotation.basicCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
+                  {quotation.boqItems.map((item, index) => {
+                    let desc = item.itemDescription || '';
+                    // Strip dropdown headings/prefixes so only chosen items are shown
+                    desc = desc.replace(/^(?:solar\s*pv\s*modules?|solar\s*inverter|grid-tied\s*\/\s*hybrid\s*solar\s*inverter|battery(?:\s*energy)?(?:\s*storage)?|mounting\s*structure|module\s*mounting\s*structure)\s*[-–:]\s*/i, '').trim();
+                    // Clean elevation feet from structure description if present (elevation feet belongs in Quantity column only)
+                    desc = desc.replace(/\s*\((?:elevated\s*)?\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft|height)\)/gi, '');
+                    desc = desc.replace(/\s*elevation\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)/gi, '');
+                    desc = desc.replace(/\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)\s*(?:height)?/gi, '');
+                    desc = desc.replace(/\s*\(\s*\)/g, '').trim();
+
+                    // Clean quantity
+                    let qty = item.quantity || '';
+                    if (qty.toLowerCase() === 'nill') qty = 'Nil';
+
+                    // Check for item 3 (Battery) and item 4 (Mounting Structure) nil states
+                    const isBatteryRow = item.slNo === 3 || item.id === 'boq-3' || (item.itemDescription && item.itemDescription.toLowerCase().includes('battery'));
+                    const isStructureRow = item.slNo === 4 || item.id === 'boq-4' || (item.itemDescription && (item.itemDescription.toLowerCase().includes('structure') || item.itemDescription.toLowerCase().includes('mounting')));
+
+                    if (isBatteryRow) {
+                      if (qty.toLowerCase().includes('nil') || qty === '0' || qty === '0 Nos' || desc.toLowerCase().includes('nil') || !desc) {
+                        desc = 'Battery';
+                        qty = 'Nil';
+                      }
+                    } else if (isStructureRow) {
+                      if (qty.toLowerCase().includes('nil') || qty === '0' || qty === '0 Feet' || qty === '0 ft' || desc.toLowerCase().includes('nil') || !desc) {
+                        desc = 'Mounting Structure';
+                        qty = 'Nil';
+                      }
+                    }
+
+                    if (!desc) desc = item.itemDescription;
+
+                    return (
+                      <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                        <td className="border border-slate-300 py-1.5 px-2 text-center font-bold">{item.slNo}</td>
+                        <td className="border border-slate-300 py-1.5 px-3 text-left">{desc}</td>
+                        <td className="border border-slate-300 py-1.5 px-3 text-center">{qty}</td>
+                        {index === 0 && (
+                          <td 
+                            rowSpan={quotation.boqItems.length} 
+                            className="border border-slate-400 py-2 px-3 text-right font-black align-middle text-sm text-slate-900 bg-amber-50/30 tabular-nums"
+                          >
+                            {quotation.basicCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                   <tr className="bg-slate-100 font-bold text-[11.5px] border-t-2 border-slate-400">
                     <td className="border border-slate-300 py-1.5 px-2 text-center">A</td>
                     <td colSpan={2} className="border border-slate-300 py-1.5 px-3 uppercase text-slate-900">
@@ -729,7 +815,9 @@ export default function Quotation5PagePrintView({
               {/* Grand Total Bar */}
               <div className="bg-slate-900 text-white p-3.5 rounded-sm flex items-center justify-between text-xs font-black mb-5 shadow-sm">
                 <div className="flex items-center gap-2">
-                  <span className="text-[#f7b944]">D = A + B - C</span>
+                  <span className="text-[#f7b944] font-mono">
+                    {quotation.specialDiscount > 0 ? 'D = A + B - C' : 'C = A + B'}
+                  </span>
                   <span className="uppercase tracking-wider">Grand Total (EPC) – Inclusive of Taxes, To Pay Amount</span>
                 </div>
                 <div className="text-base text-[#f7b944] tracking-tight font-black tabular-nums">

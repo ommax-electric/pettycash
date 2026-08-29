@@ -8,7 +8,11 @@ import {
   DEFAULT_SAVINGS_BENEFITS,
   BOQItem, 
   SolarBenefitRow,
-  QuotationRevision
+  QuotationRevision,
+  interpolateSubject,
+  buildDefaultBOQItems,
+  getStructureFeet,
+  cleanStructureDescription
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -32,6 +36,7 @@ import {
   Zap,
   Battery,
   Layers,
+  Star,
   IndianRupee,
   Calculator,
   Building2,
@@ -86,16 +91,22 @@ function getMasterConfig(propConfig?: QuotationMasterConfig): QuotationMasterCon
   return DEFAULT_QUOTATION_MASTER_CONFIG;
 }
 
-// Helper to auto-generate Offer No (e.g. SP26270025) and reuse released/deleted numbers
-function generateOfferNo(existingQuotations: SolarQuotation[]): string {
-  const prefix = 'SP';
-  const yearCode = '2627';
+// Helper to auto-generate Offer No (e.g. SP26270025) and reuse released/deleted numbers synced with Tools Master Config
+function generateOfferNo(existingQuotations: SolarQuotation[], config?: QuotationMasterConfig): string {
+  const cfg = config || getMasterConfig();
+  const prefix = (cfg.offerPrefix !== undefined && cfg.offerPrefix !== null && cfg.offerPrefix !== '') ? cfg.offerPrefix : 'SP';
+  const yearCode = (cfg.offerYearCode !== undefined && cfg.offerYearCode !== null && cfg.offerYearCode !== '') ? cfg.offerYearCode : '2627';
+  const startSeq = (cfg.offerStartingSeq && cfg.offerStartingSeq > 0) ? cfg.offerStartingSeq : 1;
   const usedNumbers = new Set<number>();
+
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedYear = yearCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`^${escapedPrefix}${escapedYear}(\\d+)`, 'i');
 
   existingQuotations.forEach(q => {
     if (q.offerNo) {
       const baseOffer = q.offerNo.split('-')[0].trim();
-      const match = baseOffer.match(/SP2627(\d+)/i) || baseOffer.match(/(\d{4})$/);
+      const match = baseOffer.match(regex) || baseOffer.match(/(\d{4})$/);
       if (match) {
         const num = parseInt(match[1], 10);
         if (!isNaN(num)) {
@@ -105,8 +116,8 @@ function generateOfferNo(existingQuotations: SolarQuotation[]): string {
     }
   });
 
-  // Start from sequence 25 (default base) and find lowest available sequence number
-  let seq = 25;
+  // Start from sequence configured in Tools module and find lowest available sequence number
+  let seq = startSeq;
   while (usedNumbers.has(seq)) {
     seq++;
   }
@@ -161,6 +172,11 @@ function createCompleteQuotation(
     connectionType?: string;
     targetSegment?: string;
     scheme?: string;
+    starModule?: boolean;
+    starInverter?: boolean;
+    starBattery?: boolean;
+    starStructure?: boolean;
+    structureFeet?: number;
   },
   masterConfig: QuotationMasterConfig,
   currentUser: User | null,
@@ -193,9 +209,10 @@ function createCompleteQuotation(
     const goodsBase = basicCost * (gstGoodsPercent / 100);
     const servicesBase = basicCost * (gstServicesPercent / 100);
     gstGoodsAmount = Math.round(goodsBase * (gstGoodsRate / 100));
-    gstServicesAmount = Math.round(servicesBase * (gstServicesRate / 100));
+    // Reconcile services tax so basicCost + totalGst exactly equals rawTotal without any +/- ₹1 rounding drift
+    gstServicesAmount = Math.max(0, (rawTotal - basicCost) - gstGoodsAmount);
     totalGst = gstGoodsAmount + gstServicesAmount;
-    grandTotal = Math.max(0, basicCost + totalGst - discount);
+    grandTotal = Math.max(0, rawTotal - discount);
   } else {
     const solarBase = capacity * 55000;
     const batteryBase = isBatteryActive ? (formData.batteryQty * 95000) : 0;
@@ -208,78 +225,78 @@ function createCompleteQuotation(
     grandTotal = Math.max(0, basicCost + totalGst - discount);
   }
 
-  // Supply Scope Items
+  // Supply Scope Items - include section if starred in masterConfig.starredSupplySections (configured in Tools)
+  const sections = masterConfig.starredSupplySections || { module: true, inverter: true, battery: false, structure: true };
+  const starModule = formData.starModule !== undefined ? formData.starModule : (sections.module !== false);
+  const starInverter = formData.starInverter !== undefined ? formData.starInverter : (sections.inverter !== false);
+  const starBattery = formData.starBattery !== undefined ? formData.starBattery : (sections.battery === true);
+  const starStructure = formData.starStructure !== undefined ? formData.starStructure : (sections.structure !== false);
+
+  const dynamicSupply: string[] = [];
+  if (starModule && formData.solarModule && !formData.solarModule.toLowerCase().includes('nil')) {
+    let cleanMod = formData.solarModule.replace(/^solar\s*pv\s*modules?\s*[-–:]\s*/i, '').trim();
+    if (cleanMod) dynamicSupply.push(cleanMod);
+  }
+  if (starInverter && formData.inverter && !formData.inverter.toLowerCase().includes('nil')) {
+    let cleanInv = formData.inverter.replace(/^(?:grid-tied\s*\/\s*hybrid\s*)?solar\s*inverter\s*[-–:]\s*/i, '').trim();
+    if (cleanInv) dynamicSupply.push(cleanInv);
+  }
+  const isBatteryNil = !isBatteryActive || !formData.battery || formData.battery.toLowerCase().includes('nil') || (formData.batteryQty !== undefined && formData.batteryQty <= 0);
+  if (starBattery && formData.battery && !isBatteryNil) {
+    let cleanBat = formData.battery.replace(/^battery(?:\s*energy)?(?:\s*storage)?(?:\s*bank)?\s*[-–:]\s*/i, '').trim();
+    cleanBat = cleanBat.replace(/\s*\((?:qty:\s*)?\d+\s*nos\)/gi, '').trim();
+    if (cleanBat && !cleanBat.toLowerCase().includes('nil')) {
+      dynamicSupply.push(cleanBat);
+    }
+  }
+  const isStructureNil = !formData.structureElevation || formData.structureElevation.toLowerCase().includes('nil') || (formData.structureFeet !== undefined && formData.structureFeet <= 0);
+  if (starStructure && formData.structureElevation && !isStructureNil) {
+    let cleanStruct = cleanStructureDescription(formData.structureElevation);
+    if (cleanStruct && !cleanStruct.toLowerCase().includes('nil')) {
+      dynamicSupply.push(cleanStruct);
+    }
+  }
+
+  const rawDefaultList = (masterConfig.defaultSupplyIncludes && masterConfig.defaultSupplyIncludes.length > 0)
+    ? masterConfig.defaultSupplyIncludes
+    : [
+        'ACDB & DCDB: IP65 Enclosures with Type-II Surge Protection Devices (SPD) & MCBs',
+        'Cables & Balance of System (BOS): 4/6 sq.mm UV resistant DC solar cables & multi-core AC cables',
+        'Earthing & Lightning Protection: Dedicated copper-bonded chemical earthing electrodes with pits & lightning arrestor',
+        'Bi-Directional Net Metering: TANGEDCO / DISCOM liaisoning & generation meter support'
+      ];
+
+  // Filter out any primary equipment lines from defaultList (since primary equipment is dynamic)
+  const defaultList = rawDefaultList.filter(item => {
+    const lower = item.toLowerCase();
+    return !lower.includes('solar pv module') &&
+           !lower.includes('solar hybrid inverter') &&
+           !lower.startsWith('solar module') &&
+           !lower.startsWith('inverter') &&
+           !lower.startsWith('battery') &&
+           !lower.includes('module mounting structure') &&
+           !lower.startsWith('mounting structure');
+  });
+
   const supplyIncludes: string[] = [
-    `Solar PV Modules: ${formData.solarModule}`,
-    `Grid-Tied / Hybrid Solar Inverter: ${formData.inverter}`,
-    ...(isBatteryActive
-      ? [`Battery Energy Storage: ${formData.battery} (Qty: ${formData.batteryQty} Nos)`]
-      : [`Battery Storage: Nill (Direct Grid Net-Metering)`]),
-    `Module Mounting Structure: ${formData.structureElevation}`,
-    `ACDB & DCDB: IP65 Enclosures with Type-II Surge Protection Devices (SPD) & MCBs`,
-    `Cables & Balance of System (BOS): 4/6 sq.mm UV resistant DC solar cables & multi-core AC cables`,
-    `Earthing & Lightning Protection: Dedicated copper-bonded chemical earthing electrodes with pits & lightning arrestor`,
-    `Bi-Directional Net Metering: TANGEDCO / DISCOM liaisoning & generation meter support`
+    ...dynamicSupply,
+    ...defaultList
   ];
 
-  // BOQ Items
-  const numPanels = Math.max(1, Math.round((capacity * 1000) / 550));
-  const boqItems: BOQItem[] = [
-    {
-      id: 'boq-1',
-      slNo: 1,
-      itemDescription: `Solar PV Modules – ${formData.solarModule}`,
-      quantity: `${capacity} kWp (${numPanels} Nos × 550Wp)`,
-      unitPrice: Math.round((basicCost * 0.45) / capacity),
-      totalPrice: Math.round(basicCost * 0.45),
-      brand: formData.solarModule.split(' ')[0] || 'Tier-1'
-    },
-    {
-      id: 'boq-2',
-      slNo: 2,
-      itemDescription: `Solar Inverter – ${formData.inverter}`,
-      quantity: `1 Set (${capacity >= 10 ? 'Three Phase' : 'Single Phase'})`,
-      unitPrice: Math.round(basicCost * 0.22),
-      totalPrice: Math.round(basicCost * 0.22),
-      brand: formData.inverter.split(' ')[0] || 'Servotec'
-    },
-    ...(isBatteryActive ? [{
-      id: 'boq-3',
-      slNo: 3,
-      itemDescription: `Battery Storage Bank – ${formData.battery}`,
-      quantity: `${formData.batteryQty} Nos`,
-      unitPrice: 95000,
-      totalPrice: formData.batteryQty * 95000,
-      brand: 'LFP Battery'
-    }] : []),
-    {
-      id: 'boq-4',
-      slNo: isBatteryActive ? 4 : 3,
-      itemDescription: `Mounting Structure – ${formData.structureElevation}`,
-      quantity: `${capacity} kWp`,
-      unitPrice: Math.round((basicCost * 0.12) / capacity),
-      totalPrice: Math.round(basicCost * 0.12),
-      brand: 'HDG Galvanized'
-    },
-    {
-      id: 'boq-5',
-      slNo: isBatteryActive ? 5 : 4,
-      itemDescription: `Balance of System (BOS) – ACDB/DCDB, UV DC & AC Cables, Chemical Earthing`,
-      quantity: `1 Lot`,
-      unitPrice: Math.round(basicCost * 0.11),
-      totalPrice: Math.round(basicCost * 0.11),
-      brand: 'Polycab / Hensel'
-    },
-    {
-      id: 'boq-6',
-      slNo: isBatteryActive ? 6 : 5,
-      itemDescription: `Turnkey Installation, Testing, Grid Sync & Net-Metering Commissioning`,
-      quantity: `${capacity} kWp`,
-      unitPrice: Math.round((basicCost * 0.10) / capacity),
-      totalPrice: Math.round(basicCost * 0.10),
-      brand: 'OMMAX Engineering'
-    }
-  ];
+  // BOQ Items - Standardized base items + configured defaults from Pricing
+  const boqItems: BOQItem[] = buildDefaultBOQItems({
+    capacityKw: capacity,
+    capacityKwp: capacity,
+    solarModule: formData.solarModule,
+    inverter: formData.inverter,
+    battery: formData.battery,
+    batteryQty: formData.batteryQty,
+    isBatteryActive: isBatteryActive,
+    structureElevation: formData.structureElevation,
+    structureFeet: formData.structureFeet,
+    basicCost: basicCost,
+    defaultBoqItems: masterConfig.defaultBoqItems
+  });
 
   // Benefits table: directly from Tools module master configuration
   const benefitsTable: SolarBenefitRow[] = (masterConfig.benefitsTable && masterConfig.benefitsTable.length > 0)
@@ -354,9 +371,15 @@ function createCompleteQuotation(
     }
   }
 
-  const generatedSubject = masterConfig.defaultSubjectTemplate
-    ? masterConfig.defaultSubjectTemplate.replace(/\{\{capacity\}\}/g, String(capacity))
-    : `Proposal for ${capacity} kWp Roof top Solar Power Plant`;
+  const generatedSubject = interpolateSubject(masterConfig.defaultSubjectTemplate, {
+    capacityKw: capacity,
+    capacityKwp: capacity,
+    connectionType: formData.connectionType,
+    clientName: formData.clientName,
+    projectName: formData.clientName,
+    location: formData.location,
+    scheme: formData.scheme
+  });
 
   return {
     id,
@@ -526,16 +549,21 @@ export default function QuotationDashboardView({
 
   // d. Solar PV Modules
   const [formSolarModule, setFormSolarModule] = useState<string>('');
+  const [formStarModule, setFormStarModule] = useState<boolean>(true);
 
   // e. Inverter
   const [formInverter, setFormInverter] = useState<string>('');
+  const [formStarInverter, setFormStarInverter] = useState<boolean>(true);
 
   // f. Battery with qty
   const [formBattery, setFormBattery] = useState<string>('');
   const [formBatteryQty, setFormBatteryQty] = useState<number>(0);
+  const [formStarBattery, setFormStarBattery] = useState<boolean>(true);
 
-  // g. Structure Elevation
+  // g. Structure Elevation & Height in Feet
   const [formStructure, setFormStructure] = useState<string>('');
+  const [formStructureFeet, setFormStructureFeet] = useState<number>(0);
+  const [formStarStructure, setFormStarStructure] = useState<boolean>(true);
 
   // Pricing (Manual default or Automatic)
   const [formPricingMode, setFormPricingMode] = useState<'MANUAL' | 'AUTOMATIC'>('MANUAL');
@@ -800,7 +828,18 @@ export default function QuotationDashboardView({
     const contact = contacts.find(c => c.id === opp.contactId);
     const account = accounts.find(a => a.id === opp.accountId);
 
-    const clientName = contact?.name || account?.name || opp.title || 'Valued Customer';
+    let clientName = 'Valued Customer';
+    if (contact) {
+      const rawName = (contact.name || [contact.firstName, contact.lastName].filter(Boolean).join(' ') || '').trim();
+      const sal = (contact.salutation || '').trim();
+      if (sal && rawName && !rawName.toLowerCase().startsWith(sal.toLowerCase())) {
+        clientName = `${sal} ${rawName}`;
+      } else {
+        clientName = rawName || account?.name || opp.title || 'Valued Customer';
+      }
+    } else {
+      clientName = account?.name || opp.title || 'Valued Customer';
+    }
     const phone = contact?.phone || contact?.mobile || contact?.altMobile || account?.phone || '';
     const email = contact?.email || account?.email || '';
 
@@ -853,12 +892,12 @@ export default function QuotationDashboardView({
     setFormContactEmail('');
     setFormFullAddress('');
     
-    // Auto-generate offer number
-    const generatedOffer = generateOfferNo(quotations);
-    setFormOfferNo(generatedOffer);
-
     // Load master config from tools
     const config = getMasterConfig();
+    
+    // Auto-generate offer number synced with master config
+    const generatedOffer = generateOfferNo(quotations, config);
+    setFormOfferNo(generatedOffer);
     
     // Default capacity
     setFormCapacityKw(0);
@@ -870,10 +909,15 @@ export default function QuotationDashboardView({
 
     // Initial empty selections for user to choose
     setFormSolarModule('');
+    setFormStarModule(true);
     setFormInverter('');
+    setFormStarInverter(true);
     setFormBattery('');
     setFormBatteryQty(0);
+    setFormStarBattery(true);
     setFormStructure('');
+    setFormStructureFeet(0);
+    setFormStarStructure(true);
 
     // Pricing defaults
     setFormPricingMode('MANUAL');
@@ -898,13 +942,16 @@ export default function QuotationDashboardView({
     setFormSegment(quo.targetSegment || 'Residential Rooftop');
     setFormScheme(quo.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)');
 
+    const hasSupply = Array.isArray(quo.supplyIncludes) && quo.supplyIncludes.length > 0;
     const moduleLine = quo.supplyIncludes?.find(s => s.toLowerCase().includes('solar pv module') || s.toLowerCase().includes('panel'));
     const moduleText = moduleLine ? moduleLine.replace(/Solar PV Modules:\s*/i, '').trim() : (config.supplyDropdownOptions.moduleOptions[0] || '');
     setFormSolarModule(moduleText || '');
+    setFormStarModule(hasSupply ? Boolean(moduleLine) : true);
 
     const inverterLine = quo.supplyIncludes?.find(s => s.toLowerCase().includes('inverter'));
     const inverterText = inverterLine ? inverterLine.replace(/Grid-Tied \/ Hybrid Solar Inverter:\s*/i, '').trim() : (config.supplyDropdownOptions.inverterOptions[0] || '');
     setFormInverter(inverterText || '');
+    setFormStarInverter(hasSupply ? Boolean(inverterLine) : true);
 
     const batteryLine = quo.supplyIncludes?.find(s => s.toLowerCase().includes('battery'));
     if (batteryLine && !batteryLine.toLowerCase().includes('nil')) {
@@ -913,17 +960,39 @@ export default function QuotationDashboardView({
       setFormBatteryQty(qty);
       const batteryClean = batteryLine.replace(/Battery Energy Storage:\s*/i, '').replace(/\(Qty.*?\)/i, '').trim();
       setFormBattery(batteryClean || config.supplyDropdownOptions.batteryOptions[1] || 'Battery Storage');
+      setFormStarBattery(true);
     } else if (batteryLine && batteryLine.toLowerCase().includes('nil')) {
-      setFormBattery(config.supplyDropdownOptions.batteryOptions.find(b => b.toLowerCase().includes('nil')) || 'Nill (On-Grid Direct Net-Metering)');
+      setFormBattery(config.supplyDropdownOptions.batteryOptions.find(b => b.toLowerCase().includes('nil')) || 'Nil (On-Grid Direct Net-Metering)');
       setFormBatteryQty(0);
+      setFormStarBattery(true);
     } else {
       setFormBattery('');
       setFormBatteryQty(0);
+      setFormStarBattery(hasSupply ? Boolean(batteryLine) : true);
     }
 
     const structureLine = quo.supplyIncludes?.find(s => s.toLowerCase().includes('structure') || s.toLowerCase().includes('mounting'));
-    const structureText = structureLine ? structureLine.replace(/Module Mounting Structure:\s*/i, '').trim() : (config.supplyDropdownOptions.structureOptions[0] || '');
-    setFormStructure(structureText || '');
+    const structureBOQ = quo.boqItems?.find(b => b.slNo === 4 || b.id === 'boq-4' || b.itemDescription.toLowerCase().includes('mounting structure') || b.itemDescription.toLowerCase().includes('structure'));
+    const isStructureNil = structureBOQ?.quantity?.toLowerCase().includes('nil') || structureBOQ?.quantity === '0' || structureBOQ?.quantity === '0 Feet' || (structureLine && structureLine.toLowerCase().includes('nil'));
+    
+    if (isStructureNil) {
+      setFormStructure(config.supplyDropdownOptions.structureOptions.find(s => s.toLowerCase().includes('nil')) || 'Nil (No Mounting Structure / Customer Scope)');
+      setFormStructureFeet(0);
+      setFormStarStructure(true);
+    } else {
+      const structureText = structureLine ? structureLine.replace(/Module Mounting Structure:\s*/i, '').replace(/\(.*?\)/i, '').trim() : (structureBOQ?.itemDescription || config.supplyDropdownOptions.structureOptions[1] || config.supplyDropdownOptions.structureOptions[0] || '');
+      setFormStructure(structureText || '');
+      setFormStarStructure(hasSupply ? Boolean(structureLine) : true);
+
+      // Extract structure feet if present in BOQ quantity or structure line
+      let extractedFeet = 7;
+      const structureSearchStr = `${structureBOQ?.quantity || ''} ${structureLine || ''} ${structureBOQ?.itemDescription || ''}`;
+      const feetMatch = structureSearchStr.match(/(\d+(?:\.\d+)?)\s*(?:ft|feet|Height)/i);
+      if (feetMatch) {
+        extractedFeet = parseFloat(feetMatch[1]) || 0;
+      }
+      setFormStructureFeet(extractedFeet);
+    }
 
     setFormPricingMode('MANUAL');
     setFormManualPrice(quo.grandTotal ? (quo.grandTotal + (quo.specialDiscount || 0)) : (quo.basicCost + quo.totalGst));
@@ -1053,7 +1122,7 @@ export default function QuotationDashboardView({
         contactPhone: formContactPhone.trim(),
         contactEmail: formContactEmail.trim(),
         location: formFullAddress.trim() || 'Ariyalur - 621704',
-        offerNo: formOfferNo.trim() || generateOfferNo(quotations),
+        offerNo: formOfferNo.trim() || generateOfferNo(quotations, config),
         capacityKw: capacity,
         connectionType: formSystemType,
         targetSegment: formSegment,
@@ -1063,6 +1132,11 @@ export default function QuotationDashboardView({
         battery: formBattery,
         batteryQty: formBattery.toLowerCase().includes('nil') || !formBattery ? 0 : formBatteryQty,
         structureElevation: formStructure || config.supplyDropdownOptions.structureOptions[0],
+        structureFeet: formStructureFeet,
+        starModule: formStarModule,
+        starInverter: formStarInverter,
+        starBattery: formStarBattery,
+        starStructure: formStarStructure,
         pricingMode: formPricingMode,
         manualTotal: formManualPrice,
         discountAmount: formDiscountAmount
@@ -1120,31 +1194,59 @@ export default function QuotationDashboardView({
   // Live master configuration options for dropdowns and defaults
   const masterConfig = getMasterConfig(propMasterConfig);
 
+  // Available opportunities for new quotation creation (filters out opportunities that already have a quotation)
+  const availableOpportunities = useMemo(() => {
+    return opportunities.filter(opp => {
+      if (formOpportunityId && opp.id === formOpportunityId) return true;
+      const alreadyHasQuotation = quotations.some(q => q.opportunityId === opp.id);
+      return !alreadyHasQuotation;
+    });
+  }, [opportunities, quotations, formOpportunityId]);
+
   // Live pricing breakdown computation for the questionnaire modal preview
   const livePricingPreview = useMemo(() => {
     const capacity = formCapacityKw;
-    const isBatteryActive = Boolean(formBattery && !formBattery.toLowerCase().includes('nill') && formBatteryQty > 0);
+    const isBatteryActive = Boolean(formBattery && !formBattery.toLowerCase().includes('nil') && formBatteryQty > 0);
     
     let basic = 0;
-    let total = 0;
+    let goodsTax = 0;
+    let servicesTax = 0;
+    let totalTax = 0;
+    let subtotal = 0;
+    let discount = formDiscountAmount || 0;
+    let grandTotal = 0;
+
+    const goodsPercent = masterConfig.gstGoodsPercent || 80;
+    const goodsRate = masterConfig.gstGoodsRate || 5;
+    const servicesPercent = masterConfig.gstServicesPercent || 20;
+    const servicesRate = masterConfig.gstServicesRate || 18;
+    const totalMultiplier = ((goodsPercent / 100) * (1 + goodsRate / 100)) + ((servicesPercent / 100) * (1 + servicesRate / 100));
 
     if (formPricingMode === 'MANUAL') {
       const rawPrice = formManualPrice > 0 ? formManualPrice : Math.round(capacity * 60000);
-      basic = Math.round(rawPrice / 1.076);
+      basic = Math.round(rawPrice / totalMultiplier);
+      const goodsBase = basic * (goodsPercent / 100);
+      goodsTax = Math.round(goodsBase * (goodsRate / 100));
+      // Reconcile services tax so basic + totalTax exactly equals rawPrice
+      servicesTax = Math.max(0, (rawPrice - basic) - goodsTax);
+      totalTax = goodsTax + servicesTax;
+      subtotal = rawPrice;
+      grandTotal = Math.max(0, rawPrice - discount);
     } else {
       const solarBase = capacity * 55000;
       const batteryBase = isBatteryActive ? (formBatteryQty * 95000) : 0;
       basic = Math.round(solarBase + batteryBase);
+      const goodsBase = basic * (goodsPercent / 100);
+      const servicesBase = basic * (servicesPercent / 100);
+      goodsTax = Math.round(goodsBase * (goodsRate / 100));
+      servicesTax = Math.round(servicesBase * (servicesRate / 100));
+      totalTax = goodsTax + servicesTax;
+      subtotal = basic + totalTax;
+      grandTotal = Math.max(0, subtotal - discount);
     }
 
-    const goodsBase = basic * 0.80;
-    const servicesBase = basic * 0.20;
-    const goodsTax = Math.round(goodsBase * 0.05);
-    const servicesTax = Math.round(servicesBase * 0.18);
-    const totalTax = goodsTax + servicesTax;
-    const subtotal = basic + totalTax;
-    const discount = formDiscountAmount || 0;
-    const grandTotal = Math.max(0, subtotal - discount);
+    const goodsBase = basic * (goodsPercent / 100);
+    const servicesBase = basic * (servicesPercent / 100);
 
     return {
       capacity,
@@ -1158,7 +1260,7 @@ export default function QuotationDashboardView({
       discount,
       grandTotal
     };
-  }, [formPricingMode, formManualPrice, formCapacityKw, formBattery, formBatteryQty, formDiscountAmount]);
+  }, [formPricingMode, formManualPrice, formCapacityKw, formBattery, formBatteryQty, formDiscountAmount, masterConfig]);
 
   return (
     <div className="space-y-4">
@@ -2065,7 +2167,7 @@ export default function QuotationDashboardView({
                     className="w-full text-xs font-medium p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
                   >
                     <option value="">-- Choose Client from CRM Opportunities --</option>
-                    {opportunities.map(opp => (
+                    {availableOpportunities.map(opp => (
                       <option key={opp.id} value={opp.id}>
                         {opp.title} ({opp.accountName} • Target: ₹{opp.amount.toLocaleString('en-IN')})
                       </option>
@@ -2222,9 +2324,9 @@ export default function QuotationDashboardView({
                     className="w-full text-xs font-semibold p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
                   >
                     <option value={0}>Choose Project Capacity</option>
-                    {STANDARD_CAPACITIES.map(cap => (
+                    {(masterConfig.capacityOptions && masterConfig.capacityOptions.length > 0 ? masterConfig.capacityOptions : STANDARD_CAPACITIES).map(cap => (
                       <option key={cap} value={cap}>
-                        {cap.toFixed(2)} kWp ({Math.round((cap * 1000) / 550)} Panels × 550Wp)
+                        {cap.toFixed(2)} kWp
                       </option>
                     ))}
                   </select>
@@ -2235,10 +2337,12 @@ export default function QuotationDashboardView({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Solar PV Modules */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <Sun className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Solar PV Modules *</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Sun className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Solar PV Modules *</span>
+                    </label>
+                  </div>
                   <select
                     value={formSolarModule}
                     onChange={(e) => setFormSolarModule(e.target.value)}
@@ -2253,10 +2357,12 @@ export default function QuotationDashboardView({
 
                 {/* Inverter */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Inverter *</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Inverter *</span>
+                    </label>
+                  </div>
                   <select
                     value={formInverter}
                     onChange={(e) => setFormInverter(e.target.value)}
@@ -2274,10 +2380,12 @@ export default function QuotationDashboardView({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Battery with Qty (Quantity next to dropdown) */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <Battery className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Battery & Storage *</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Battery className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Battery & Storage *</span>
+                    </label>
+                  </div>
 
                   <div className="flex items-center gap-2">
                     <select
@@ -2320,22 +2428,56 @@ export default function QuotationDashboardView({
                   </div>
                 </div>
 
-                {/* Structure Elevation */}
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Structure Elevation *</span>
-                  </label>
-                  <select
-                    value={formStructure}
-                    onChange={(e) => setFormStructure(e.target.value)}
-                    className="w-full text-xs font-medium p-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
-                  >
-                    <option value="">Choose Structure Elevation</option>
-                    {masterConfig.supplyDropdownOptions.structureOptions.map((opt, i) => (
-                      <option key={i} value={opt}>{opt}</option>
-                    ))}
-                  </select>
+                {/* Structure Elevation with Feet next to dropdown */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Structure Elevation *</span>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={formStructure}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormStructure(val);
+                        if (val.toLowerCase().includes('nil') || !val) {
+                          setFormStructureFeet(0);
+                        } else {
+                          // Extract feet number if present in option string (e.g. 7 to 10 Feet -> 7, 12+ Feet -> 12)
+                          const match = val.match(/(\d+(?:\.\d+)?)\s*(?:to|-)?\s*(?:\d+)?\s*(?:Feet|Ft|feet|ft)/i);
+                          const parsedFeet = match ? parseFloat(match[1]) : (formStructureFeet > 0 ? formStructureFeet : 7);
+                          setFormStructureFeet(parsedFeet);
+                        }
+                      }}
+                      className="flex-1 min-w-0 text-xs font-medium p-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
+                    >
+                      <option value="">Choose Structure Elevation</option>
+                      {masterConfig.supplyDropdownOptions.structureOptions.map((opt, i) => (
+                        <option key={i} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+
+                    <div className="flex items-center gap-1 shrink-0 bg-white px-2 py-1 border border-slate-300 rounded-lg" title="Structure height in feet (0 = Nil)">
+                      <span className="text-[11px] font-semibold text-slate-600">Feet:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        placeholder="0"
+                        value={formStructure.toLowerCase().includes('nil') || !formStructure ? 0 : formStructureFeet}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const parsed = val === '' ? 0 : parseFloat(val);
+                          setFormStructureFeet(isNaN(parsed) ? 0 : Math.max(0, parsed));
+                        }}
+                        disabled={formStructure.toLowerCase().includes('nil') || !formStructure}
+                        className="w-12 text-xs font-bold text-center bg-transparent border-0 focus:outline-none disabled:text-slate-400"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

@@ -30,7 +30,7 @@ import {
   Wrench
 } from 'lucide-react';
 import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
-import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
+import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, OpportunityStage, OpportunityEditHistoryEntry, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
 import { SolarQuotation, QuotationStatus, QuotationMasterConfig, DEFAULT_QUOTATION_MASTER_CONFIG } from './quotation/types';
 import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
@@ -1643,6 +1643,59 @@ export default function App() {
       console.error('Error saving quotation to Firestore:', err);
     }
 
+    // Dynamic CRM Opportunity Sync: Automatically update deal amount & pipeline stage
+    if (finalQuo.opportunityId) {
+      const linkedOpp = crmOpportunities.find(o => o.id === finalQuo.opportunityId);
+      if (linkedOpp) {
+        let newStage: OpportunityStage = linkedOpp.stage;
+        let newProb = linkedOpp.probability;
+        let newLostReason = linkedOpp.lostReason;
+
+        if (finalQuo.status === 'WON') {
+          newStage = 'CLOSED_WON';
+          newProb = 100;
+        } else if (finalQuo.status === 'LOST') {
+          newStage = 'CLOSED_LOST';
+          newProb = 0;
+          newLostReason = finalQuo.lostReason || linkedOpp.lostReason;
+        } else if (isSubmit || finalQuo.status === 'SENT') {
+          newStage = 'PROPOSAL';
+          newProb = 70;
+        } else if (linkedOpp.stage === 'PROSPECTING' || linkedOpp.stage === 'QUALIFICATION') {
+          newStage = 'PROPOSAL';
+          newProb = 50;
+        }
+
+        const quoteAmount = finalQuo.grandTotal || linkedOpp.amount;
+        const now = new Date().toISOString();
+        const stageLabel = newStage === 'CLOSED_WON' ? 'Closed Won' : newStage === 'CLOSED_LOST' ? 'Closed Lost' : 'Proposal / Quote';
+
+        const historyEntry: OpportunityEditHistoryEntry = {
+          timestamp: now,
+          changedBy: currentUser?.fullName || currentUser?.username || 'System',
+          action: 'STAGE_CHANGED',
+          details: `Synced from Solar Quotation ${finalQuo.quotationNo} (${finalQuo.revisionCode}): Amount updated to ₹${quoteAmount.toLocaleString('en-IN')}, Stage updated to ${stageLabel}`
+        };
+
+        const updatedOpp: CRMOpportunity = {
+          ...linkedOpp,
+          amount: quoteAmount,
+          stage: newStage,
+          probability: newProb,
+          lostReason: newLostReason,
+          updatedAt: now,
+          editHistory: linkedOpp.editHistory ? [historyEntry, ...linkedOpp.editHistory] : [historyEntry]
+        };
+
+        setCrmOpportunities(prev => prev.map(o => o.id === updatedOpp.id ? updatedOpp : o));
+        try {
+          await setDoc(doc(db, 'crm_opportunities', updatedOpp.id), updatedOpp);
+        } catch (err) {
+          console.error('Error syncing CRM opportunity from quotation save:', err);
+        }
+      }
+    }
+
     setActiveEditingQuotation(null);
     setActiveTab('QUOTATION_PROPOSAL');
   };
@@ -1666,6 +1719,55 @@ export default function App() {
       );
     } catch (err) {
       console.error('Error updating quotation status:', err);
+    }
+
+    // Dynamic CRM Opportunity Sync: Update opportunity stage & win/loss status
+    if (target.opportunityId) {
+      const linkedOpp = crmOpportunities.find(o => o.id === target.opportunityId);
+      if (linkedOpp) {
+        let newStage: OpportunityStage = linkedOpp.stage;
+        let newProb = linkedOpp.probability;
+        let newLostReason = linkedOpp.lostReason;
+
+        if (status === 'WON') {
+          newStage = 'CLOSED_WON';
+          newProb = 100;
+        } else if (status === 'LOST') {
+          newStage = 'CLOSED_LOST';
+          newProb = 0;
+          newLostReason = reason || target.lostReason || linkedOpp.lostReason;
+        } else if (status === 'SENT') {
+          newStage = 'PROPOSAL';
+          newProb = 70;
+        }
+
+        const now = new Date().toISOString();
+        const stageLabel = newStage === 'CLOSED_WON' ? 'Closed Won' : newStage === 'CLOSED_LOST' ? 'Closed Lost' : 'Proposal / Quote';
+
+        const historyEntry: OpportunityEditHistoryEntry = {
+          timestamp: now,
+          changedBy: currentUser?.fullName || currentUser?.username || 'System',
+          action: 'STAGE_CHANGED',
+          details: `Synced from Solar Quotation ${target.quotationNo} (${target.revisionCode}): Status marked as ${status}, Stage set to ${stageLabel}${reason ? ` (Reason: ${reason})` : ''}`
+        };
+
+        const updatedOpp: CRMOpportunity = {
+          ...linkedOpp,
+          amount: target.grandTotal || linkedOpp.amount,
+          stage: newStage,
+          probability: newProb,
+          lostReason: newLostReason,
+          updatedAt: now,
+          editHistory: linkedOpp.editHistory ? [historyEntry, ...linkedOpp.editHistory] : [historyEntry]
+        };
+
+        setCrmOpportunities(prev => prev.map(o => o.id === updatedOpp.id ? updatedOpp : o));
+        try {
+          await setDoc(doc(db, 'crm_opportunities', updatedOpp.id), updatedOpp);
+        } catch (err) {
+          console.error('Error syncing CRM opportunity from quotation status update:', err);
+        }
+      }
     }
   };
 

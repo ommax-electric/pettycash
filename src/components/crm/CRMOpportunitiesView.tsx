@@ -50,6 +50,7 @@ import {
   OpportunityEditHistoryEntry,
   OpportunityStageNote,
   ContactStatus,
+  CRM_SALUTATIONS,
   formatCRMIDate, 
   formatCRMIDateTime,
   normalizeCompanyName,
@@ -432,6 +433,7 @@ export default function CRMOpportunitiesView({
 
   // Wizard Contact Form Data (Matching CRMContactsView)
   const [wizardContactFormData, setWizardContactFormData] = useState({
+    salutation: '',
     name: '',
     accountId: '',
     accountName: '',
@@ -659,6 +661,7 @@ export default function CRMOpportunitiesView({
   const handleWizardContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (
+      !wizardContactFormData.salutation.trim() ||
       !wizardContactFormData.name.trim() ||
       !wizardContactFormData.accountId ||
       !wizardContactFormData.mobile.trim() ||
@@ -694,6 +697,7 @@ export default function CRMOpportunitiesView({
       let createdCon: CRMContact;
       if (onAddContact) {
         const res = await onAddContact({
+          salutation: wizardContactFormData.salutation.trim() || undefined,
           name: wizardContactFormData.name.trim(),
           firstName,
           lastName,
@@ -721,6 +725,7 @@ export default function CRMOpportunitiesView({
         } else {
           createdCon = {
             id: `CON-${Date.now().toString().slice(-4)}`,
+            salutation: wizardContactFormData.salutation.trim() || undefined,
             name: wizardContactFormData.name.trim(),
             firstName,
             lastName,
@@ -748,6 +753,7 @@ export default function CRMOpportunitiesView({
       } else {
         createdCon = {
           id: `CON-${Date.now().toString().slice(-4)}`,
+          salutation: wizardContactFormData.salutation.trim() || undefined,
           name: wizardContactFormData.name.trim(),
           firstName,
           lastName,
@@ -3886,20 +3892,36 @@ export default function CRMOpportunitiesView({
               {/* Form */}
               <form onSubmit={handleWizardContactSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
                 
-                {/* Full Name */}
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Rajesh Sharma"
-                    value={wizardContactFormData.name}
-                    onChange={e => {
-                      setWizardContactFormData({ ...wizardContactFormData, name: e.target.value });
-                      setWizardContactDismissDuplicateWarning(false);
-                    }}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
-                  />
+                {/* Full Name & Salutation */}
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Salutation *</label>
+                    <select
+                      required
+                      value={wizardContactFormData.salutation}
+                      onChange={e => setWizardContactFormData({ ...wizardContactFormData, salutation: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors cursor-pointer"
+                    >
+                      <option value="">Select...</option>
+                      {CRM_SALUTATIONS.map(sal => (
+                        <option key={sal} value={sal}>{sal}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Rajesh Sharma"
+                      value={wizardContactFormData.name}
+                      onChange={e => {
+                        setWizardContactFormData({ ...wizardContactFormData, name: e.target.value });
+                        setWizardContactDismissDuplicateWarning(false);
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
                 </div>
 
                 {/* Associated Account & Contact Status */}

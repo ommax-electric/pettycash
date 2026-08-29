@@ -3,6 +3,8 @@ import {
   QuotationMasterConfig, 
   DEFAULT_QUOTATION_MASTER_CONFIG, 
   MasterCatalogProduct,
+  DefaultBoqItemConfig,
+  DEFAULT_BOQ_ITEMS_CONFIG,
   BrandDeclarationItem,
   SolarBenefitRow,
   SolarQuotation
@@ -44,7 +46,8 @@ import {
   Settings2,
   FileCheck2,
   Upload,
-  X
+  X,
+  Star
 } from 'lucide-react';
 
 const STORAGE_KEY = 'ommax_solar_quotation_master_config';
@@ -123,6 +126,7 @@ export default function QuotationToolsView({
   const [newSegmentDesc, setNewSegmentDesc] = useState('');
   const [newSchemeLabel, setNewSchemeLabel] = useState('');
   const [newSchemeDesc, setNewSchemeDesc] = useState('');
+  const [newCapacityVal, setNewCapacityVal] = useState('');
   const [newModuleOption, setNewModuleOption] = useState('');
   const [newInverterOption, setNewInverterOption] = useState('');
   const [newBatteryOption, setNewBatteryOption] = useState('');
@@ -143,6 +147,9 @@ export default function QuotationToolsView({
   const [editingSchemeLabel, setEditingSchemeLabel] = useState('');
   const [editingSchemeDesc, setEditingSchemeDesc] = useState('');
 
+  const [editingCapacityIdx, setEditingCapacityIdx] = useState<number | null>(null);
+  const [editingCapacityVal, setEditingCapacityVal] = useState('');
+
   const [editingModuleIdx, setEditingModuleIdx] = useState<number | null>(null);
   const [editingModuleVal, setEditingModuleVal] = useState('');
 
@@ -160,6 +167,9 @@ export default function QuotationToolsView({
 
   const [editingBosWarrantyIdx, setEditingBosWarrantyIdx] = useState<number | null>(null);
   const [editingBosWarrantyVal, setEditingBosWarrantyVal] = useState('');
+
+  const [editingSupplyIdx, setEditingSupplyIdx] = useState<number | null>(null);
+  const [editingSupplyVal, setEditingSupplyVal] = useState('');
 
   const [editingInstallIdx, setEditingInstallIdx] = useState<number | null>(null);
   const [editingInstallVal, setEditingInstallVal] = useState('');
@@ -189,6 +199,20 @@ export default function QuotationToolsView({
     isDefaultBOQ: true
   });
   const [isAddingProduct, setIsAddingProduct] = useState(false);
+
+  // New Default BOQ Item State (for Items e, f, g & additional defaults)
+  const [isAddingDefaultBoq, setIsAddingDefaultBoq] = useState(false);
+  const [newDefaultBoq, setNewDefaultBoq] = useState<Partial<DefaultBoqItemConfig>>({
+    label: '',
+    itemDescription: '',
+    brand: '',
+    defaultUnit: 'kWp',
+    defaultQtyType: 'CAPACITY_KWP',
+    defaultQtyValue: '',
+    defaultUnitPrice: 0,
+    warrantyPeriod: 'Standard Warranty',
+    isEnabled: true
+  });
 
   const handleSaveConfig = () => {
     try {
@@ -705,9 +729,14 @@ export default function QuotationToolsView({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Opening Paragraph Template ("Dear Valued Customer, ...")
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-slate-700">
+                Opening Paragraph Template ("Dear Valued Customer, ...")
+              </label>
+              <span className="text-[10px] text-amber-700 font-medium">
+                Supports dynamic placeholders: <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Connection Type}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Target Segment}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Scheme}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Capacity}'}</code>
+              </span>
+            </div>
             <textarea
               rows={3}
               value={config.introOpeningText}
@@ -716,8 +745,8 @@ export default function QuotationToolsView({
             />
           </div>
 
-          {/* Grid of 3 Pre-Defined Dropdown Configurations */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
+          {/* Grid of 4 Pre-Defined Dropdown Configurations */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 pt-2">
             {/* Dropdown 1: System Connection Types */}
             <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
               <div className="flex items-center justify-between">
@@ -1149,6 +1178,138 @@ export default function QuotationToolsView({
                 </div>
               </div>
             </div>
+
+            {/* Dropdown 4: Project Capacity Options */}
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <Sun className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Project Capacity Options (kWp)</span>
+                </h4>
+                <span className="text-[10px] font-mono font-bold text-slate-500">
+                  {(config.capacityOptions || []).length} Options
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-tight">
+                Populates the Project Capacity dropdown in Prepare Solar Quotation modal
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {(config.capacityOptions || []).map((cap, idx) => {
+                  const isEditing = editingCapacityIdx === idx;
+                  return (
+                    <div key={idx} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.1"
+                            value={editingCapacityVal}
+                            onChange={(e) => setEditingCapacityVal(e.target.value)}
+                            placeholder="Capacity in kWp (e.g. 5.5)"
+                            className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-bold"
+                          />
+                          <div className="flex items-center justify-end gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCapacityIdx(null);
+                                setEditingCapacityVal('');
+                              }}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const parsed = parseFloat(editingCapacityVal);
+                                if (isNaN(parsed) || parsed <= 0) return;
+                                const updated = [...(config.capacityOptions || [])];
+                                updated[idx] = parsed;
+                                updated.sort((a, b) => a - b);
+                                setConfig({ ...config, capacityOptions: updated });
+                                setEditingCapacityIdx(null);
+                                setEditingCapacityVal('');
+                              }}
+                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-[10px] font-bold cursor-pointer"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold text-slate-900 font-mono flex items-center gap-1.5">
+                              <span className="px-2.5 py-1 rounded-md bg-amber-100/70 text-amber-900 font-bold">{cap} kWp</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCapacityIdx(idx);
+                                setEditingCapacityVal(String(cap));
+                              }}
+                              className="text-slate-400 hover:text-amber-600 p-1 cursor-pointer"
+                              title="Edit capacity"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {(config.capacityOptions || []).length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = (config.capacityOptions || []).filter((_, i) => i !== idx);
+                                  setConfig({ ...config, capacityOptions: updated });
+                                }}
+                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                                title="Delete capacity"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add Capacity */}
+              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    placeholder="New capacity (kWp)... e.g. 7.5"
+                    value={newCapacityVal}
+                    onChange={(e) => setNewCapacityVal(e.target.value)}
+                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const parsed = parseFloat(newCapacityVal);
+                      if (isNaN(parsed) || parsed <= 0) return;
+                      const current = config.capacityOptions || [];
+                      if (!current.includes(parsed)) {
+                        const updated = [...current, parsed].sort((a, b) => a - b);
+                        setConfig({ ...config, capacityOptions: updated });
+                      }
+                      setNewCapacityVal('');
+                    }}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1169,10 +1330,15 @@ export default function QuotationToolsView({
           {/* Sub-Section 1: Supply Includes Dropdowns */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-amber-600" />
-                <span>Supply Includes – Predefined Dropdown Catalogs</span>
-              </h4>
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-amber-600" />
+                  <span>Supply Includes – Predefined Dropdown Catalogs</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Dropdown options are linked to the Pricing & Component Catalog. Manage new products from the Pricing tab.
+                </p>
+              </div>
               <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">
                 Equipment Dropdowns
               </span>
@@ -1182,10 +1348,34 @@ export default function QuotationToolsView({
               {/* Modules Dropdown Options */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Solar PV Module Options</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-800">Solar PV Module Options</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = config.starredSupplySections?.module !== false;
+                        setConfig({
+                          ...config,
+                          starredSupplySections: {
+                            ...(config.starredSupplySections || { module: true, inverter: true, battery: false, structure: true }),
+                            module: !current
+                          }
+                        });
+                      }}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        config.starredSupplySections?.module !== false
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                      }`}
+                      title={config.starredSupplySections?.module !== false ? "Starred: Included in Supply Scope Preview" : "Unstarred: Omitted from Supply Scope Preview"}
+                    >
+                      <Star className={`w-3 h-3 ${config.starredSupplySections?.module !== false ? 'fill-amber-500 text-amber-600' : 'text-slate-400'}`} />
+                      <span>{config.starredSupplySections?.module !== false ? 'In Scope' : 'Omitted'}</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] font-mono text-slate-500">{config.supplyDropdownOptions.moduleOptions.length} items</span>
                 </div>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {config.supplyDropdownOptions.moduleOptions.map((opt, i) => {
                     const isEditing = editingModuleIdx === i;
                     return (
@@ -1224,7 +1414,9 @@ export default function QuotationToolsView({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
+                            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                              <span className="truncate text-slate-800 font-medium">{opt}</span>
+                            </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
@@ -1241,9 +1433,16 @@ export default function QuotationToolsView({
                                 type="button"
                                 onClick={() => {
                                   const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
+                                  const optNormalized = opt.trim().toLowerCase();
+                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                    const pName = p.name.trim().toLowerCase();
+                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                  });
                                   setConfig({
                                     ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated }
+                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
+                                    productsCatalog: updatedCatalog
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1258,41 +1457,39 @@ export default function QuotationToolsView({
                     );
                   })}
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add module model / brand..."
-                    value={newModuleOption}
-                    onChange={(e) => setNewModuleOption(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newModuleOption.trim()) return;
-                      setConfig({
-                        ...config,
-                        supplyDropdownOptions: {
-                          ...config.supplyDropdownOptions,
-                          moduleOptions: [...config.supplyDropdownOptions.moduleOptions, newModuleOption.trim()]
-                        }
-                      });
-                      setNewModuleOption('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
 
               {/* Inverter Dropdown Options */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Solar Inverter Options</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-800">Solar Inverter Options</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = config.starredSupplySections?.inverter !== false;
+                        setConfig({
+                          ...config,
+                          starredSupplySections: {
+                            ...(config.starredSupplySections || { module: true, inverter: true, battery: false, structure: true }),
+                            inverter: !current
+                          }
+                        });
+                      }}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        config.starredSupplySections?.inverter !== false
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                      }`}
+                      title={config.starredSupplySections?.inverter !== false ? "Starred: Included in Supply Scope Preview" : "Unstarred: Omitted from Supply Scope Preview"}
+                    >
+                      <Star className={`w-3 h-3 ${config.starredSupplySections?.inverter !== false ? 'fill-amber-500 text-amber-600' : 'text-slate-400'}`} />
+                      <span>{config.starredSupplySections?.inverter !== false ? 'In Scope' : 'Omitted'}</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] font-mono text-slate-500">{config.supplyDropdownOptions.inverterOptions.length} items</span>
                 </div>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {config.supplyDropdownOptions.inverterOptions.map((opt, i) => {
                     const isEditing = editingInverterIdx === i;
                     return (
@@ -1331,7 +1528,9 @@ export default function QuotationToolsView({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
+                            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                              <span className="truncate text-slate-800 font-medium">{opt}</span>
+                            </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
@@ -1348,9 +1547,16 @@ export default function QuotationToolsView({
                                 type="button"
                                 onClick={() => {
                                   const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
+                                  const optNormalized = opt.trim().toLowerCase();
+                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                    const pName = p.name.trim().toLowerCase();
+                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                  });
                                   setConfig({
                                     ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated }
+                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
+                                    productsCatalog: updatedCatalog
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1365,41 +1571,39 @@ export default function QuotationToolsView({
                     );
                   })}
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add inverter model / brand..."
-                    value={newInverterOption}
-                    onChange={(e) => setNewInverterOption(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newInverterOption.trim()) return;
-                      setConfig({
-                        ...config,
-                        supplyDropdownOptions: {
-                          ...config.supplyDropdownOptions,
-                          inverterOptions: [...config.supplyDropdownOptions.inverterOptions, newInverterOption.trim()]
-                        }
-                      });
-                      setNewInverterOption('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
 
               {/* Battery Dropdown Options */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Battery Storage Options</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-800">Battery Storage Options</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = !!config.starredSupplySections?.battery;
+                        setConfig({
+                          ...config,
+                          starredSupplySections: {
+                            ...(config.starredSupplySections || { module: true, inverter: true, battery: false, structure: true }),
+                            battery: !current
+                          }
+                        });
+                      }}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        config.starredSupplySections?.battery
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                      }`}
+                      title={config.starredSupplySections?.battery ? "Starred: Included in Supply Scope Preview" : "Unstarred: Omitted from Supply Scope Preview"}
+                    >
+                      <Star className={`w-3 h-3 ${config.starredSupplySections?.battery ? 'fill-amber-500 text-amber-600' : 'text-slate-400'}`} />
+                      <span>{config.starredSupplySections?.battery ? 'In Scope' : 'Omitted'}</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] font-mono text-slate-500">{config.supplyDropdownOptions.batteryOptions.length} items</span>
                 </div>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {config.supplyDropdownOptions.batteryOptions.map((opt, i) => {
                     const isEditing = editingBatteryIdx === i;
                     return (
@@ -1438,7 +1642,9 @@ export default function QuotationToolsView({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
+                            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                              <span className="truncate text-slate-800 font-medium">{opt}</span>
+                            </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
@@ -1455,9 +1661,16 @@ export default function QuotationToolsView({
                                 type="button"
                                 onClick={() => {
                                   const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
+                                  const optNormalized = opt.trim().toLowerCase();
+                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                    const pName = p.name.trim().toLowerCase();
+                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                  });
                                   setConfig({
                                     ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated }
+                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
+                                    productsCatalog: updatedCatalog
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1472,41 +1685,39 @@ export default function QuotationToolsView({
                     );
                   })}
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add battery model (e.g. LFP / Tubular)..."
-                    value={newBatteryOption}
-                    onChange={(e) => setNewBatteryOption(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newBatteryOption.trim()) return;
-                      setConfig({
-                        ...config,
-                        supplyDropdownOptions: {
-                          ...config.supplyDropdownOptions,
-                          batteryOptions: [...config.supplyDropdownOptions.batteryOptions, newBatteryOption.trim()]
-                        }
-                      });
-                      setNewBatteryOption('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
 
               {/* Structure Options */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Mounting Structure Options</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-800">Mounting Structure Options</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = config.starredSupplySections?.structure !== false;
+                        setConfig({
+                          ...config,
+                          starredSupplySections: {
+                            ...(config.starredSupplySections || { module: true, inverter: true, battery: false, structure: true }),
+                            structure: !current
+                          }
+                        });
+                      }}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        config.starredSupplySections?.structure !== false
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                      }`}
+                      title={config.starredSupplySections?.structure !== false ? "Starred: Included in Supply Scope Preview" : "Unstarred: Omitted from Supply Scope Preview"}
+                    >
+                      <Star className={`w-3 h-3 ${config.starredSupplySections?.structure !== false ? 'fill-amber-500 text-amber-600' : 'text-slate-400'}`} />
+                      <span>{config.starredSupplySections?.structure !== false ? 'In Scope' : 'Omitted'}</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] font-mono text-slate-500">{config.supplyDropdownOptions.structureOptions.length} items</span>
                 </div>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {config.supplyDropdownOptions.structureOptions.map((opt, i) => {
                     const isEditing = editingStructureIdx === i;
                     return (
@@ -1545,7 +1756,9 @@ export default function QuotationToolsView({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
+                            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                              <span className="truncate text-slate-800 font-medium">{opt}</span>
+                            </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
@@ -1562,9 +1775,16 @@ export default function QuotationToolsView({
                                 type="button"
                                 onClick={() => {
                                   const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
+                                  const optNormalized = opt.trim().toLowerCase();
+                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                    const pName = p.name.trim().toLowerCase();
+                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                  });
                                   setConfig({
                                     ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated }
+                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
+                                    productsCatalog: updatedCatalog
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1579,37 +1799,144 @@ export default function QuotationToolsView({
                     );
                   })}
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add structure specification..."
-                    value={newStructureOption}
-                    onChange={(e) => setNewStructureOption(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newStructureOption.trim()) return;
-                      setConfig({
-                        ...config,
-                        supplyDropdownOptions: {
-                          ...config.supplyDropdownOptions,
-                          structureOptions: [...config.supplyDropdownOptions.structureOptions, newStructureOption.trim()]
-                        }
-                      });
-                      setNewStructureOption('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Sub-Section 2: Installation Includes Checklist */}
+          {/* Sub-Section 2: Supply Includes Defaults Section (Checklist) */}
+          <div className="space-y-3 pt-4 border-t border-slate-200/80">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                  <CheckSquare className="w-4 h-4 text-amber-600" />
+                  <span>Supply Includes – Defaults Section (Checklist)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Standard supply items added automatically to Supply Includes in proposals and preview.
+                </p>
+              </div>
+              <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">
+                {config.defaultSupplyIncludes.length} items
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {config.defaultSupplyIncludes.map((item, index) => {
+                const isEditing = editingSupplyIdx === index;
+                return (
+                  <div key={index} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 transition-all">
+                    {isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-md bg-amber-500/10 text-amber-700 text-[11px] font-bold flex items-center justify-center shrink-0">
+                          {index + 1}
+                        </span>
+                        <input
+                          type="text"
+                          value={editingSupplyVal}
+                          onChange={(e) => setEditingSupplyVal(e.target.value)}
+                          className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 text-slate-900 font-medium"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!editingSupplyVal.trim()) return;
+                            const updated = [...config.defaultSupplyIncludes];
+                            updated[index] = editingSupplyVal.trim();
+                            setConfig({ ...config, defaultSupplyIncludes: updated });
+                            setEditingSupplyIdx(null);
+                          }}
+                          className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSupplyIdx(null)}
+                          className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center justify-center shrink-0">
+                            {index + 1}
+                          </span>
+                          <span className="text-xs text-slate-800 font-medium leading-relaxed">
+                            {item}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSupplyIdx(index);
+                              setEditingSupplyVal(item);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all cursor-pointer"
+                            title="Edit item"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = config.defaultSupplyIncludes.filter((_, idx) => idx !== index);
+                              setConfig({ ...config, defaultSupplyIncludes: updated });
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                            title="Remove item"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add New Supply Item Form */}
+            <div className="flex gap-2 pt-2">
+              <input
+                type="text"
+                placeholder="Add new custom supply item (e.g. Solar Generation Meter, Lightning Arrestor, AC/DC Disconnects)..."
+                value={newSupplyItem}
+                onChange={(e) => setNewSupplyItem(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newSupplyItem.trim()) {
+                    e.preventDefault();
+                    setConfig({
+                      ...config,
+                      defaultSupplyIncludes: [...config.defaultSupplyIncludes, newSupplyItem.trim()]
+                    });
+                    setNewSupplyItem('');
+                  }
+                }}
+                className="flex-1 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!newSupplyItem.trim()) return;
+                  setConfig({
+                    ...config,
+                    defaultSupplyIncludes: [...config.defaultSupplyIncludes, newSupplyItem.trim()]
+                  });
+                  setNewSupplyItem('');
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0 flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Supply Item</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-Section 3: Installation Includes Checklist */}
           <div className="space-y-3 pt-4 border-t border-slate-200/80">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
@@ -3150,13 +3477,22 @@ export default function QuotationToolsView({
                           type="button"
                           onClick={() => {
                             const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
+                            const optNormalized = opt.trim().toLowerCase();
+                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                              const pName = p.name.trim().toLowerCase();
+                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                            });
+                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
                             setConfig({
                               ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated }
+                              supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
+                              productsCatalog: updatedCatalog,
+                              starredSupplyOptions: updatedStarred
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
-                          title="Delete option"
+                          title="Delete option and remove from catalog"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -3184,13 +3520,22 @@ export default function QuotationToolsView({
                           type="button"
                           onClick={() => {
                             const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
+                            const optNormalized = opt.trim().toLowerCase();
+                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                              const pName = p.name.trim().toLowerCase();
+                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                            });
+                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
                             setConfig({
                               ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated }
+                              supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
+                              productsCatalog: updatedCatalog,
+                              starredSupplyOptions: updatedStarred
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
-                          title="Delete option"
+                          title="Delete option and remove from catalog"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -3218,13 +3563,22 @@ export default function QuotationToolsView({
                           type="button"
                           onClick={() => {
                             const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
+                            const optNormalized = opt.trim().toLowerCase();
+                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                              const pName = p.name.trim().toLowerCase();
+                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                            });
+                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
                             setConfig({
                               ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated }
+                              supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
+                              productsCatalog: updatedCatalog,
+                              starredSupplyOptions: updatedStarred
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
-                          title="Delete option"
+                          title="Delete option and remove from catalog"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -3252,13 +3606,22 @@ export default function QuotationToolsView({
                           type="button"
                           onClick={() => {
                             const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
+                            const optNormalized = opt.trim().toLowerCase();
+                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                              const pName = p.name.trim().toLowerCase();
+                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                            });
+                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
                             setConfig({
                               ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated }
+                              supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
+                              productsCatalog: updatedCatalog,
+                              starredSupplyOptions: updatedStarred
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
-                          title="Delete option"
+                          title="Delete option and remove from catalog"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -3266,6 +3629,170 @@ export default function QuotationToolsView({
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Defaults Section (BOQ Items e, f, g & Additional Standard Scope) */}
+            <div className="bg-amber-50/40 p-5 rounded-2xl border border-amber-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/80 pb-3">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                    <span>Defaults (BOQ Items e, f, g & Standard Supply/Installation)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Configure default items e, f, g (Cables, AC Side Supply, Installation & Commissioning) and additional scopes. You can edit descriptions, brands, unit rates, toggle items, or add new default rows.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAddingDefaultBoq(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs self-start shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Default Item</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-amber-200 rounded-xl bg-white shadow-2xs">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-slate-900 text-white font-bold text-[11px]">
+                    <tr>
+                      <th className="p-2.5 border-r border-slate-800 w-12 text-center">Item</th>
+                      <th className="p-2.5 border-r border-slate-800">Item Description (Preview & Proposal)</th>
+                      <th className="p-2.5 border-r border-slate-800 w-36">Brand / Spec</th>
+                      <th className="p-2.5 border-r border-slate-800 w-24 text-center">Unit</th>
+                      <th className="p-2.5 border-r border-slate-800 w-32 text-center">Qty Basis</th>
+                      <th className="p-2.5 border-r border-slate-800 w-28 text-right">Unit Rate (₹)</th>
+                      <th className="p-2.5 border-r border-slate-800 w-20 text-center">Status</th>
+                      <th className="p-2.5 w-12 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {(config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((item, idx) => {
+                      const letter = String.fromCharCode(101 + idx); // e, f, g, h, i...
+                      return (
+                        <tr key={item.id || idx} className={item.isEnabled === false ? 'bg-slate-50/70 opacity-60' : 'hover:bg-amber-50/20'}>
+                          <td className="p-2.5 border-r border-slate-200 text-center font-bold font-mono text-amber-700">
+                            {letter}.
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200">
+                            <input
+                              type="text"
+                              value={item.itemDescription}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                  cIdx === idx ? { ...cur, itemDescription: val } : cur
+                                );
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className="w-full text-xs font-semibold text-slate-900 bg-transparent border-0 border-b border-transparent focus:border-amber-500 focus:bg-amber-50/30 px-1 py-0.5 rounded focus:outline-hidden"
+                            />
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200">
+                            <input
+                              type="text"
+                              value={item.brand || ''}
+                              placeholder="e.g. Polycab"
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                  cIdx === idx ? { ...cur, brand: val } : cur
+                                );
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className="w-full text-xs text-slate-700 bg-transparent border-0 border-b border-transparent focus:border-amber-500 focus:bg-amber-50/30 px-1 py-0.5 rounded focus:outline-hidden"
+                            />
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200 text-center">
+                            <select
+                              value={item.defaultUnit || 'kWp'}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                  cIdx === idx ? { ...cur, defaultUnit: val } : cur
+                                );
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className="text-xs font-mono font-medium p-1 rounded border border-slate-200 bg-white cursor-pointer"
+                            >
+                              <option value="kWp">kWp</option>
+                              <option value="Nos">Nos</option>
+                              <option value="Lot">Lot</option>
+                              <option value="Set">Set</option>
+                              <option value="Feet">Feet</option>
+                            </select>
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200 text-center">
+                            <select
+                              value={item.defaultQtyType || 'CAPACITY_KWP'}
+                              onChange={(e) => {
+                                const val = e.target.value as 'CAPACITY_KWP' | 'FIXED' | 'NOS';
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                  cIdx === idx ? { ...cur, defaultQtyType: val } : cur
+                                );
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className="text-xs font-medium p-1 rounded border border-slate-200 bg-white cursor-pointer"
+                            >
+                              <option value="CAPACITY_KWP">As per kWp</option>
+                              <option value="FIXED">Fixed</option>
+                              <option value="NOS">Nos Qty</option>
+                            </select>
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200 text-right">
+                            <div className="relative">
+                              <span className="absolute left-1 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-[10px]">₹</span>
+                              <input
+                                type="number"
+                                value={item.defaultUnitPrice || ''}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                    cIdx === idx ? { ...cur, defaultUnitPrice: val } : cur
+                                  );
+                                  setConfig({ ...config, defaultBoqItems: updated });
+                                }}
+                                className="w-20 pl-4 pr-1 py-0.5 text-xs text-right font-mono font-bold text-slate-900 bg-transparent border-0 border-b border-transparent focus:border-amber-500 focus:bg-amber-50/30 rounded focus:outline-hidden"
+                              />
+                            </div>
+                          </td>
+                          <td className="p-2.5 border-r border-slate-200 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).map((cur, cIdx) => 
+                                  cIdx === idx ? { ...cur, isEnabled: cur.isEnabled === false ? true : false } : cur
+                                );
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                                item.isEnabled !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {item.isEnabled !== false ? 'Active' : 'Disabled'}
+                            </button>
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).filter((_, cIdx) => cIdx !== idx);
+                                setConfig({ ...config, defaultBoqItems: updated });
+                              }}
+                              className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                              title="Delete default item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -3475,12 +4002,11 @@ export default function QuotationToolsView({
                           onChange={(e) => setNewProduct({ ...newProduct, defaultUnit: e.target.value })}
                           className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 font-mono"
                         >
-                          <option value="kWp">kWp</option>
                           <option value="Nos">Nos</option>
-                          <option value="Set">Set</option>
-                          <option value="Lot">Lot</option>
-                          <option value="Pcs">Pcs</option>
+                          <option value="kWp">kWp</option>
+                          <option value="Feet">Feet</option>
                           <option value="Box">Box</option>
+                          <option value="Pcs">Pcs</option>
                         </select>
                       </div>
 
@@ -3579,6 +4105,168 @@ export default function QuotationToolsView({
                       className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
                     >
                       Save Product to Catalog
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Add New Default BOQ Item Modal */}
+            {isAddingDefaultBoq && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  {/* Modal Header */}
+                  <div className="px-6 py-4 bg-amber-600 text-white flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Add Default BOQ Item</h4>
+                        <p className="text-[11px] text-amber-100">Add a default item to the proposal bill of quantities</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingDefaultBoq(false)}
+                      className="text-amber-100 hover:text-white p-1 rounded-lg hover:bg-amber-700 transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Modal Body Form */}
+                  <div className="p-6 space-y-4">
+                    {/* Item Description */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Item Description (Preview & Proposal) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Remote Monitoring Unit & Data Logger"
+                        value={newDefaultBoq.itemDescription || ''}
+                        onChange={(e) => setNewDefaultBoq({ ...newDefaultBoq, itemDescription: e.target.value })}
+                        className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-900"
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Brand */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Brand / Specification
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. SolarEdge / Schneider"
+                          value={newDefaultBoq.brand || ''}
+                          onChange={(e) => setNewDefaultBoq({ ...newDefaultBoq, brand: e.target.value })}
+                          className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800"
+                        />
+                      </div>
+
+                      {/* Unit */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Unit <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={newDefaultBoq.defaultUnit || 'kWp'}
+                          onChange={(e) => setNewDefaultBoq({ ...newDefaultBoq, defaultUnit: e.target.value })}
+                          className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 font-mono"
+                        >
+                          <option value="kWp">kWp</option>
+                          <option value="Nos">Nos</option>
+                          <option value="Lot">Lot</option>
+                          <option value="Set">Set</option>
+                          <option value="Feet">Feet</option>
+                        </select>
+                      </div>
+
+                      {/* Quantity Type */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Quantity Calculation Rule
+                        </label>
+                        <select
+                          value={newDefaultBoq.defaultQtyType || 'CAPACITY_KWP'}
+                          onChange={(e) => setNewDefaultBoq({ ...newDefaultBoq, defaultQtyType: e.target.value as any })}
+                          className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800"
+                        >
+                          <option value="CAPACITY_KWP">As per Project Capacity (kWp)</option>
+                          <option value="FIXED">Fixed Quantity</option>
+                          <option value="NOS">Nos Count</option>
+                        </select>
+                      </div>
+
+                      {/* Default Unit Rate */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Default Unit Rate (₹)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₹</span>
+                          <input
+                            type="number"
+                            placeholder="e.g. 1500"
+                            value={newDefaultBoq.defaultUnitPrice || ''}
+                            onChange={(e) => setNewDefaultBoq({ ...newDefaultBoq, defaultUnitPrice: parseFloat(e.target.value) || 0 })}
+                            className="w-full pl-7 pr-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-900"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingDefaultBoq(false)}
+                      className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!newDefaultBoq.itemDescription?.trim()}
+                      onClick={() => {
+                        if (!newDefaultBoq.itemDescription?.trim()) return;
+                        const currentList = config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG;
+                        const nextLetter = String.fromCharCode(101 + currentList.length);
+                        const itemToAdd: DefaultBoqItemConfig = {
+                          id: `def-boq-${Date.now()}`,
+                          label: `${nextLetter}. ${newDefaultBoq.itemDescription.trim()}`,
+                          itemDescription: newDefaultBoq.itemDescription.trim(),
+                          brand: newDefaultBoq.brand?.trim() || '',
+                          defaultUnit: newDefaultBoq.defaultUnit || 'kWp',
+                          defaultQtyType: newDefaultBoq.defaultQtyType || 'CAPACITY_KWP',
+                          defaultUnitPrice: Number(newDefaultBoq.defaultUnitPrice) || 0,
+                          warrantyPeriod: newDefaultBoq.warrantyPeriod || 'Standard Warranty',
+                          isEnabled: true
+                        };
+
+                        setConfig({
+                          ...config,
+                          defaultBoqItems: [...currentList, itemToAdd]
+                        });
+                        setIsAddingDefaultBoq(false);
+                        setNewDefaultBoq({
+                          label: '',
+                          itemDescription: '',
+                          brand: '',
+                          defaultUnit: 'kWp',
+                          defaultQtyType: 'CAPACITY_KWP',
+                          defaultQtyValue: '',
+                          defaultUnitPrice: 0,
+                          warrantyPeriod: 'Standard Warranty',
+                          isEnabled: true
+                        });
+                      }}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                    >
+                      Add to Defaults
                     </button>
                   </div>
                 </div>

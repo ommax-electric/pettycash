@@ -11,7 +11,8 @@ import {
   DEFAULT_SAVINGS_BENEFITS,
   calculateSolarPricing,
   getNextOfferNumber,
-  LetterheadConfig
+  LetterheadConfig,
+  buildDefaultBOQItems
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings } from '../../types';
@@ -107,9 +108,9 @@ export default function SolarQuotationBuilder({
       installationIncludes: [...DEFAULT_INSTALLATION_INCLUDES],
       boqItems: [
         { id: 'boq-1', slNo: 1, itemDescription: 'SERVOTEC HHV [550 Wp] Mono Perc DCR', quantity: '4.95 kWp' },
-        { id: 'boq-2', slNo: 2, itemDescription: 'Battery', quantity: 'Nill' },
-        { id: 'boq-3', slNo: 3, itemDescription: 'Table RCC Mounting Structure Elevation for 5 kW', quantity: '7 Feet' },
-        { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC', quantity: '1 Nos' },
+        { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter Make: SERVOTEC', quantity: '1 Nos' },
+        { id: 'boq-3', slNo: 3, itemDescription: 'Nil', quantity: 'Nil' },
+        { id: 'boq-4', slNo: 4, itemDescription: 'Table RCC Structure', quantity: '7 Feet' },
         { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: '4.95 kWp' },
         { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: '4.95 kWp' },
         { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: '4.95 kWp' }
@@ -210,7 +211,18 @@ export default function SolarQuotationBuilder({
     const acc = accounts.find(a => a.id === opp.accountId);
     const con = contacts.find(c => c.id === opp.contactId);
 
-    const clientName = con?.name || acc?.name || opp.title;
+    let clientName = opp.title || 'Valued Client';
+    if (con) {
+      const rawName = (con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || '').trim();
+      const sal = (con.salutation || '').trim();
+      if (sal && rawName && !rawName.toLowerCase().startsWith(sal.toLowerCase())) {
+        clientName = `${sal} ${rawName}`;
+      } else {
+        clientName = rawName || acc?.name || opp.title || 'Valued Client';
+      }
+    } else {
+      clientName = acc?.name || opp.title || 'Valued Client';
+    }
     
     // Construct full comprehensive postal address
     const addressParts: string[] = [];
@@ -873,7 +885,9 @@ export default function SolarQuotationBuilder({
             {/* Net Payable Grand Total Banner */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4 rounded-xl flex items-center justify-between shadow-md">
               <div>
-                <span className="text-[10px] font-mono font-bold uppercase text-[#f7b944]">D = A + B - C</span>
+                <span className="text-[10px] font-mono font-bold uppercase text-[#f7b944]">
+                  {formData.specialDiscount > 0 ? 'D = A + B - C' : 'C = A + B'}
+                </span>
                 <h4 className="text-sm font-black tracking-wide">
                   Grand Total (EPC) – Inclusive of Taxes, To Pay Amount
                 </h4>

@@ -31,6 +31,7 @@ import {
   CRMSettings,
   ContactStatus,
   AccountEditHistoryEntry,
+  CRM_SALUTATIONS,
   formatCRMIDate,
   formatCRMIDateTime,
   normalizePhoneNumber
@@ -112,6 +113,7 @@ export default function CRMContactsView({
 
   // Form State
   const [formData, setFormData] = useState({
+    salutation: '',
     name: '',
     email: '',
     mobile: '',
@@ -180,7 +182,12 @@ export default function CRMContactsView({
 
   // Helpers
   const getContactName = (con: CRMContact) => {
-    return con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || 'Unnamed Contact';
+    const raw = (con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || '').trim();
+    if (!raw) return 'Unnamed Contact';
+    if (con.salutation && con.salutation.trim() && !raw.toLowerCase().startsWith(con.salutation.toLowerCase())) {
+      return `${con.salutation.trim()} ${raw}`;
+    }
+    return raw;
   };
 
   const getContactInitials = (con: CRMContact) => {
@@ -371,6 +378,7 @@ export default function CRMContactsView({
   // ==================== FORM HANDLERS ====================
   const resetForm = () => {
     setFormData({
+      salutation: '',
       name: '',
       email: '',
       mobile: '',
@@ -403,12 +411,18 @@ export default function CRMContactsView({
     if (!canEdit) return;
     setEditingContact(con);
     setDismissDuplicateContactWarning(false);
-    const resolvedName = getContactName(con);
+    const rawName = (con.name || [con.firstName, con.lastName].filter(Boolean).join(' ') || '').trim();
+    let cleanName = rawName;
+    const sal = con.salutation || '';
+    if (sal && cleanName.toLowerCase().startsWith(sal.toLowerCase())) {
+      cleanName = cleanName.slice(sal.length).trim();
+    }
     const currentAccId = con.accountId && con.accountId !== 'INDEPENDENT' ? con.accountId : 'INDEPENDENT';
     const isIndep = currentAccId === 'INDEPENDENT';
     const hasAltAddr = !isIndep && Boolean(con.hasAlternativeAddress);
     setFormData({
-      name: resolvedName,
+      salutation: sal,
+      name: cleanName,
       email: con.email || '',
       mobile: con.mobile || con.phone || '',
       altMobile: con.altMobile || '',
@@ -490,7 +504,7 @@ export default function CRMContactsView({
     const mobile = formData.mobile.trim();
     const accountId = formData.accountId;
 
-    if (!contactName || !mobile || !accountId) return;
+    if (!formData.salutation.trim() || !contactName || !mobile || !accountId) return;
 
     const isIndependent = accountId === 'INDEPENDENT' || !accountId;
     if (isIndependent) {
@@ -516,6 +530,7 @@ export default function CRMContactsView({
 
       const payload = {
         ...formData,
+        salutation: formData.salutation.trim() || undefined,
         name: contactName,
         firstName: contactName,
         lastName: '',
@@ -537,7 +552,11 @@ export default function CRMContactsView({
       if (editingContact) {
         const changes: { field: string; oldValue: string; newValue: string }[] = [];
 
-        const oldName = getContactName(editingContact).trim();
+        if ((editingContact.salutation || '').trim() !== formData.salutation.trim()) {
+          changes.push({ field: 'Salutation', oldValue: editingContact.salutation || '(None)', newValue: formData.salutation || '(None)' });
+        }
+
+        const oldName = (editingContact.name || [editingContact.firstName, editingContact.lastName].filter(Boolean).join(' ') || '').trim();
         const newName = contactName;
         if (oldName !== newName) {
           changes.push({ field: 'Full Name', oldValue: oldName || '(Blank)', newValue: newName });
@@ -2197,17 +2216,33 @@ export default function CRMContactsView({
 
               <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
                 
-                {/* 1. Full Name * */}
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Kuralamuthan"
-                    value={formData.name}
-                    onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
-                  />
+                {/* 1. Salutation & Full Name * */}
+                <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Salutation *</label>
+                    <select
+                      required
+                      value={formData.salutation}
+                      onChange={e => setFormData({ ...formData, salutation: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors cursor-pointer"
+                    >
+                      <option value="">Select...</option>
+                      {CRM_SALUTATIONS.map(sal => (
+                        <option key={sal} value={sal}>{sal}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Rajesh Kumar"
+                      value={formData.name}
+                      onChange={e => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                    />
+                  </div>
                 </div>
 
                 {/* 2. Associated Account * & Contact Status * */}

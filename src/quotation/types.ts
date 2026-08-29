@@ -1,3 +1,5 @@
+import React from 'react';
+
 export type QuotationStatus = 'DRAFT' | 'SENT' | 'UNDER_REVISION' | 'WON' | 'LOST' | 'EXPIRED';
 
 export type QuotationType = 'SOLAR_EPC' | 'STANDARD_BOQ';
@@ -75,6 +77,7 @@ export interface SolarQuotation {
   accountId?: string;
   accountName?: string;
   contactId?: string;
+  contactSalutation?: string;
   contactName?: string;
   contactPhone?: string;
   contactEmail?: string;
@@ -187,12 +190,10 @@ export const DEFAULT_LETTERHEAD_CONFIG: LetterheadConfig = {
 };
 
 export const DEFAULT_SUPPLY_INCLUDES = [
-  'Solar PV Modules (SERVOTEC – Made in India)',
-  'Solar hybrid Inverter Servotec',
-  'Battery (Optional / As per requirement)',
-  'Module Mounting Structures (Hot-Dip Galvanized / Anodized)',
-  'ACDB / DCDB with complete protection & surge arrestors',
-  'DC & AC cables, earthing materials, conduits, breakers, and accessories'
+  'ACDB & DCDB: IP65 Enclosures with Type-II Surge Protection Devices (SPD) & MCBs',
+  'Cables & Balance of System (BOS): 4/6 sq.mm UV resistant DC solar cables & multi-core AC cables',
+  'Earthing & Lightning Protection: Dedicated copper-bonded chemical earthing electrodes with pits & lightning arrestor',
+  'Bi-Directional Net Metering: TANGEDCO / DISCOM liaisoning & generation meter support'
 ];
 
 export const DEFAULT_INSTALLATION_INCLUDES = [
@@ -449,6 +450,7 @@ export interface QuotationMasterConfig {
   availableSystemTypes: { id: string; label: string; description?: string }[];
   availableSegments: { id: string; label: string; description?: string }[];
   availableSchemes: { id: string; label: string; description?: string }[];
+  capacityOptions?: number[];
 
   // 3. Scope of Work
   supplyDropdownOptions: {
@@ -459,6 +461,13 @@ export interface QuotationMasterConfig {
     protectionOptions: string[];
     cablingOptions: string[];
   };
+  starredSupplySections?: {
+    module?: boolean;
+    inverter?: boolean;
+    battery?: boolean;
+    structure?: boolean;
+  };
+  starredSupplyOptions?: string[];
   defaultSupplyIncludes: string[];
   defaultInstallationIncludes: string[];
 
@@ -525,7 +534,61 @@ export interface QuotationMasterConfig {
   gstServicesPercent: number;
   gstServicesRate: number;
   productsCatalog: MasterCatalogProduct[];
+  defaultBoqItems: DefaultBoqItemConfig[];
 }
+
+export interface DefaultBoqItemConfig {
+  id: string;
+  itemKey?: string;
+  label: string;
+  itemDescription: string;
+  brand?: string;
+  defaultUnit: string;
+  defaultQtyType: 'CAPACITY_KWP' | 'FIXED' | 'NOS';
+  defaultQtyValue?: string;
+  defaultUnitPrice: number;
+  warrantyPeriod?: string;
+  isEnabled: boolean;
+}
+
+export const DEFAULT_BOQ_ITEMS_CONFIG: DefaultBoqItemConfig[] = [
+  {
+    id: 'def-boq-5',
+    itemKey: 'dc_cables',
+    label: 'e. DC Cables, Array Junction Boxes & Accessories',
+    itemDescription: 'DC Cables, Array Junction Boxes & Accessories',
+    brand: 'Polycab / Hensel',
+    defaultUnit: 'kWp',
+    defaultQtyType: 'CAPACITY_KWP',
+    defaultUnitPrice: 3800,
+    warrantyPeriod: '5 Years Manufacturer Warranty',
+    isEnabled: true
+  },
+  {
+    id: 'def-boq-6',
+    itemKey: 'ac_supply',
+    label: 'f. AC Side Supply (Cables, ACDB, Earthing & Accessories)',
+    itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)',
+    brand: 'Polycab / Havells',
+    defaultUnit: 'kWp',
+    defaultQtyType: 'CAPACITY_KWP',
+    defaultUnitPrice: 3200,
+    warrantyPeriod: '5 Years Manufacturer Warranty',
+    isEnabled: true
+  },
+  {
+    id: 'def-boq-7',
+    itemKey: 'installation',
+    label: 'g. Installation and Commissioning',
+    itemDescription: 'Installation and Commissioning',
+    brand: 'OMMAX Engineering Team',
+    defaultUnit: 'kWp',
+    defaultQtyType: 'CAPACITY_KWP',
+    defaultUnitPrice: 4500,
+    warrantyPeriod: '1 Year Free O&M Workmanship',
+    isEnabled: true
+  }
+];
 
 export const DEFAULT_MASTER_CATALOG_PRODUCTS: MasterCatalogProduct[] = [
   {
@@ -567,7 +630,7 @@ export const DEFAULT_MASTER_CATALOG_PRODUCTS: MasterCatalogProduct[] = [
     name: 'Table RCC Mounting Structure (Elevated 7-10 Ft)',
     brand: 'JSW HDG Steel',
     modelSpec: 'Hot-Dip Galvanized 80 Micron Elevated Structure',
-    defaultUnit: 'kWp',
+    defaultUnit: 'Feet',
     defaultUnitPrice: 6500,
     warrantyPeriod: '10 Years Structural Integrity',
     isDefaultBOQ: true
@@ -575,31 +638,31 @@ export const DEFAULT_MASTER_CATALOG_PRODUCTS: MasterCatalogProduct[] = [
   {
     id: 'prod-5',
     category: 'ELECTRICAL',
-    name: 'ACDB & DCDB Surge Protection Boxes with Enclosure',
-    brand: 'C&S / Finder / Hensel',
-    modelSpec: 'IP65 Enclosure, Type II SPD, Dual Pole MCB/Isolator',
-    defaultUnit: 'Set',
-    defaultUnitPrice: 8500,
-    warrantyPeriod: '2 Years Replacement Warranty',
+    name: 'DC Cables, Array Junction Boxes & Accessories',
+    brand: 'Polycab / Hensel',
+    modelSpec: '6 sq.mm XLPO UV Solar Cable + IP65 Array Junction Box with SPD & Fuses',
+    defaultUnit: 'kWp',
+    defaultUnitPrice: 3800,
+    warrantyPeriod: '5 Years Manufacturer Warranty',
     isDefaultBOQ: true
   },
   {
     id: 'prod-6',
     category: 'ELECTRICAL',
-    name: 'Solar DC & AC Armoured Cables & Earthing System',
+    name: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)',
     brand: 'Polycab / Havells',
-    modelSpec: '6 sq.mm XLPO UV Solar Cable + 4 Core Cu Armoured + 3 Pit Earth Rods',
-    defaultUnit: 'Lot',
-    defaultUnitPrice: 14500,
+    modelSpec: '4 Core Cu Armoured AC Cable + ACDB with Type-2 SPD + Chemical Earthing System',
+    defaultUnit: 'kWp',
+    defaultUnitPrice: 3200,
     warrantyPeriod: '5 Years Manufacturer Warranty',
     isDefaultBOQ: true
   },
   {
     id: 'prod-7',
     category: 'SERVICES',
-    name: 'Installation, Testing & Grid Commissioning',
+    name: 'Installation and Commissioning',
     brand: 'OMMAX Engineering Team',
-    modelSpec: 'Turnkey Mechanical, Civil, Electrical & Discom Net-Metering Liaison',
+    modelSpec: 'Turnkey Mechanical Erection, Civil Foundations, Electrical Integration & Net-Metering Liaison',
     defaultUnit: 'kWp',
     defaultUnitPrice: 4500,
     warrantyPeriod: '1 Year Free O&M Workmanship',
@@ -615,7 +678,7 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
   defaultSubjectTemplate: 'Proposal for {capacityKwp} kWp Roof top Solar Power Plant',
   defaultToSalutation: 'Dear Valued Customer,',
 
-  introOpeningText: 'We thank you for giving us an opportunity to submit our Techno-Commercial Proposal for Design, Engineering, Supply, Installation, Testing & Commissioning of Rooftop Solar PV Power Plant.',
+  introOpeningText: 'In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of a {Connection Type} Solar PV Power Plant at your {Target Segment} under the {Scheme}.',
   availableSystemTypes: [
     { id: 'ON_GRID', label: 'On Grid-Connected Solar PV Power Plant', description: 'Synchronized with DISCOM Grid with Bi-directional Net Metering' },
     { id: 'OFF_GRID', label: 'Off Grid-Connected Solar PV Power Plant', description: 'Standalone battery storage system for zero-grid reliance' },
@@ -633,6 +696,7 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
     { id: 'STATE_SUBSIDY', label: 'State Renewable Energy Incentive Scheme', description: 'State Nodal Agency specific incentive' },
     { id: 'OPEX_PPA', label: 'RESCO / OPEX / PPA Model', description: 'Zero upfront Capex - Tariff per unit basis' }
   ],
+  capacityOptions: [1, 2, 2.22, 3, 3.33, 4, 4.95, 5, 5.50, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 100],
 
   supplyDropdownOptions: {
     moduleOptions: [
@@ -650,12 +714,13 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
       'Deye / GoodWe Hybrid Inverter with Battery Port'
     ],
     batteryOptions: [
-      'Nill (On-Grid Direct Net-Metering)',
+      'Nil (On-Grid Direct Net-Metering)',
       'Servotec 48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
       'Exide Tubular Solar C10 Heavy-Duty Battery Bank',
       'Luminous 150Ah / 200Ah Solar Tall Tubular Battery Bank'
     ],
     structureOptions: [
+      'Nil (No Mounting Structure / Customer Scope)',
       'Table RCC Mounting Structure Elevation 7 to 10 Feet (Walkable Roof)',
       'Flush Mount Aluminium Rails for Metal Sheet Industrial Roof',
       'Super High-Rise Elevated Heavy Duty HDG Structure (12+ Feet)',
@@ -672,6 +737,25 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
       'Finolex UV Stabilized DC Cable + Heavy GI Earthing Rods & Compound'
     ]
   },
+  starredSupplyOptions: [
+    'SERVOTEC HHV [550 Wp] Mono Perc DCR – Made in India',
+    'Waaree 540-550 Wp Bi-facial Dual Glass TopCon DCR',
+    'Adani Solar 545 Wp Mono PERC High Efficiency DCR',
+    'Vikram Solar 550 Wp Half-Cut DCR Modules',
+    'Tata Power Solar 540 Wp Mono Crystalline DCR',
+    'SERVOTEC Single / Three Phase On-Grid MPPT Inverter',
+    'Growatt On-Grid Smart Inverter with WiFi & Mobile App Monitoring',
+    'Solis High-Efficiency Dual MPPT Grid Tied Inverter',
+    'Sungrow Commercial Three Phase Inverter',
+    'Deye / GoodWe Hybrid Inverter with Battery Port',
+    'Servotec 48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
+    'Exide Tubular Solar C10 Heavy-Duty Battery Bank',
+    'Luminous 150Ah / 200Ah Solar Tall Tubular Battery Bank',
+    'Table RCC Mounting Structure Elevation 7 to 10 Feet (Walkable Roof)',
+    'Flush Mount Aluminium Rails for Metal Sheet Industrial Roof',
+    'Super High-Rise Elevated Heavy Duty HDG Structure (12+ Feet)',
+    'Ground Mounted Galvanized Steel Structure with Concrete Ballast'
+  ],
   defaultSupplyIncludes: DEFAULT_SUPPLY_INCLUDES,
   defaultInstallationIncludes: DEFAULT_INSTALLATION_INCLUDES,
 
@@ -747,5 +831,346 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
   gstGoodsRate: 5,
   gstServicesPercent: 20,
   gstServicesRate: 18,
-  productsCatalog: DEFAULT_MASTER_CATALOG_PRODUCTS
+  productsCatalog: DEFAULT_MASTER_CATALOG_PRODUCTS,
+  defaultBoqItems: DEFAULT_BOQ_ITEMS_CONFIG,
+  starredSupplySections: {
+    module: true,
+    inverter: true,
+    battery: false,
+    structure: true
+  }
 };
+
+/**
+ * Parses markdown-like *bold* or **bold** syntax and renders with font-bold
+ * Example: "Aadhaar-linked bank account after commissioning and *National Portal* inspection."
+ * -> "National Portal" will be rendered inside <strong className="font-bold">
+ */
+export function renderFormattedText(text: string | undefined | null): React.ReactNode {
+  if (!text) return null;
+  if (!text.includes('*')) return text;
+
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*|\*)([^*]+)\1/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    parts.push(
+      React.createElement(
+        'strong',
+        { key: match.index, className: 'font-bold text-slate-950' },
+        match[2]
+      )
+    );
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return React.createElement(React.Fragment, null, ...parts);
+}
+
+/**
+ * Cleans the Mounting Structure description by stripping any redundant elevation feet text
+ * so that elevation feet only appears in the Quantity column and only the chosen item is shown.
+ */
+export function cleanStructureDescription(rawText?: string): string {
+  if (!rawText || !rawText.trim() || rawText.toLowerCase().includes('nil')) return 'Mounting Structure';
+  let text = rawText.trim();
+  text = text.replace(/^mounting\s*structure\s*[-–:]\s*/i, '');
+  text = text.replace(/^module\s*mounting\s*structure\s*[-–:]\s*/i, '');
+  text = text.replace(/\s*\((?:elevated\s*)?\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft|height)\)/gi, '');
+  text = text.replace(/\s*elevation\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)/gi, '');
+  text = text.replace(/\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)\s*(?:height)?/gi, '');
+  text = text.replace(/\s*\(\s*\)/g, '').trim();
+  text = text.replace(/\s{2,}/g, ' ').trim();
+  if (!text || text.toLowerCase() === 'mounting structure' || text.toLowerCase().includes('nil')) {
+    return 'Mounting Structure';
+  }
+  return text;
+}
+
+/**
+ * Cleans the Battery description by stripping redundant prefixes and quantity annotations
+ * so that the quantity appears only in the Quantity column and only the chosen item is shown.
+ */
+export function cleanBatteryDescription(rawText?: string, isBatteryActive?: boolean): string {
+  if (!isBatteryActive || !rawText || rawText.toLowerCase().includes('nil')) {
+    return 'Battery';
+  }
+  let text = rawText.trim();
+  text = text.replace(/^battery(?:\s*energy)?(?:\s*storage)?(?:\s*bank)?\s*[-–:]\s*/i, '');
+  text = text.replace(/\s*\((?:qty:\s*)?\d+\s*nos\)/gi, '');
+  text = text.replace(/\s*\(\s*nill?[^)]*\)/gi, '');
+  text = text.replace(/\s{2,}/g, ' ').trim();
+  if (!text || text.toLowerCase() === 'battery' || text.toLowerCase().includes('nil')) {
+    return 'Battery';
+  }
+  return text;
+}
+
+/**
+ * Dynamically replaces placeholders like {Connection Type}, {Target Segment}, {Scheme}
+ * from Prepare Solar Quotation dropdown choices.
+ */
+export function interpolateOpeningText(
+  template: string | undefined | null,
+  params: {
+    connectionType?: string;
+    targetSegment?: string;
+    scheme?: string;
+    capacityKw?: number;
+    clientName?: string;
+    projectName?: string;
+  }
+): string {
+  if (!template || !template.trim()) {
+    return 'In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of an On Grid-Connected Solar PV Power Plant at your residence under the PM Surya Ghar: Muft Bijli Yojana.';
+  }
+
+  let conn = params.connectionType || 'On-Grid';
+  const cleanConn = conn
+    .replace(/\s*(Solar\s*PV\s*Power\s*Plant|Solar\s*Power\s*Plant|Power\s*Plant)\s*$/i, '')
+    .trim() || conn;
+
+  let seg = params.targetSegment || 'Residence';
+  const cleanSeg = seg.replace(/^Solar\s+for\s+/i, '').trim() || seg;
+
+  const scheme = params.scheme || 'PM Surya Ghar: Muft Bijli Yojana';
+  const capacity = params.capacityKw ? `${params.capacityKw} kWp` : '';
+  const clientName = params.clientName || '';
+  const projectName = params.projectName || '';
+
+  let result = template
+    .replace(/\{(\s*Connection\s*Type\s*|\s*connectionType\s*|\s*System\s*Type\s*|\s*systemType\s*)\}/gi, cleanConn)
+    .replace(/\{\{(\s*Connection\s*Type\s*|\s*connectionType\s*|\s*System\s*Type\s*|\s*systemType\s*)\}\}/gi, cleanConn)
+    .replace(/\{(\s*Target\s*Segment\s*|\s*targetSegment\s*|\s*Segment\s*|\s*segment\s*)\}/gi, cleanSeg)
+    .replace(/\{\{(\s*Target\s*Segment\s*|\s*targetSegment\s*|\s*Segment\s*|\s*segment\s*)\}\}/gi, cleanSeg)
+    .replace(/\{(\s*Scheme\s*|\s*scheme\s*)[\}\)]/gi, scheme)
+    .replace(/\{\{(\s*Scheme\s*|\s*scheme\s*)\}\}/gi, scheme)
+    .replace(/\{(\s*Capacity\s*|\s*capacity\s*|\s*capacityKw\s*|\s*capacityKwp\s*)\}/gi, capacity)
+    .replace(/\{\{(\s*Capacity\s*|\s*capacity\s*|\s*capacityKw\s*|\s*capacityKwp\s*)\}\}/gi, capacity)
+    .replace(/\{(\s*Client\s*Name\s*|\s*clientName\s*)\}/gi, clientName)
+    .replace(/\{\{(\s*Client\s*Name\s*|\s*clientName\s*)\}\}/gi, clientName)
+    .replace(/\{(\s*Project\s*Name\s*|\s*projectName\s*)\}/gi, projectName)
+    .replace(/\{\{(\s*Project\s*Name\s*|\s*projectName\s*)\}\}/gi, projectName);
+
+  // Fix grammar "a [Vowel]" -> "an [Vowel]" e.g. "a On Grid-Connected" -> "an On Grid-Connected"
+  result = result.replace(/\ba\s+([AEIOUaeiou])/g, 'an $1');
+
+  return result;
+}
+
+/**
+ * Dynamically replaces placeholders like {capacityKwp}, {capacityKw}, {capacity}, {location}, {clientName}, {projectName}, {connectionType}, {scheme}
+ * in quotation subject templates or custom subject lines.
+ */
+export function interpolateSubject(
+  template: string | undefined | null,
+  params: {
+    capacityKw?: number;
+    capacityKwp?: number;
+    systemType?: string;
+    connectionType?: string;
+    targetSegment?: string;
+    scheme?: string;
+    clientName?: string;
+    projectName?: string;
+    location?: string;
+  }
+): string {
+  if (!template || !template.trim()) {
+    const cap = params.capacityKwp || params.capacityKw;
+    return cap ? `Proposal for ${cap} kWp Roof top Solar Power Plant` : 'Proposal for Roof top Solar Power Plant';
+  }
+
+  const capNum = params.capacityKwp || params.capacityKw;
+  const capStr = (capNum !== undefined && capNum !== null && capNum > 0) ? `${capNum}` : '';
+  const clientName = params.clientName || '';
+  const projectName = params.projectName || clientName;
+  const location = params.location || '';
+  const conn = params.connectionType || params.systemType || '';
+  const scheme = params.scheme || '';
+
+  return template
+    .replace(/\{{1,2}\s*(?:capacityKwp|capacityKw|capacity|capacity\s*kwp|capacity\s*kw)\s*\}{1,2}/gi, capStr)
+    .replace(/\{{1,2}\s*(?:client\s*name|clientname)\s*\}{1,2}/gi, clientName)
+    .replace(/\{{1,2}\s*(?:project\s*name|projectname)\s*\}{1,2}/gi, projectName)
+    .replace(/\{{1,2}\s*(?:location|site\s*location)\s*\}{1,2}/gi, location)
+    .replace(/\{{1,2}\s*(?:connection\s*type|connectiontype|system\s*type|systemtype)\s*\}{1,2}/gi, conn)
+    .replace(/\{{1,2}\s*scheme\s*\}{1,2}/gi, scheme);
+}
+
+/**
+ * Derives the Structure Elevation feet quantity string from the dropdown label or custom numeric feet.
+ */
+export function getStructureFeet(structureElevation?: string, structureFeet?: number): string {
+  if (structureFeet !== undefined && structureFeet !== null) {
+    if (structureFeet <= 0) return 'Nil';
+    return `${structureFeet} Feet`;
+  }
+  if (!structureElevation || structureElevation.toLowerCase().includes('nil')) return 'Nil';
+  if (structureElevation.match(/\b0\s*(?:feet|ft)\b/i)) return 'Nil';
+  
+  const feetMatch = structureElevation.match(/(\d+\s*(?:to|-)\s*\d+\s*(?:Feet|Ft|feet|ft)|\d+\+?\s*(?:Feet|Ft|feet|ft))/i);
+  if (feetMatch) {
+    let matched = feetMatch[0].replace(/ft/i, 'Feet');
+    if (!matched.toLowerCase().includes('feet')) matched += ' Feet';
+    return matched;
+  }
+  
+  if (structureElevation.toLowerCase().includes('flush')) {
+    return 'Flush Mount';
+  }
+  if (structureElevation.toLowerCase().includes('ground')) {
+    return 'Ground Mount';
+  }
+  return '7 to 10 Feet';
+}
+
+export interface BuildBOQParams {
+  capacityKw: number;
+  capacityKwp?: number;
+  solarModule?: string;
+  inverter?: string;
+  inverterQty?: number;
+  inverterUnit?: string;
+  battery?: string;
+  batteryQty?: number;
+  isBatteryActive?: boolean;
+  structureElevation?: string;
+  structureFeet?: number;
+  basicCost?: number;
+  defaultBoqItems?: DefaultBoqItemConfig[];
+  dcCablesText?: string;
+  acSideSupplyText?: string;
+  installationText?: string;
+}
+
+/**
+ * Standardizes the BOQ items for preview and quotation generation:
+ * a. Solar PV Modules (Quantity: Project Capacity kWp)
+ * b. Solar Inverter (Quantity: 1 Nos)
+ * c. Battery (Quantity: Chosen Nos / Nil)
+ * d. Mounting Structure (Quantity: Elevation feet from dropdown / input)
+ * e, f, g & onwards: Defaults dynamically configured in the Pricing Defaults section.
+ */
+export function buildDefaultBOQItems(params: BuildBOQParams): BOQItem[] {
+  const cap = params.capacityKwp || params.capacityKw || 4.95;
+  const basicCost = params.basicCost || Math.round(cap * 63000);
+  
+  let moduleDesc = params.solarModule?.trim() || '550 Wp Mono Perc DCR Panels';
+  moduleDesc = moduleDesc.replace(/^solar\s*pv\s*modules?\s*[-–:]\s*/i, '').trim();
+  if (!moduleDesc) moduleDesc = '550 Wp Mono Perc DCR Panels';
+    
+  let inverterDesc = params.inverter?.trim() || 'On-Grid MPPT Grid-Tied Inverter';
+  inverterDesc = inverterDesc.replace(/^(?:grid-tied\s*\/\s*hybrid\s*)?solar\s*inverter\s*[-–:]\s*/i, '').trim();
+  if (!inverterDesc) inverterDesc = 'On-Grid MPPT Grid-Tied Inverter';
+    
+  const hasBattery = Boolean(
+    (params.isBatteryActive ?? (params.batteryQty !== undefined ? params.batteryQty > 0 : false)) &&
+    params.battery &&
+    !params.battery.toLowerCase().includes('nil') &&
+    (params.batteryQty === undefined || params.batteryQty > 0)
+  );
+  const batteryDesc = hasBattery ? cleanBatteryDescription(params.battery, true) : 'Battery';
+  const batteryQty = hasBattery ? (params.batteryQty && params.batteryQty > 0 ? `${params.batteryQty} Nos` : '1 Nos') : 'Nil';
+
+  const hasStructure = Boolean(
+    params.structureElevation &&
+    !params.structureElevation.toLowerCase().includes('nil') &&
+    (params.structureFeet === undefined || params.structureFeet > 0)
+  );
+  const structureFeetStr = getStructureFeet(params.structureElevation, params.structureFeet);
+  const structureDesc = hasStructure ? cleanStructureDescription(params.structureElevation) : 'Mounting Structure';
+
+  const inverterUnit = params.inverterUnit || 'Nos';
+  const inverterQtyStr = params.inverterQty ? `${params.inverterQty} ${inverterUnit}` : `1 ${inverterUnit}`;
+
+  const baseItems: BOQItem[] = [
+    {
+      id: 'boq-1',
+      slNo: 1,
+      itemDescription: moduleDesc,
+      quantity: `${cap} kWp`,
+      unitPrice: Math.round((basicCost * 0.45) / cap),
+      totalPrice: Math.round(basicCost * 0.45),
+      brand: params.solarModule?.split(' ')[0] || 'Tier-1'
+    },
+    {
+      id: 'boq-2',
+      slNo: 2,
+      itemDescription: inverterDesc,
+      quantity: inverterQtyStr,
+      unitPrice: Math.round(basicCost * 0.22),
+      totalPrice: Math.round(basicCost * 0.22),
+      brand: params.inverter?.split(' ')[0] || 'Servotec'
+    },
+    {
+      id: 'boq-3',
+      slNo: 3,
+      itemDescription: batteryDesc,
+      quantity: batteryQty,
+      unitPrice: hasBattery ? 95000 : 0,
+      totalPrice: hasBattery ? (params.batteryQty || 1) * 95000 : 0,
+      brand: hasBattery ? 'LFP Battery' : 'N/A'
+    },
+    {
+      id: 'boq-4',
+      slNo: 4,
+      itemDescription: structureDesc,
+      quantity: structureFeetStr,
+      unitPrice: Math.round((basicCost * 0.12) / cap),
+      totalPrice: Math.round(basicCost * 0.12),
+      brand: 'HDG Galvanized'
+    }
+  ];
+
+  // Dynamic default items e, f, g + any additional custom items from Pricing Defaults
+  const defaultItemsConfig = (params.defaultBoqItems && params.defaultBoqItems.length > 0)
+    ? params.defaultBoqItems
+    : DEFAULT_BOQ_ITEMS_CONFIG;
+
+  const extraItems: BOQItem[] = defaultItemsConfig
+    .filter(item => item.isEnabled !== false)
+    .map((item, index) => {
+      let qtyStr = `${cap} kWp`;
+      if (item.defaultQtyType === 'FIXED' && item.defaultQtyValue) {
+        qtyStr = item.defaultQtyValue;
+      } else if (item.defaultQtyType === 'NOS') {
+        qtyStr = item.defaultQtyValue ? `${item.defaultQtyValue} Nos` : '1 Nos';
+      } else if (item.defaultUnit && item.defaultUnit !== 'kWp') {
+        qtyStr = item.defaultQtyValue ? `${item.defaultQtyValue} ${item.defaultUnit}` : `${cap} ${item.defaultUnit}`;
+      }
+
+      // If custom overrides were passed in params
+      let desc = item.itemDescription;
+      if (item.itemKey === 'dc_cables' && params.dcCablesText) desc = params.dcCablesText;
+      if (item.itemKey === 'ac_supply' && params.acSideSupplyText) desc = params.acSideSupplyText;
+      if (item.itemKey === 'installation' && params.installationText) desc = params.installationText;
+
+      const unitRate = item.defaultUnitPrice || 0;
+      const calculatedPrice = item.defaultQtyType === 'CAPACITY_KWP' || item.defaultUnit === 'kWp'
+        ? Math.round(unitRate * cap)
+        : unitRate;
+
+      return {
+        id: item.id || `boq-${index + 5}`,
+        slNo: index + 5,
+        itemDescription: desc,
+        quantity: qtyStr,
+        unitPrice: unitRate,
+        totalPrice: calculatedPrice,
+        brand: item.brand || ''
+      };
+    });
+
+  return [...baseItems, ...extraItems];
+}
+

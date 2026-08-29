@@ -97,8 +97,21 @@ export const formatCRMIDate = (isoString?: string | null): string => {
 
 export type ContactStatus = 'ACTIVE' | 'INACTIVE' | 'LEFT_COMPANY' | 'DO_NOT_CONTACT';
 
+export const CRM_SALUTATIONS = ['Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Er.', 'Prof.'];
+
+export const formatContactFullName = (contact?: { salutation?: string; name?: string; firstName?: string; lastName?: string } | null): string => {
+  if (!contact) return '';
+  const rawName = (contact.name || [contact.firstName, contact.lastName].filter(Boolean).join(' ') || '').trim();
+  if (!rawName) return '';
+  if (contact.salutation && contact.salutation.trim() && !rawName.toLowerCase().startsWith(contact.salutation.toLowerCase())) {
+    return `${contact.salutation.trim()} ${rawName}`;
+  }
+  return rawName;
+};
+
 export interface CRMContact {
   id: string;
+  salutation?: string;
   accountId?: string;
   accountName?: string;
   name?: string;
