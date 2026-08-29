@@ -7,7 +7,9 @@ import {
   DEFAULT_BOQ_ITEMS_CONFIG,
   BrandDeclarationItem,
   SolarBenefitRow,
-  SolarQuotation
+  SolarQuotation,
+  interpolateOpeningText,
+  renderFormattedText
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings } from '../../types';
@@ -729,20 +731,67 @@ export default function QuotationToolsView({
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <label className="block text-xs font-bold text-slate-700">
                 Opening Paragraph Template ("Dear Valued Customer, ...")
               </label>
-              <span className="text-[10px] text-amber-700 font-medium">
-                Supports dynamic placeholders: <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Connection Type}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Target Segment}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Scheme}'}</code>, <code className="bg-amber-50 px-1 py-0.5 rounded text-amber-900 font-bold">{'{Capacity}'}</code>
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-amber-800">Dynamic placeholders:</span>
+                {['{Connection Type}', '{Target Segment}', '{Scheme}', '{Capacity}'].map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      setConfig(prev => ({ ...prev, introOpeningText: prev.introOpeningText + ' ' + tag }));
+                    }}
+                    className="bg-amber-100/70 hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded text-amber-900 font-mono text-[10.5px] font-bold cursor-pointer transition-colors shadow-2xs"
+                    title="Click to insert placeholder"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
             </div>
             <textarea
-              rows={3}
+              rows={4}
               value={config.introOpeningText}
               onChange={(e) => setConfig({ ...config, introOpeningText: e.target.value })}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 leading-relaxed"
+              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 leading-relaxed font-sans"
+              placeholder="Enter intro opening paragraph template..."
             />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Tip: Use <strong className="font-bold">*text*</strong> for bold and press <strong>Enter</strong> for new lines/paragraphs.
+            </p>
+
+            {/* Live Rendered Preview in Master Config */}
+            <div className="mt-3 p-4 bg-amber-50/50 border border-amber-200/80 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  Live Formatted Output Preview
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  Renders bold (*text*), dynamic values & multi-line paragraphs
+                </span>
+              </div>
+              <div className="text-slate-800 text-xs leading-relaxed space-y-2 bg-white p-3.5 rounded-xl border border-amber-100 shadow-2xs">
+                {(() => {
+                  const sampleInterpolated = interpolateOpeningText(config.introOpeningText, {
+                    connectionType: 'On-Grid Solar PV Plant',
+                    targetSegment: 'Residential Villa',
+                    scheme: 'PM Surya Ghar: Muft Bijli Yojana',
+                    capacityKw: 5,
+                    clientName: 'Mr Prakash',
+                    projectName: 'Mr Prakash'
+                  });
+                  const paragraphs = sampleInterpolated.split(/\r?\n\r?\n+/).map(p => p.trim()).filter(Boolean);
+                  if (paragraphs.length === 0) return <p className="italic text-slate-400">Empty template</p>;
+                  return paragraphs.map((para, idx) => (
+                    <p key={idx} className="whitespace-pre-line">{renderFormattedText(para)}</p>
+                  ));
+                })()}
+              </div>
+            </div>
           </div>
 
           {/* Grid of 4 Pre-Defined Dropdown Configurations */}
@@ -2270,30 +2319,39 @@ export default function QuotationToolsView({
 
           <div className="space-y-2.5">
             {config.termsAndConditions.map((clause, index) => (
-              <div key={index} className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
-                <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {index + 1}
-                </span>
-                <textarea
-                  rows={2}
-                  value={clause}
-                  onChange={(e) => {
-                    const updated = [...config.termsAndConditions];
-                    updated[index] = e.target.value;
-                    setConfig({ ...config, termsAndConditions: updated });
-                  }}
-                  className="flex-1 text-xs bg-transparent border-none focus:outline-hidden focus:ring-0 text-slate-800 font-medium leading-relaxed resize-y"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const updated = config.termsAndConditions.filter((_, i) => i !== index);
-                    setConfig({ ...config, termsAndConditions: updated });
-                  }}
-                  className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div key={index} className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2">
+                <div className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {index + 1}
+                  </span>
+                  <textarea
+                    rows={2}
+                    value={clause}
+                    onChange={(e) => {
+                      const updated = [...config.termsAndConditions];
+                      updated[index] = e.target.value;
+                      setConfig({ ...config, termsAndConditions: updated });
+                    }}
+                    className="flex-1 text-xs bg-transparent border-none focus:outline-hidden focus:ring-0 text-slate-800 font-medium leading-relaxed resize-y"
+                    placeholder="Enter terms clause (use *bold* for emphasis)..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = config.termsAndConditions.filter((_, i) => i !== index);
+                      setConfig({ ...config, termsAndConditions: updated });
+                    }}
+                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                {(clause.includes('*') || clause.includes('\n')) && (
+                  <div className="ml-9 text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                    <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Formatted Preview:</span>
+                    <span className="whitespace-pre-line">{renderFormattedText(clause)}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -3050,30 +3108,39 @@ export default function QuotationToolsView({
 
           <div className="space-y-2.5">
             {config.technicalAssumptions.map((item, index) => (
-              <div key={index} className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
-                <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {index + 1}
-                </span>
-                <textarea
-                  rows={2}
-                  value={item}
-                  onChange={(e) => {
-                    const updated = [...config.technicalAssumptions];
-                    updated[index] = e.target.value;
-                    setConfig({ ...config, technicalAssumptions: updated });
-                  }}
-                  className="flex-1 text-xs bg-transparent border-none focus:outline-hidden focus:ring-0 text-slate-800 font-medium leading-relaxed resize-y"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const updated = config.technicalAssumptions.filter((_, i) => i !== index);
-                    setConfig({ ...config, technicalAssumptions: updated });
-                  }}
-                  className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div key={index} className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2">
+                <div className="flex items-start gap-3">
+                  <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {index + 1}
+                  </span>
+                  <textarea
+                    rows={2}
+                    value={item}
+                    onChange={(e) => {
+                      const updated = [...config.technicalAssumptions];
+                      updated[index] = e.target.value;
+                      setConfig({ ...config, technicalAssumptions: updated });
+                    }}
+                    className="flex-1 text-xs bg-transparent border-none focus:outline-hidden focus:ring-0 text-slate-800 font-medium leading-relaxed resize-y"
+                    placeholder="Enter assumption (use *bold* for emphasis)..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = config.technicalAssumptions.filter((_, i) => i !== index);
+                      setConfig({ ...config, technicalAssumptions: updated });
+                    }}
+                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                {(item.includes('*') || item.includes('\n')) && (
+                  <div className="ml-9 text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                    <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Formatted Preview:</span>
+                    <span className="whitespace-pre-line">{renderFormattedText(item)}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -3167,7 +3234,7 @@ export default function QuotationToolsView({
                         <span className="w-5 h-5 rounded-md bg-red-500/10 text-red-700 text-[11px] font-bold flex items-center justify-center shrink-0">
                           {index + 1}
                         </span>
-                        <span className="text-xs text-slate-800 font-medium">{item}</span>
+                        <span className="text-xs text-slate-800 font-medium">{renderFormattedText(item)}</span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button

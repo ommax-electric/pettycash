@@ -842,12 +842,31 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
 };
 
 /**
- * Parses markdown-like *bold* or **bold** syntax and renders with font-bold
+ * Parses markdown-like *bold* or **bold** syntax and renders with font-bold,
+ * preserving newlines (\n) with <br /> elements.
  * Example: "Aadhaar-linked bank account after commissioning and *National Portal* inspection."
  * -> "National Portal" will be rendered inside <strong className="font-bold">
  */
 export function renderFormattedText(text: string | undefined | null): React.ReactNode {
   if (!text) return null;
+
+  // Handle multi-line strings (newlines created when user presses Enter)
+  if (text.includes('\n')) {
+    const lines = text.split('\n');
+    return React.createElement(
+      React.Fragment,
+      null,
+      lines.map((line, lIdx) =>
+        React.createElement(
+          React.Fragment,
+          { key: lIdx },
+          lIdx > 0 ? React.createElement('br') : null,
+          renderFormattedText(line)
+        )
+      )
+    );
+  }
+
   if (!text.includes('*')) return text;
 
   const parts: React.ReactNode[] = [];

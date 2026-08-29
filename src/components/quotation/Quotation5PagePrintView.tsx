@@ -887,7 +887,7 @@ export default function Quotation5PagePrintView({
                 </h3>
                 <ol className="text-[11px] text-slate-700 space-y-1.5 list-decimal pl-5 leading-snug">
                   {quotation.termsAndConditions.map((term, idx) => (
-                    <li key={idx}>{term}</li>
+                    <li key={idx}>{renderFormattedText(term)}</li>
                   ))}
                 </ol>
               </div>
@@ -977,7 +977,7 @@ export default function Quotation5PagePrintView({
                   <div className="font-bold text-slate-800">Assumptions:</div>
                   <ul className="list-disc pl-5 space-y-1">
                     {quotation.tariffAssumptions.map((assump, idx) => (
-                      <li key={idx}>{assump}</li>
+                      <li key={idx}>{renderFormattedText(assump)}</li>
                     ))}
                   </ul>
                 </div>
@@ -1003,9 +1003,9 @@ export default function Quotation5PagePrintView({
                     {quotation.brandDeclarations.map((brand) => (
                       <tr key={brand.slNo} className={brand.slNo % 2 === 0 ? 'bg-slate-50/50' : 'bg-white'}>
                         <td className="border border-slate-300 py-1 px-2 text-center font-bold">{brand.slNo}</td>
-                        <td className="border border-slate-300 py-1 px-3">{brand.description}</td>
-                        <td className="border border-slate-300 py-1 px-3 font-semibold text-slate-900">{brand.brand}</td>
-                        <td className="border border-slate-300 py-1 px-3 text-slate-700">{brand.warrantySpec}</td>
+                        <td className="border border-slate-300 py-1 px-3">{renderFormattedText(brand.description)}</td>
+                        <td className="border border-slate-300 py-1 px-3 font-semibold text-slate-900">{renderFormattedText(brand.brand)}</td>
+                        <td className="border border-slate-300 py-1 px-3 text-slate-700">{renderFormattedText(brand.warrantySpec)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1017,7 +1017,7 @@ export default function Quotation5PagePrintView({
                     <div className="font-bold text-slate-800">Notes:</div>
                     <ol className="list-decimal pl-5 space-y-1 leading-snug">
                       {(quotation.brandNotes || []).map((note, idx) => (
-                        <li key={idx}>{note}</li>
+                        <li key={idx}>{renderFormattedText(note)}</li>
                       ))}
                     </ol>
                   </div>
@@ -1042,7 +1042,7 @@ export default function Quotation5PagePrintView({
                 </h3>
                 <ul className="text-[11.5px] text-slate-700 space-y-2 list-disc pl-5 leading-snug">
                   {quotation.technicalAssumptions.map((item, idx) => (
-                    <li key={idx} className="whitespace-pre-line">{item}</li>
+                    <li key={idx} className="whitespace-pre-line">{renderFormattedText(item)}</li>
                   ))}
                 </ul>
               </div>
@@ -1054,7 +1054,7 @@ export default function Quotation5PagePrintView({
                 </h3>
                 <ol className="text-[11.5px] text-slate-700 space-y-1.5 list-decimal pl-5 leading-snug">
                   {quotation.exclusions.map((item, idx) => (
-                    <li key={idx}>{item}</li>
+                    <li key={idx}>{renderFormattedText(item)}</li>
                   ))}
                 </ol>
               </div>
@@ -1065,7 +1065,7 @@ export default function Quotation5PagePrintView({
                   DISCLAIMER
                 </h3>
                 <p className="text-[11px] text-slate-600 leading-relaxed text-justify">
-                  {quotation.warrantyDisclaimer}
+                  {renderFormattedText(quotation.warrantyDisclaimer)}
                 </p>
               </div>
 

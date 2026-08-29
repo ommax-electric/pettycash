@@ -669,12 +669,29 @@ export default function LiveQuotationCanvas({
                 </label>
                 <select
                   value={formData.systemType}
-                  onChange={(e) => setFormData({ ...formData, systemType: e.target.value as any })}
+                  onChange={(e) => setFormData({ ...formData, systemType: e.target.value as any, connectionType: e.target.value as any })}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium focus:bg-white cursor-pointer"
                 >
                   {masterConfig.availableSystemTypes.map((st) => (
                     <option key={st.id} value={st.id}>
                       {st.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Target Customer Segment
+                </label>
+                <select
+                  value={formData.targetSegment}
+                  onChange={(e) => setFormData({ ...formData, targetSegment: e.target.value as any })}
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium focus:bg-white cursor-pointer"
+                >
+                  {masterConfig.availableSegments.map((seg) => (
+                    <option key={seg.id} value={seg.id}>
+                      {seg.label}
                     </option>
                   ))}
                 </select>
@@ -704,7 +721,52 @@ export default function LiveQuotationCanvas({
                   value={formData.salutation}
                   onChange={(e) => setFormData({ ...formData, salutation: e.target.value })}
                   className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  placeholder="Dear Sir / Madam,"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-700">
+                    Introductory Opening Paragraph
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, introOpeningText: masterConfig.introOpeningText })}
+                    className="text-[10px] text-amber-700 hover:text-amber-800 font-bold cursor-pointer"
+                  >
+                    Reset to Master Template
+                  </button>
+                </div>
+                <textarea
+                  rows={6}
+                  value={formData.introOpeningText !== undefined ? formData.introOpeningText : masterConfig.introOpeningText}
+                  onChange={(e) => setFormData({ ...formData, introOpeningText: e.target.value })}
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-sans focus:bg-white focus:ring-2 focus:ring-[#f7b944]"
+                  placeholder="Enter custom intro text..."
+                />
+                <div className="mt-1.5 p-2 bg-amber-50/70 border border-amber-200 rounded-lg text-[10.5px] text-amber-900 leading-snug">
+                  <span className="font-bold block text-[11px] mb-0.5">Supports dynamic placeholders:</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {['{Connection Type}', '{Target Segment}', '{Scheme}', '{Capacity}'].map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          const currentText = formData.introOpeningText !== undefined ? formData.introOpeningText : masterConfig.introOpeningText;
+                          setFormData({ ...formData, introOpeningText: currentText + ' ' + tag });
+                        }}
+                        className="bg-white hover:bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded text-amber-900 font-mono text-[10px] font-bold cursor-pointer transition-colors"
+                        title="Click to append placeholder"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Tip: Use <strong className="font-bold">*text*</strong> for bold and press <strong>Enter</strong> for new lines.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -1778,9 +1840,9 @@ export default function LiveQuotationCanvas({
                       clientName: formData.clientName,
                       projectName: formData.projectName
                     });
-                    const paragraphs = interpolated.split(/\r?\n+/).map(p => p.trim()).filter(Boolean);
+                    const paragraphs = interpolated.split(/\r?\n\r?\n+/).map(p => p.trim()).filter(Boolean);
                     return paragraphs.map((para, pIdx) => (
-                      <p key={pIdx}>{renderFormattedText(para)}</p>
+                      <p key={pIdx} className="whitespace-pre-line">{renderFormattedText(para)}</p>
                     ));
                   })()}
                 </div>
@@ -2019,7 +2081,7 @@ export default function LiveQuotationCanvas({
                 </h4>
                 <ol className="list-decimal pl-4 space-y-1 text-slate-700 text-[11px] leading-relaxed">
                   {formData.termsAndConditions.slice(0, 5).map((term, i) => (
-                    <li key={i}>{term}</li>
+                    <li key={i}>{renderFormattedText(term)}</li>
                   ))}
                   {formData.termsAndConditions.length > 5 && (
                     <li className="text-amber-800 font-bold list-none">+ {formData.termsAndConditions.length - 5} more standard clauses</li>
@@ -2147,9 +2209,9 @@ export default function LiveQuotationCanvas({
                       {formData.brandDeclarations.map((b) => (
                         <tr key={b.slNo}>
                           <td className="p-1.5 font-mono text-slate-400">{b.slNo}</td>
-                          <td className="p-1.5 font-bold text-slate-800">{b.description}</td>
-                          <td className="p-1.5 text-amber-800 font-bold">{b.brand}</td>
-                          <td className="p-1.5 text-slate-600">{b.warrantySpec}</td>
+                          <td className="p-1.5 font-bold text-slate-800">{renderFormattedText(b.description)}</td>
+                          <td className="p-1.5 text-amber-800 font-bold">{renderFormattedText(b.brand)}</td>
+                          <td className="p-1.5 text-slate-600">{renderFormattedText(b.warrantySpec)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2180,7 +2242,7 @@ export default function LiveQuotationCanvas({
                   <h5 className="text-[11px] font-black uppercase text-slate-800 mb-1.5">Technical Assumptions</h5>
                   <ul className="space-y-1 text-[10.5px] text-slate-600 list-disc pl-3">
                     {formData.technicalAssumptions.slice(0, 4).map((a, i) => (
-                      <li key={i}>{a}</li>
+                      <li key={i} className="whitespace-pre-line">{renderFormattedText(a)}</li>
                     ))}
                   </ul>
                 </div>
@@ -2197,7 +2259,7 @@ export default function LiveQuotationCanvas({
                   <h5 className="text-[11px] font-black uppercase text-slate-800 mb-1.5">Scope Exclusions</h5>
                   <ul className="space-y-1 text-[10.5px] text-slate-600 list-disc pl-3">
                     {formData.exclusions.slice(0, 4).map((ex, i) => (
-                      <li key={i}>{ex}</li>
+                      <li key={i}>{renderFormattedText(ex)}</li>
                     ))}
                   </ul>
                 </div>
@@ -2215,7 +2277,7 @@ export default function LiveQuotationCanvas({
                 </span>
                 <span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Legal Disclaimer</span>
                 <p className="text-[10.5px] text-slate-600 leading-relaxed text-justify">
-                  {formData.warrantyDisclaimer}
+                  {renderFormattedText(formData.warrantyDisclaimer)}
                 </p>
               </div>
 

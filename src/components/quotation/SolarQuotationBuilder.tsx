@@ -653,6 +653,67 @@ export default function SolarQuotationBuilder({
                   placeholder="Proposal for 4.95 kWp Roof top Solar"
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Target Customer Segment
+                </label>
+                <select
+                  value={formData.targetSegment || 'RESIDENTIAL_VILLA'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, targetSegment: e.target.value as any }))}
+                  className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
+                >
+                  <option value="RESIDENTIAL_VILLA">Residential Individual / Villa</option>
+                  <option value="RESIDENTIAL_APARTMENTS">Apartments & Gated Communities</option>
+                  <option value="COMMERCIAL_INSTITUTIONAL">Commercial / Industrial / Institutional</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Salutation</label>
+                <input
+                  type="text"
+                  value={formData.salutation || 'Dear Sir / Madam,'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, salutation: e.target.value }))}
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#f7b944]"
+                  placeholder="Dear Sir / Madam,"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Introductory Opening Paragraph
+                </label>
+                <textarea
+                  rows={4}
+                  value={formData.introOpeningText || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, introOpeningText: e.target.value }))}
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#f7b944] font-sans"
+                  placeholder="Leave empty to use master config default intro text, or customize here..."
+                />
+                <div className="mt-1.5 p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-snug">
+                  <span className="font-bold block text-xs mb-0.5">Supports dynamic placeholders:</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {['{Connection Type}', '{Target Segment}', '{Scheme}', '{Capacity}'].map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          const currentText = formData.introOpeningText || '';
+                          setFormData(prev => ({ ...prev, introOpeningText: (currentText ? currentText + ' ' : '') + tag }));
+                        }}
+                        className="bg-white hover:bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg text-amber-900 font-mono text-[10.5px] font-bold cursor-pointer transition-colors shadow-2xs"
+                        title="Click to append placeholder"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10.5px] text-slate-500 mt-1">
+                    Tip: Use <strong className="font-bold">*text*</strong> for bold and press <strong>Enter</strong> for new lines.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
