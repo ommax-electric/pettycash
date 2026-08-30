@@ -5425,7 +5425,7 @@ export default function RegisterView({
                       </div>
                     </div>
 
-                    {/* Row 2: Amount ({currencySymbol}) & Payment Type */}
+                    {/* Row 2: Amount ({currencySymbol}) & Request Type */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className={currentUser.role === 'AUDITOR' ? 'col-span-2' : ''}>
                         <label htmlFor="form-amount" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
@@ -5448,7 +5448,7 @@ export default function RegisterView({
                       {currentUser.role !== 'AUDITOR' && (
                         <div>
                           <label htmlFor="form-payment-type" className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5 tracking-wider">
-                            Payment Type
+                            Request Type
                           </label>
                           <select 
                             id="form-payment-type"
