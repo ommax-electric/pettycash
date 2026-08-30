@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, DollarSign, Ban, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, IndianRupee, Ban, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
@@ -260,12 +260,14 @@ export default function RegisterView({
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState<string[]>([]);
   const [filterPayee, setFilterPayee] = useState<string[]>([]);
+  const [filterPaymentMode, setFilterPaymentMode] = useState<string[]>([]);
   const [filterType, setFilterType] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
 
   // Popover toggle states for multi-select checklist filters
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
   const [isPayeeFilterOpen, setIsPayeeFilterOpen] = useState(false);
+  const [isPaymentModeFilterOpen, setIsPaymentModeFilterOpen] = useState(false);
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [payeeSearch, setPayeeSearch] = useState('');
@@ -433,7 +435,7 @@ export default function RegisterView({
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterCategory, filterPayee, filterType, filterStatus, fromDate, toDate, isAllTime]);
+  }, [search, filterCategory, filterPayee, filterPaymentMode, filterType, filterStatus, fromDate, toDate, isAllTime]);
   
   // Drag and drop / Receipt File states
   const [dragActive, setDragActive] = useState(false);
@@ -577,6 +579,7 @@ export default function RegisterView({
       } else if (forceType === 'OUT') {
         const matchesPayee = filterPayee.length === 0 || filterPayee.includes('ALL') || filterPayee.includes(txn.merchant.trim());
         const matchesCategory = filterCategory.length === 0 || filterCategory.includes('ALL') || filterCategory.includes(txn.category);
+        const matchesPaymentMode = filterPaymentMode.length === 0 || filterPaymentMode.includes('ALL') || filterPaymentMode.includes(txn.paymentType || 'CASH');
         const matchesStatus = filterStatus.length === 0 || filterStatus.includes('ALL') || filterStatus.includes(txn.status || 'PAID');
 
         let matchesUser = true;
@@ -590,7 +593,7 @@ export default function RegisterView({
           matchesUser = recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
         }
 
-        return matchesType && matchesDate && matchesPayee && matchesCategory && matchesStatus && matchesUser;
+        return matchesType && matchesDate && matchesPayee && matchesCategory && matchesPaymentMode && matchesStatus && matchesUser;
       } else {
         const matchesSearch = 
           txn.merchant.toLowerCase().includes(search.toLowerCase()) ||
@@ -3029,7 +3032,7 @@ export default function RegisterView({
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs ${
                             isPaymentDone ? 'bg-emerald-600 text-white' : isApprovalDone ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-slate-200 text-slate-400'
                           }`}>
-                            {isPaymentDone ? <Check className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                            {isPaymentDone ? <Check className="w-4 h-4" /> : <IndianRupee className="w-4 h-4" />}
                           </div>
                           <span className="text-[11px] font-bold text-slate-800 mt-1.5">
                             {isPaymentDone ? 'Cash Issued' : 'Disbursement'}
@@ -4376,6 +4379,7 @@ export default function RegisterView({
                       setIsAllTime(true);
                       setFilterCategory([]);
                       setFilterPayee([]);
+                      setFilterPaymentMode([]);
                       setFilterStatus([]);
                     }
                   }}
@@ -4395,6 +4399,7 @@ export default function RegisterView({
                   onClick={() => {
                     setIsCategoryFilterOpen(!isCategoryFilterOpen);
                     setIsPayeeFilterOpen(false);
+                    setIsPaymentModeFilterOpen(false);
                     setIsStatusFilterOpen(false);
                   }}
                   className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
@@ -4482,6 +4487,7 @@ export default function RegisterView({
                   onClick={() => {
                     setIsPayeeFilterOpen(!isPayeeFilterOpen);
                     setIsCategoryFilterOpen(false);
+                    setIsPaymentModeFilterOpen(false);
                     setIsStatusFilterOpen(false);
                   }}
                   className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
@@ -4559,6 +4565,88 @@ export default function RegisterView({
                 )}
               </div>
 
+              {/* Type (Cash / Online) Multi-Select Filter */}
+              <div className="relative col-span-1 sm:w-[130px]">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">
+                  Type {filterPaymentMode.length > 0 && <span className="text-rose-600 font-extrabold">({filterPaymentMode.length})</span>}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPaymentModeFilterOpen(!isPaymentModeFilterOpen);
+                    setIsCategoryFilterOpen(false);
+                    setIsPayeeFilterOpen(false);
+                    setIsStatusFilterOpen(false);
+                  }}
+                  className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
+                    filterPaymentMode.length > 0 ? 'border-rose-400 bg-rose-50/20 text-rose-950 font-bold' : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="truncate">
+                    {filterPaymentMode.length === 0
+                      ? 'All Types'
+                      : filterPaymentMode.length === 1
+                      ? (filterPaymentMode[0] === 'ONLINE' ? 'Online' : 'Cash')
+                      : `${filterPaymentMode.length} Selected`}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+                </button>
+
+                {isPaymentModeFilterOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setIsPaymentModeFilterOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1.5 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3 text-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                        <span className="font-extrabold text-slate-800 text-[11px]">Filter Type</span>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setFilterPaymentMode(['CASH', 'ONLINE'])}
+                            className="text-rose-600 hover:underline cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setFilterPaymentMode([])}
+                            className="text-slate-500 hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        {[
+                          { id: 'CASH', label: 'Cash' },
+                          { id: 'ONLINE', label: 'Online' }
+                        ].map((mode, idx) => {
+                          const isChecked = filterPaymentMode.includes(mode.id);
+                          return (
+                            <label
+                              key={idx}
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-rose-50/50 rounded-lg cursor-pointer text-slate-700 font-medium transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setFilterPaymentMode(prev =>
+                                    prev.includes(mode.id) ? prev.filter(m => m !== mode.id) : [...prev, mode.id]
+                                  );
+                                }}
+                                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer accent-rose-600"
+                              />
+                              <span className="truncate">{mode.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* Status Multi-Select Filter */}
               <div className="relative col-span-1 sm:w-[140px]">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider truncate">
@@ -4570,6 +4658,7 @@ export default function RegisterView({
                     setIsStatusFilterOpen(!isStatusFilterOpen);
                     setIsCategoryFilterOpen(false);
                     setIsPayeeFilterOpen(false);
+                    setIsPaymentModeFilterOpen(false);
                   }}
                   className={`w-full py-1.5 px-2.5 bg-white border rounded-xl text-xs font-semibold text-slate-700 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
                     filterStatus.length > 0 ? 'border-rose-400 bg-rose-50/20 text-rose-950 font-bold' : 'border-slate-200 hover:border-slate-300'

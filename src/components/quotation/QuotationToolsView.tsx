@@ -283,15 +283,17 @@ export default function QuotationToolsView({
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleResetToDefaults}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-            title="Reset to factory defaults"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-            <span>Reset Defaults</span>
-          </button>
+          {currentUser?.role === 'ADMIN' && (
+            <button
+              type="button"
+              onClick={handleResetToDefaults}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              title="Reset to factory defaults (Admin Only)"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              <span>Reset Defaults</span>
+            </button>
+          )}
 
           <button
             type="button"

@@ -6,6 +6,13 @@ import {
   DEFAULT_QUOTATION_MASTER_CONFIG, 
   DEFAULT_LETTERHEAD_CONFIG,
   DEFAULT_SAVINGS_BENEFITS,
+  DEFAULT_SUPPLY_INCLUDES,
+  DEFAULT_INSTALLATION_INCLUDES,
+  DEFAULT_TERMS_AND_CONDITIONS,
+  DEFAULT_BRAND_DECLARATIONS,
+  DEFAULT_BRAND_NOTES,
+  DEFAULT_TECHNICAL_ASSUMPTIONS,
+  DEFAULT_EXCLUSIONS,
   BOQItem, 
   SolarBenefitRow,
   QuotationRevision,
@@ -45,7 +52,12 @@ import {
   MapPin,
   Sparkles,
   Trash2,
-  History
+  History,
+  RefreshCw,
+  CheckSquare,
+  Square,
+  Save,
+  AlertTriangle
 } from 'lucide-react';
 import Quotation5PagePrintView from './Quotation5PagePrintView';
 
@@ -149,6 +161,294 @@ function getRevisedOfferDetails(currentOfferNo: string, currentRevisionIndex = 0
     newOfferNo,
     revisionCode
   };
+}
+
+interface MasterDiffSection {
+  key: string;
+  tabId: string;
+  title: string;
+  desc: string;
+  isModified?: boolean;
+  changesSummary: string;
+  applySync: (quo: SolarQuotation, master: QuotationMasterConfig) => Partial<SolarQuotation>;
+}
+
+// Helper to deeply compare arrays of strings or objects
+function isDeepEqual(a: any, b: any): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Helper to detect differences between current quotation snapshot and latest Master Configuration across all Tools tabs
+function detectMasterConfigDiffs(quo: SolarQuotation, master: QuotationMasterConfig): MasterDiffSection[] {
+  const sections: MasterDiffSection[] = [];
+
+  // 1. General Tab (Subject Template / Validity / Salutation)
+  const currentSalutation = (quo.salutation || '').trim();
+  const masterSalutation = (master.defaultToSalutation || '').trim();
+  const isSalutationDifferent = Boolean(masterSalutation && currentSalutation && masterSalutation !== currentSalutation);
+  sections.push({
+    key: 'general',
+    tabId: 'GENERAL',
+    title: 'General (Salutation & Defaults)',
+    desc: 'Default to-salutation and greeting settings',
+    isModified: isSalutationDifferent,
+    changesSummary: isSalutationDifferent ? `Master Salutation: "${masterSalutation}" vs Proposal: "${currentSalutation}"` : 'Salutation matches Master Config',
+    applySync: (q, m) => ({
+      salutation: m.defaultToSalutation || q.salutation
+    })
+  });
+
+  // 2. Intro Tab (Opening Narrative / Intro Opening Text)
+  const currentIntro = (quo.introOpeningText || '').trim();
+  const masterIntro = (master.introOpeningText || '').trim();
+  const isIntroDifferent = Boolean(masterIntro && currentIntro && masterIntro !== currentIntro);
+  sections.push({
+    key: 'intro',
+    tabId: 'INTRO',
+    title: 'Intro (Opening Proposal Text)',
+    desc: 'Introductory proposal paragraph narrative template',
+    isModified: isIntroDifferent,
+    changesSummary: isIntroDifferent ? 'Master intro opening text template has been updated in Tools module.' : 'Intro narrative matches Master Config',
+    applySync: (q, m) => ({
+      introOpeningText: m.introOpeningText || q.introOpeningText
+    })
+  });
+
+  // 3. Scope of Work Tab (Installation Scope Inclusions)
+  const currentInstall = quo.installationIncludes || [];
+  const masterInstall = (master.defaultInstallationIncludes && master.defaultInstallationIncludes.length > 0) ? master.defaultInstallationIncludes : DEFAULT_INSTALLATION_INCLUDES;
+  const isInstallDifferent = !isDeepEqual(currentInstall, masterInstall);
+  sections.push({
+    key: 'scopeOfWork',
+    tabId: 'SCOPE_OF_WORK',
+    title: 'Scope of Work (Installation Scope)',
+    desc: 'Standard installation and commissioning inclusions',
+    isModified: isInstallDifferent,
+    changesSummary: isInstallDifferent ? 'Standard installation & commissioning scope clauses have been updated in Tools module.' : 'Installation scope matches Master Config',
+    applySync: (q, m) => ({
+      installationIncludes: (m.defaultInstallationIncludes && m.defaultInstallationIncludes.length > 0) ? m.defaultInstallationIncludes : q.installationIncludes
+    })
+  });
+
+  // 4. Payment Terms Tab (Advance %, Delivery %, Installation %, Subsidy Note)
+  const isAdvanceDiff = (master.defaultAdvancePercent !== undefined && quo.advancePaymentPercent !== undefined && master.defaultAdvancePercent !== quo.advancePaymentPercent);
+  const isDeliveryDiff = (master.defaultDeliveryPercent !== undefined && quo.deliveryPaymentPercent !== undefined && master.defaultDeliveryPercent !== quo.deliveryPaymentPercent);
+  const isInstallPercDiff = (master.defaultInstallationPercent !== undefined && quo.installationPaymentPercent !== undefined && master.defaultInstallationPercent !== quo.installationPaymentPercent);
+  const isMilestonesDifferent = Boolean(isAdvanceDiff || isDeliveryDiff || isInstallPercDiff);
+  sections.push({
+    key: 'paymentMilestones',
+    tabId: 'PAYMENT_TERMS',
+    title: 'Payment Terms (Milestone Percentages)',
+    desc: 'Advance %, Delivery %, and Installation % milestone splits',
+    isModified: isMilestonesDifferent,
+    changesSummary: isMilestonesDifferent ? `Master Splits: Advance ${master.defaultAdvancePercent ?? 50}%, Delivery ${master.defaultDeliveryPercent ?? 40}%, Install ${master.defaultInstallationPercent ?? 10}% vs Proposal: ${quo.advancePaymentPercent ?? 50}% / ${quo.deliveryPaymentPercent ?? 40}% / ${quo.installationPaymentPercent ?? 10}%` : 'Payment milestones match Master Config',
+    applySync: (q, m) => ({
+      advancePaymentPercent: m.defaultAdvancePercent ?? q.advancePaymentPercent,
+      deliveryPaymentPercent: m.defaultDeliveryPercent ?? q.deliveryPaymentPercent,
+      installationPaymentPercent: m.defaultInstallationPercent ?? q.installationPaymentPercent
+    })
+  });
+
+  const currentSubsidy = (quo.subsidyNote || '').trim();
+  const masterSubsidy = (master.defaultSubsidyNote || '').trim();
+  const isSubsidyDiff = Boolean(masterSubsidy && currentSubsidy && masterSubsidy !== currentSubsidy);
+  sections.push({
+    key: 'subsidyNote',
+    tabId: 'PAYMENT_TERMS',
+    title: 'Payment Terms (Subsidy Note / DBT)',
+    desc: 'PM Surya Ghar DBT policy disclaimer & government subsidy note',
+    isModified: isSubsidyDiff,
+    changesSummary: isSubsidyDiff ? 'Master Central Subsidy DBT note has been updated in Tools module.' : 'Subsidy disclaimer matches Master Config',
+    applySync: (q, m) => ({
+      subsidyNote: m.defaultSubsidyNote || q.subsidyNote
+    })
+  });
+
+  // 5. Banking Details Tab
+  const isBankDiff = Boolean(
+    (master.beneficiaryName && (quo.beneficiaryName || '').trim() !== master.beneficiaryName.trim()) ||
+    (master.bankName && (quo.bankName || '').trim() !== master.bankName.trim()) ||
+    (master.accountNumber && (quo.accountNumber || '').trim() !== master.accountNumber.trim()) ||
+    (master.ifscCode && (quo.ifscCode || '').trim() !== master.ifscCode.trim()) ||
+    (master.accountType && (quo.accountType || '').trim() !== master.accountType.trim()) ||
+    (master.bankAddress && (quo.bankAddress || '').trim() !== master.bankAddress.trim()) ||
+    (master.micrNumber && (quo.micrNumber || '').trim() !== master.micrNumber.trim())
+  );
+  sections.push({
+    key: 'banking',
+    tabId: 'BANKING_DETAILS',
+    title: 'Banking Details',
+    desc: 'Beneficiary Name, Bank, A/C No, IFSC, MICR, and Branch Address',
+    isModified: isBankDiff,
+    changesSummary: isBankDiff ? `Master Bank: ${master.bankName || ''} (${master.accountNumber || ''}) vs Proposal: ${quo.bankName || ''} (${quo.accountNumber || ''})` : 'Banking details match Master Config',
+    applySync: (q, m) => ({
+      beneficiaryName: m.beneficiaryName || q.beneficiaryName,
+      bankName: m.bankName || q.bankName,
+      accountNumber: m.accountNumber || q.accountNumber,
+      accountType: m.accountType || q.accountType,
+      ifscCode: m.ifscCode || q.ifscCode,
+      micrNumber: m.micrNumber || q.micrNumber,
+      bankAddress: m.bankAddress || q.bankAddress
+    })
+  });
+
+  // 6. Terms & Conditions Tab
+  const masterTerms = (master.termsAndConditions && master.termsAndConditions.length > 0) ? master.termsAndConditions : DEFAULT_TERMS_AND_CONDITIONS;
+  const isTermsDiff = !isDeepEqual(masterTerms, quo.termsAndConditions || []);
+  sections.push({
+    key: 'terms',
+    tabId: 'TERMS_AND_CONDITIONS',
+    title: 'Terms & Conditions',
+    desc: 'Standard commercial clauses, statutory conditions, and validity terms',
+    isModified: isTermsDiff,
+    changesSummary: isTermsDiff ? `Master has ${masterTerms.length} terms vs Proposal snapshot with ${(quo.termsAndConditions || []).length} terms.` : 'Terms and conditions match Master Config',
+    applySync: (q, m) => ({
+      termsAndConditions: (m.termsAndConditions && m.termsAndConditions.length > 0) ? m.termsAndConditions : q.termsAndConditions
+    })
+  });
+
+  // 7. Warranty Tab
+  const masterInverterYears = master.defaultInverterWarranty ? (parseInt(master.defaultInverterWarranty) || 5) : 5;
+  const masterBosYears = master.defaultBosWarranty ? (parseInt(master.defaultBosWarranty) || 1) : 1;
+  const isModuleWarrantyDiff = master.moduleWarrantyYears !== undefined && quo.moduleWarrantyYears !== undefined && master.moduleWarrantyYears !== quo.moduleWarrantyYears;
+  const isInverterWarrantyDiff = quo.inverterWarrantyYears !== undefined && masterInverterYears !== quo.inverterWarrantyYears;
+  const isBosWarrantyDiff = quo.balanceOfSystemWarrantyYears !== undefined && masterBosYears !== quo.balanceOfSystemWarrantyYears;
+  const isWarrantyDiff = Boolean(isModuleWarrantyDiff || isInverterWarrantyDiff || isBosWarrantyDiff);
+  sections.push({
+    key: 'warranties',
+    tabId: 'WARRANTY',
+    title: 'Warranty Periods',
+    desc: 'Solar Modules (Yrs), Inverter Warranty (Yrs), and BOS Warranty (Yrs)',
+    isModified: isWarrantyDiff,
+    changesSummary: isWarrantyDiff ? `Master: Module ${master.moduleWarrantyYears || 25}Y, Inverter ${masterInverterYears}Y, BOS ${masterBosYears}Y vs Proposal: Module ${quo.moduleWarrantyYears || 25}Y, Inverter ${quo.inverterWarrantyYears || 5}Y, BOS ${quo.balanceOfSystemWarrantyYears || 1}Y` : 'Warranty terms match Master Config',
+    applySync: (q, m) => ({
+      moduleWarrantyYears: m.moduleWarrantyYears || q.moduleWarrantyYears,
+      inverterWarrantyYears: m.defaultInverterWarranty ? (parseInt(m.defaultInverterWarranty) || 5) : q.inverterWarrantyYears,
+      balanceOfSystemWarrantyYears: m.defaultBosWarranty ? (parseInt(m.defaultBosWarranty) || 1) : q.balanceOfSystemWarrantyYears
+    })
+  });
+
+  // 8. Project Completion Tab
+  const masterCompletion = (master.defaultCompletionWeeks || '').trim();
+  const currentCompletion = (quo.projectCompletionWeeks || '').trim();
+  const isCompletionDiff = Boolean(masterCompletion && currentCompletion && masterCompletion !== currentCompletion);
+  sections.push({
+    key: 'projectCompletion',
+    tabId: 'PROJECT_COMPLETION',
+    title: 'Project Completion Timeline',
+    desc: 'Standard project delivery and execution timeline in weeks',
+    isModified: isCompletionDiff,
+    changesSummary: isCompletionDiff ? `Master Timeline: "${masterCompletion}" vs Proposal: "${currentCompletion}"` : 'Project completion timeline matches Master Config',
+    applySync: (q, m) => ({
+      projectCompletionWeeks: m.defaultCompletionWeeks || q.projectCompletionWeeks
+    })
+  });
+
+  // 9. Estimated Solar Benefits Tab (Tariff per unit rate & tariff assumptions)
+  const isTariffRateDiff = master.defaultTariffPerUnit !== undefined && quo.tariffPerUnit !== undefined && master.defaultTariffPerUnit !== quo.tariffPerUnit;
+  const isTariffAssumptionsDiff = master.tariffAssumptions && !isDeepEqual(master.tariffAssumptions, quo.tariffAssumptions || []);
+  const isBenefitsTableDiff = master.benefitsTable && !isDeepEqual(master.benefitsTable, quo.benefitsTable || []);
+  const isSolarBenefitsDiff = Boolean(isTariffRateDiff || isTariffAssumptionsDiff || isBenefitsTableDiff);
+  sections.push({
+    key: 'discomTariff',
+    tabId: 'ESTIMATED_SOLAR_BENEFITS',
+    title: 'Estimated Solar Benefits (Tariff & Matrix)',
+    desc: 'Grid tariff unit rate (₹/kWh), generation factors, and ROI table matrix',
+    isModified: isSolarBenefitsDiff,
+    changesSummary: isSolarBenefitsDiff ? `Master Tariff: ₹${master.defaultTariffPerUnit || 8.00}/unit vs Proposal: ₹${quo.tariffPerUnit || 8.00}/unit` : 'Solar tariff and benefits match Master Config',
+    applySync: (q, m) => ({
+      tariffPerUnit: m.defaultTariffPerUnit ?? q.tariffPerUnit,
+      tariffAssumptions: (m.tariffAssumptions && m.tariffAssumptions.length > 0) ? m.tariffAssumptions : q.tariffAssumptions,
+      benefitsTable: (m.benefitsTable && m.benefitsTable.length > 0) ? m.benefitsTable : q.benefitsTable
+    })
+  });
+
+  // 10. Brand Declaration Tab
+  const isBrandDeclarationsDiff = master.brandDeclarations && !isDeepEqual(master.brandDeclarations, quo.brandDeclarations || []);
+  const isBrandNotesDiff = master.brandNotes && !isDeepEqual(master.brandNotes, quo.brandNotes || []);
+  const isBrandDiff = Boolean(isBrandDeclarationsDiff || isBrandNotesDiff);
+  sections.push({
+    key: 'brandDeclaration',
+    tabId: 'BRAND_DECLARATION',
+    title: 'Brand Declaration & Matrix',
+    desc: 'Approved make/brand matrix list and manufacturer notes',
+    isModified: isBrandDiff,
+    changesSummary: isBrandDiff ? 'Master approved brand matrix list and brand notes have been updated in Tools module.' : 'Brand declarations match Master Config',
+    applySync: (q, m) => ({
+      brandDeclarations: (m.brandDeclarations && m.brandDeclarations.length > 0) ? m.brandDeclarations : q.brandDeclarations,
+      brandNotes: (m.brandNotes && m.brandNotes.length > 0) ? m.brandNotes : q.brandNotes
+    })
+  });
+
+  // 11. Technical Assumptions Tab
+  const isTechDiff = master.technicalAssumptions && !isDeepEqual(master.technicalAssumptions, quo.technicalAssumptions || []);
+  sections.push({
+    key: 'technicalAssumptions',
+    tabId: 'TECHNICAL_ASSUMPTIONS',
+    title: 'Technical Assumptions',
+    desc: 'Technical boundary conditions, roof tilt, and standard cable run specifications',
+    isModified: Boolean(isTechDiff),
+    changesSummary: isTechDiff ? 'Master technical assumptions list has been updated in Tools module.' : 'Technical assumptions match Master Config',
+    applySync: (q, m) => ({
+      technicalAssumptions: (m.technicalAssumptions && m.technicalAssumptions.length > 0) ? m.technicalAssumptions : q.technicalAssumptions
+    })
+  });
+
+  // 12. Exclusions Tab
+  const isExclusionsDiff = master.exclusions && !isDeepEqual(master.exclusions, quo.exclusions || []);
+  sections.push({
+    key: 'exclusions',
+    tabId: 'EXCLUSIONS',
+    title: 'Standard Exclusions',
+    desc: 'Civil/statutory exclusions and customer scope responsibilities',
+    isModified: Boolean(isExclusionsDiff),
+    changesSummary: isExclusionsDiff ? 'Master exclusions list has been updated in Tools module.' : 'Exclusions match Master Config',
+    applySync: (q, m) => ({
+      exclusions: (m.exclusions && m.exclusions.length > 0) ? m.exclusions : q.exclusions
+    })
+  });
+
+  // 13. Disclaimer Tab
+  const masterDisclaimer = (master.warrantyDisclaimer || '').trim();
+  const currentDisclaimer = (quo.warrantyDisclaimer || '').trim();
+  const isDisclaimerDiff = Boolean(masterDisclaimer && currentDisclaimer && masterDisclaimer !== currentDisclaimer);
+  sections.push({
+    key: 'warrantyDisclaimer',
+    tabId: 'DISCLAIMER',
+    title: 'Warranty Disclaimer Text',
+    desc: 'Manufacturer warranty pass-through & replacement policy clauses',
+    isModified: isDisclaimerDiff,
+    changesSummary: isDisclaimerDiff ? 'Master warranty disclaimer clauses have been updated in Tools module.' : 'Disclaimer matches Master Config',
+    applySync: (q, m) => ({
+      warrantyDisclaimer: m.warrantyDisclaimer || q.warrantyDisclaimer
+    })
+  });
+
+  // 14. Add-on & Pricing Tab (Signatory, Stamp & Letterhead)
+  const isSignatoryDiff = (master.authorizedSignatoryName && quo.authorizedSignatoryName && master.authorizedSignatoryName.trim() !== quo.authorizedSignatoryName.trim()) ||
+    (master.signatoryDesignation && quo.signatoryDesignation && master.signatoryDesignation.trim() !== quo.signatoryDesignation.trim());
+  const isStampDiff = (master.companyStampUrl !== undefined && quo.companyStampUrl !== undefined && master.companyStampUrl !== quo.companyStampUrl) ||
+    (master.companyStampEnabled !== undefined && quo.companyStampEnabled !== undefined && master.companyStampEnabled !== quo.companyStampEnabled);
+  const isStampSectionDiff = Boolean(isSignatoryDiff || isStampDiff);
+  sections.push({
+    key: 'brandingStamp',
+    tabId: 'ADDON_PRICING',
+    title: 'Pricing & Signatory Stamp',
+    desc: 'Authorized Signatory Name, Designation, and Company Stamp seal',
+    isModified: isStampSectionDiff,
+    changesSummary: isStampSectionDiff ? `Master Signatory: "${master.authorizedSignatoryName}" vs Proposal: "${quo.authorizedSignatoryName}"` : 'Signatory and stamp settings match Master Config',
+    applySync: (q, m) => ({
+      authorizedSignatoryName: m.authorizedSignatoryName || q.authorizedSignatoryName,
+      signatoryDesignation: m.signatoryDesignation || q.signatoryDesignation,
+      companyStampEnabled: m.companyStampEnabled ?? q.companyStampEnabled,
+      companyStampUrl: m.companyStampUrl !== undefined ? m.companyStampUrl : q.companyStampUrl,
+      companyStampWidth: m.companyStampWidth ?? q.companyStampWidth,
+      companyStampRotate: m.companyStampRotate ?? q.companyStampRotate,
+      companyStampOpacity: m.companyStampOpacity ?? q.companyStampOpacity
+    })
+  });
+
+  return sections;
 }
 
 // Complete Quotation Generator based on the questionnaire answers
@@ -257,14 +557,11 @@ function createCompleteQuotation(
     }
   }
 
-  const rawDefaultList = (masterConfig.defaultSupplyIncludes && masterConfig.defaultSupplyIncludes.length > 0)
-    ? masterConfig.defaultSupplyIncludes
-    : [
-        'ACDB & DCDB: IP65 Enclosures with Type-II Surge Protection Devices (SPD) & MCBs',
-        'Cables & Balance of System (BOS): 4/6 sq.mm UV resistant DC solar cables & multi-core AC cables',
-        'Earthing & Lightning Protection: Dedicated copper-bonded chemical earthing electrodes with pits & lightning arrestor',
-        'Bi-Directional Net Metering: TANGEDCO / DISCOM liaisoning & generation meter support'
-      ];
+  const rawDefaultList = (existingQuotation?.supplyIncludes && existingQuotation.supplyIncludes.length > 0)
+    ? existingQuotation.supplyIncludes
+    : ((masterConfig.defaultSupplyIncludes && masterConfig.defaultSupplyIncludes.length > 0)
+      ? masterConfig.defaultSupplyIncludes
+      : DEFAULT_SUPPLY_INCLUDES);
 
   // Filter out any primary equipment lines from defaultList (since primary equipment is dynamic)
   const defaultList = rawDefaultList.filter(item => {
@@ -298,10 +595,12 @@ function createCompleteQuotation(
     defaultBoqItems: masterConfig.defaultBoqItems
   });
 
-  // Benefits table: directly from Tools module master configuration
-  const benefitsTable: SolarBenefitRow[] = (masterConfig.benefitsTable && masterConfig.benefitsTable.length > 0)
-    ? masterConfig.benefitsTable
-    : DEFAULT_SAVINGS_BENEFITS;
+  // Benefits table: directly from Tools module master configuration or existing quotation snapshot
+  const benefitsTable: SolarBenefitRow[] = (existingQuotation?.benefitsTable && existingQuotation.benefitsTable.length > 0)
+    ? existingQuotation.benefitsTable
+    : ((masterConfig.benefitsTable && masterConfig.benefitsTable.length > 0)
+      ? masterConfig.benefitsTable
+      : DEFAULT_SAVINGS_BENEFITS);
 
   const now = new Date();
   const validityDate = new Date();
@@ -388,7 +687,7 @@ function createCompleteQuotation(
     revisionIndex,
     revisionCode,
     revisionHistory: historyList,
-    letterhead: masterConfig.letterhead || DEFAULT_LETTERHEAD_CONFIG,
+    letterhead: existingQuotation?.letterhead || masterConfig.letterhead || DEFAULT_LETTERHEAD_CONFIG,
     title: `Solar Proposal – ${formData.clientName} (${capacity} kWp)`,
     type: 'SOLAR_EPC',
     status,
@@ -397,18 +696,18 @@ function createCompleteQuotation(
     clientName: formData.clientName,
     projectName: formData.clientName,
     location: formData.location,
-    state: 'Tamil Nadu',
-    scheme: formData.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)',
-    targetSegment: formData.targetSegment,
-    connectionType: formData.connectionType,
-    subject: generatedSubject,
-    salutation: masterConfig.defaultToSalutation || 'Dear Valued Customer,',
-    introOpeningText: masterConfig.introOpeningText || 'In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of a Solar PV Power Plant.',
+    state: existingQuotation?.state || 'Tamil Nadu',
+    scheme: formData.scheme || existingQuotation?.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)',
+    targetSegment: formData.targetSegment || existingQuotation?.targetSegment,
+    connectionType: formData.connectionType || existingQuotation?.connectionType,
+    subject: existingQuotation?.subject || generatedSubject,
+    salutation: existingQuotation?.salutation || masterConfig.defaultToSalutation || 'Dear Valued Customer,',
+    introOpeningText: existingQuotation?.introOpeningText || masterConfig.introOpeningText || 'In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of a Solar PV Power Plant.',
     date: dateStr,
-    priceValidityDate: validityStr,
+    priceValidityDate: existingQuotation?.priceValidityDate || validityStr,
     
-    contactPhone: formData.contactPhone,
-    contactEmail: formData.contactEmail,
+    contactPhone: formData.contactPhone || existingQuotation?.contactPhone,
+    contactEmail: formData.contactEmail || existingQuotation?.contactEmail,
     
     capacityKw: capacity,
     capacityKwp: capacity,
@@ -416,74 +715,86 @@ function createCompleteQuotation(
     gridEvacuationVoltage: capacity > 5 ? '415V Three Phase' : '230V Single Phase',
     
     supplyIncludes,
-    installationIncludes: (masterConfig.defaultInstallationIncludes && masterConfig.defaultInstallationIncludes.length > 0)
-      ? masterConfig.defaultInstallationIncludes
-      : [
-          'Design, Engineering & Structural Stability Verification',
-          'Civil Works, Grouting / Anchor Fastening of Structure on Rooftop',
-          'Complete DC Wiring with Cable Trays & Weatherproof Conduit Pipes',
-          'AC Cabling from Inverter to Main Distribution Panel / LT Meter Board',
-          'Installation of Dual Earthing Electrodes with Earth Pit Chambers',
-          'Testing, Inverter Synchronization, Grid Anti-Islanding Protection Trial',
-          'DISCOM Net-Metering Liaisoning & Bi-directional Solar Meter Commissioning'
-        ],
+    installationIncludes: (existingQuotation?.installationIncludes && existingQuotation.installationIncludes.length > 0)
+      ? existingQuotation.installationIncludes
+      : ((masterConfig.defaultInstallationIncludes && masterConfig.defaultInstallationIncludes.length > 0)
+        ? masterConfig.defaultInstallationIncludes
+        : DEFAULT_INSTALLATION_INCLUDES),
     
     boqItems,
     basicCost,
-    gstGoodsPercent,
-    gstGoodsRate,
+    gstGoodsPercent: existingQuotation?.gstGoodsPercent ?? gstGoodsPercent,
+    gstGoodsRate: existingQuotation?.gstGoodsRate ?? gstGoodsRate,
     gstGoodsAmount,
-    gstServicesPercent,
-    gstServicesRate,
+    gstServicesPercent: existingQuotation?.gstServicesPercent ?? gstServicesPercent,
+    gstServicesRate: existingQuotation?.gstServicesRate ?? gstServicesRate,
     gstServicesAmount,
     totalGst,
     specialDiscount: discount,
     grandTotal,
     
-    subsidyNote: masterConfig.defaultSubsidyNote || 'Direct DBT Subsidy up to ₹78,000 under PM Surya Ghar Muft Bijli Yojana will be credited directly to consumer bank account after DISCOM meter installation.',
-    advancePaymentPercent: masterConfig.defaultAdvancePercent ?? 50,
-    deliveryPaymentPercent: masterConfig.defaultDeliveryPercent ?? 40,
-    installationPaymentPercent: masterConfig.defaultInstallationPercent ?? 10,
+    subsidyNote: existingQuotation?.subsidyNote || masterConfig.defaultSubsidyNote || 'Direct DBT Subsidy up to ₹78,000 under PM Surya Ghar Muft Bijli Yojana will be credited directly to consumer bank account after DISCOM meter installation.',
+    advancePaymentPercent: existingQuotation?.advancePaymentPercent ?? masterConfig.defaultAdvancePercent ?? 50,
+    deliveryPaymentPercent: existingQuotation?.deliveryPaymentPercent ?? masterConfig.defaultDeliveryPercent ?? 40,
+    installationPaymentPercent: existingQuotation?.installationPaymentPercent ?? masterConfig.defaultInstallationPercent ?? 10,
     
-    beneficiaryName: masterConfig.beneficiaryName || 'OMMAX ELECTRIC PRIVATE LIMITED',
-    bankName: masterConfig.bankName || 'HDFC Bank Ltd',
-    accountNumber: masterConfig.accountNumber || '50200088991122',
-    accountType: masterConfig.accountType || 'Current Account',
-    ifscCode: masterConfig.ifscCode || 'HDFC0001234',
-    micrNumber: masterConfig.micrNumber || '600240012',
-    bankAddress: masterConfig.bankAddress || 'T. Nagar Branch, Chennai - 600017',
+    beneficiaryName: existingQuotation?.beneficiaryName || masterConfig.beneficiaryName || 'OMMAX ELECTRIC PRIVATE LIMITED',
+    bankName: existingQuotation?.bankName || masterConfig.bankName || 'HDFC Bank Ltd',
+    accountNumber: existingQuotation?.accountNumber || masterConfig.accountNumber || '50200088991122',
+    accountType: existingQuotation?.accountType || masterConfig.accountType || 'Current Account',
+    ifscCode: existingQuotation?.ifscCode || masterConfig.ifscCode || 'HDFC0001234',
+    micrNumber: existingQuotation?.micrNumber || masterConfig.micrNumber || '600240012',
+    bankAddress: existingQuotation?.bankAddress || masterConfig.bankAddress || 'T. Nagar Branch, Chennai - 600017',
     
-    termsAndConditions: (masterConfig.termsAndConditions && masterConfig.termsAndConditions.length > 0)
-      ? masterConfig.termsAndConditions
-      : [],
-    moduleWarrantyYears: masterConfig.moduleWarrantyYears || 25,
-    inverterWarrantyYears: masterConfig.defaultInverterWarranty ? (parseInt(masterConfig.defaultInverterWarranty) || 5) : 5,
-    balanceOfSystemWarrantyYears: masterConfig.defaultBosWarranty ? (parseInt(masterConfig.defaultBosWarranty) || 1) : 1,
-    projectCompletionWeeks: masterConfig.defaultCompletionWeeks || '2 to 3 weeks',
+    termsAndConditions: (existingQuotation?.termsAndConditions && existingQuotation.termsAndConditions.length > 0)
+      ? existingQuotation.termsAndConditions
+      : ((masterConfig.termsAndConditions && masterConfig.termsAndConditions.length > 0)
+        ? masterConfig.termsAndConditions
+        : []),
+    moduleWarrantyYears: existingQuotation?.moduleWarrantyYears || masterConfig.moduleWarrantyYears || 25,
+    inverterWarrantyYears: existingQuotation?.inverterWarrantyYears || (masterConfig.defaultInverterWarranty ? (parseInt(masterConfig.defaultInverterWarranty) || 5) : 5),
+    balanceOfSystemWarrantyYears: existingQuotation?.balanceOfSystemWarrantyYears || (masterConfig.defaultBosWarranty ? (parseInt(masterConfig.defaultBosWarranty) || 1) : 1),
+    projectCompletionWeeks: existingQuotation?.projectCompletionWeeks || masterConfig.defaultCompletionWeeks || '2 to 3 weeks',
     
-    tariffPerUnit: masterConfig.defaultTariffPerUnit || 8.0,
+    tariffPerUnit: existingQuotation?.tariffPerUnit ?? masterConfig.defaultTariffPerUnit ?? 8.0,
     benefitsTable,
-    tariffAssumptions: (masterConfig.tariffAssumptions && masterConfig.tariffAssumptions.length > 0)
-      ? masterConfig.tariffAssumptions
-      : [
-          'Average Solar Generation: 4.0 Units per kWp per day',
-          'TANGEDCO Tariff considered at ₹8.00 / kWh unit',
-          'Degradation accounted at 0.55% annually after Year 1',
-          'Savings calculated based on 100% self-consumption + net-meter export'
-        ],
-    brandDeclarations: masterConfig.brandDeclarations || [],
-    brandNotes: masterConfig.brandNotes || [],
+    tariffAssumptions: (existingQuotation?.tariffAssumptions && existingQuotation.tariffAssumptions.length > 0)
+      ? existingQuotation.tariffAssumptions
+      : ((masterConfig.tariffAssumptions && masterConfig.tariffAssumptions.length > 0)
+        ? masterConfig.tariffAssumptions
+        : [
+            'Average Solar Generation: 4.0 Units per kWp per day',
+            'TANGEDCO Tariff considered at ₹8.00 / kWh unit',
+            'Degradation accounted at 0.55% annually after Year 1',
+            'Savings calculated based on 100% self-consumption + net-meter export'
+          ]),
+    brandDeclarations: (existingQuotation?.brandDeclarations && existingQuotation.brandDeclarations.length > 0)
+      ? existingQuotation.brandDeclarations
+      : masterConfig.brandDeclarations || [],
+    brandNotes: (existingQuotation?.brandNotes && existingQuotation.brandNotes.length > 0)
+      ? existingQuotation.brandNotes
+      : masterConfig.brandNotes || [],
     
-    technicalAssumptions: masterConfig.technicalAssumptions || [],
-    exclusions: masterConfig.exclusions || [],
-    warrantyDisclaimer: masterConfig.warrantyDisclaimer || '',
-    authorizedSignatoryName: masterConfig.authorizedSignatoryName || 'Authorized Signatory',
-    signatoryDesignation: masterConfig.signatoryDesignation || 'OMMAX ELECTRIC PRIVATE LIMITED',
-    companyStampEnabled: masterConfig.companyStampEnabled ?? true,
-    companyStampUrl: masterConfig.companyStampUrl,
-    companyStampWidth: masterConfig.companyStampWidth ?? 120,
-    companyStampRotate: masterConfig.companyStampRotate ?? 0,
-    companyStampOpacity: masterConfig.companyStampOpacity ?? 0.95,
+    technicalAssumptions: (existingQuotation?.technicalAssumptions && existingQuotation.technicalAssumptions.length > 0)
+      ? existingQuotation.technicalAssumptions
+      : masterConfig.technicalAssumptions || [],
+    exclusions: (existingQuotation?.exclusions && existingQuotation.exclusions.length > 0)
+      ? existingQuotation.exclusions
+      : masterConfig.exclusions || [],
+    warrantyDisclaimer: existingQuotation?.warrantyDisclaimer !== undefined
+      ? existingQuotation.warrantyDisclaimer
+      : (masterConfig.warrantyDisclaimer || ''),
+    authorizedSignatoryName: existingQuotation?.authorizedSignatoryName || masterConfig.authorizedSignatoryName || 'Authorized Signatory',
+    signatoryDesignation: existingQuotation?.signatoryDesignation || masterConfig.signatoryDesignation || 'OMMAX ELECTRIC PRIVATE LIMITED',
+    companyStampEnabled: existingQuotation?.companyStampEnabled !== undefined
+      ? existingQuotation.companyStampEnabled
+      : masterConfig.companyStampEnabled ?? true,
+    companyStampUrl: existingQuotation?.companyStampUrl !== undefined
+      ? existingQuotation.companyStampUrl
+      : masterConfig.companyStampUrl,
+    companyStampWidth: existingQuotation?.companyStampWidth ?? masterConfig.companyStampWidth ?? 120,
+    companyStampRotate: existingQuotation?.companyStampRotate ?? masterConfig.companyStampRotate ?? 0,
+    companyStampOpacity: existingQuotation?.companyStampOpacity ?? masterConfig.companyStampOpacity ?? 0.95,
     
     createdBy: currentUser?.fullName || currentUser?.username || 'Admin',
     createdAt: new Date().toISOString()
@@ -607,6 +918,25 @@ export default function QuotationDashboardView({
     revisionIndex: 1
   });
 
+  // Selective Master Sync Dialog for Revisions (Only shown if changes are detected in Tools Master Config)
+  const [revisionSyncDialog, setRevisionSyncDialog] = useState<{
+    isOpen: boolean;
+    quotation: SolarQuotation | null;
+    revisedOfferNo: string;
+    revisionCode: string;
+    revisionIndex: number;
+    detectedDiffs: MasterDiffSection[];
+    syncSelections: Record<string, boolean>;
+  }>({
+    isOpen: false,
+    quotation: null,
+    revisedOfferNo: '',
+    revisionCode: '',
+    revisionIndex: 1,
+    detectedDiffs: [],
+    syncSelections: {}
+  });
+
   // Revision Details Dialog (shows only changes made for revision when clicking revised Offer No)
   const [revisionDetailsDialog, setRevisionDetailsDialog] = useState<{
     isOpen: boolean;
@@ -614,6 +944,19 @@ export default function QuotationDashboardView({
   }>({
     isOpen: false,
     quotation: null
+  });
+
+  // Staged revision quotation (in-memory only, not saved until Draft or Submit)
+  const [pendingRevisionQuotation, setPendingRevisionQuotation] = useState<SolarQuotation | null>(null);
+  // Track if active preview quotation has unsaved changes / hasn't been committed as draft or submitted
+  const [isPreviewUnsaved, setIsPreviewUnsaved] = useState<boolean>(false);
+  // Soft warning pop-up for discarding unsaved questionnaire or preview
+  const [showDiscardModal, setShowDiscardModal] = useState<{
+    isOpen: boolean;
+    type: 'QUESTIONNAIRE' | 'PREVIEW';
+  }>({
+    isOpen: false,
+    type: 'QUESTIONNAIRE'
   });
 
   const isRevisedQuotation = (quo: SolarQuotation) => {
@@ -886,6 +1229,8 @@ export default function QuotationDashboardView({
 
   const handleOpenNewQuestionnaire = () => {
     setEditingQuotationId(null);
+    setPendingRevisionQuotation(null);
+    setIsPreviewUnsaved(false);
     setFormOpportunityId('');
     setFormClientName('');
     setFormContactPhone('');
@@ -929,6 +1274,7 @@ export default function QuotationDashboardView({
 
   const handleOpenEditQuestionnaire = (quo: SolarQuotation) => {
     setEditingQuotationId(quo.id);
+    setIsPreviewUnsaved(false);
     setFormOpportunityId(quo.opportunityId || '');
     setFormClientName(quo.clientName || '');
     setFormContactPhone(quo.contactPhone || '');
@@ -1015,29 +1361,19 @@ export default function QuotationDashboardView({
         revisionIndex: nextRevNum
       });
     } else {
+      setPendingRevisionQuotation(null);
       handleOpenEditQuestionnaire(quo);
     }
   };
 
-  // Confirm revision generation and switch to UNDER_REVISION status
+  // Step 1: When user clicks "Proceed to Edit" from Revision Warning, check for Master Config differences across all tabs
   const handleConfirmRevision = () => {
     if (!revisionWarningDialog.quotation) return;
     const quo = revisionWarningDialog.quotation;
     const { revisedOfferNo, revisionCode, revisionIndex } = revisionWarningDialog;
+    const latestCfg = getMasterConfig();
 
-    const updatedQuo: SolarQuotation = {
-      ...quo,
-      offerNo: revisedOfferNo,
-      revisionCode,
-      revisionIndex,
-      status: 'UNDER_REVISION',
-      updatedAt: new Date().toISOString()
-    };
-
-    if (onSaveQuotation) {
-      onSaveQuotation(updatedQuo);
-    }
-
+    // Close step 1 revision warning dialog
     setRevisionWarningDialog({
       isOpen: false,
       quotation: null,
@@ -1046,7 +1382,87 @@ export default function QuotationDashboardView({
       revisionIndex: 1
     });
 
-    handleOpenEditQuestionnaire(updatedQuo);
+    // Detect if any Master Config sections differ from this quotation's snapshot
+    const allSections = detectMasterConfigDiffs(quo, latestCfg);
+    const detectedDiffs = allSections.filter(s => s.isModified);
+
+    // If NO modifications/differences happened in Master Config, bypass the modal entirely!
+    if (detectedDiffs.length === 0) {
+      const stagedQuo: SolarQuotation = {
+        ...quo,
+        offerNo: revisedOfferNo,
+        revisionCode,
+        revisionIndex,
+        status: 'UNDER_REVISION',
+        updatedAt: new Date().toISOString()
+      };
+
+      // Staged in memory only - do NOT write to database until user saves draft or submits
+      setPendingRevisionQuotation(stagedQuo);
+      handleOpenEditQuestionnaire(stagedQuo);
+      return;
+    }
+
+    // Initialize all detected diffs as unchecked (false) by default so original snapshot is preserved unless user checks them
+    const initialSyncSelections: Record<string, boolean> = {};
+    detectedDiffs.forEach(diff => {
+      initialSyncSelections[diff.key] = false;
+    });
+
+    // Open Step 2 Selective Sync Dialog showing ONLY the detected changed sections
+    setRevisionSyncDialog({
+      isOpen: true,
+      quotation: quo,
+      revisedOfferNo,
+      revisionCode,
+      revisionIndex,
+      detectedDiffs,
+      syncSelections: initialSyncSelections
+    });
+  };
+
+  // Step 2: Apply selected Master Config fields (or keep old snapshot) and switch to UNDER_REVISION
+  const handleApplySyncAndEdit = () => {
+    if (!revisionSyncDialog.quotation) return;
+    const quo = revisionSyncDialog.quotation;
+    const { revisedOfferNo, revisionCode, revisionIndex, detectedDiffs, syncSelections } = revisionSyncDialog;
+    const latestCfg = getMasterConfig();
+
+    // Start with exact previous snapshot
+    let stagedQuo: SolarQuotation = {
+      ...quo,
+      offerNo: revisedOfferNo,
+      revisionCode,
+      revisionIndex,
+      status: 'UNDER_REVISION',
+      updatedAt: new Date().toISOString()
+    };
+
+    // Apply only selectively checked Master Config fields
+    detectedDiffs.forEach(diff => {
+      if (syncSelections[diff.key]) {
+        const patch = diff.applySync(stagedQuo, latestCfg);
+        stagedQuo = {
+          ...stagedQuo,
+          ...patch
+        };
+      }
+    });
+
+    // Staged in memory only - do NOT write to database until user saves draft or submits
+    setPendingRevisionQuotation(stagedQuo);
+
+    setRevisionSyncDialog({
+      isOpen: false,
+      quotation: null,
+      revisedOfferNo: '',
+      revisionCode: '',
+      revisionIndex: 1,
+      detectedDiffs: [],
+      syncSelections: {}
+    });
+
+    handleOpenEditQuestionnaire(stagedQuo);
   };
 
   const handleGenerateQuotation = () => {
@@ -1113,7 +1529,8 @@ export default function QuotationDashboardView({
 
     const config = getMasterConfig();
     const capacity = formCapacityKw;
-    const existingQuotation = editingQuotationId ? quotations.find(q => q.id === editingQuotationId) : undefined;
+    const existingQuotation = pendingRevisionQuotation 
+      || (editingQuotationId ? quotations.find(q => q.id === editingQuotationId) : undefined);
 
     const completeQuotation = createCompleteQuotation(
       {
@@ -1146,21 +1563,90 @@ export default function QuotationDashboardView({
       existingQuotation
     );
 
-    // Save to state / Firestore
-    if (onSaveQuotation) {
-      onSaveQuotation(completeQuotation);
-    }
-
-    // Close questionnaire modal
+    // Close questionnaire modal and open live preview marked as unsaved
     setIsQuestionnaireOpen(false);
-    setEditingQuotationId(null);
 
     // Immediately open 5-page live preview
     setPreviewQuotation(completeQuotation);
+    setIsPreviewUnsaved(true);
+  };
+
+  const handleSaveDraftFromQuestionnaire = () => {
+    if (!formOpportunityId) {
+      alert('Please select a Client from the "Choose Client" drop-down before saving draft.');
+      return;
+    }
+    if (!formClientName.trim()) {
+      alert('Client / Contact Name is required before saving draft.');
+      return;
+    }
+    if (!formCapacityKw || formCapacityKw <= 0) {
+      alert('Please choose Project Capacity before saving draft.');
+      return;
+    }
+
+    const config = getMasterConfig();
+    const capacity = formCapacityKw;
+    const existingQuotation = pendingRevisionQuotation 
+      || (editingQuotationId ? quotations.find(q => q.id === editingQuotationId) : undefined);
+
+    const completeQuotation = createCompleteQuotation(
+      {
+        opportunityId: formOpportunityId || undefined,
+        clientName: formClientName.trim(),
+        contactPhone: formContactPhone.trim(),
+        contactEmail: formContactEmail.trim(),
+        location: formFullAddress.trim() || 'Ariyalur - 621704',
+        offerNo: formOfferNo.trim() || generateOfferNo(quotations, config),
+        capacityKw: capacity,
+        connectionType: formSystemType,
+        targetSegment: formSegment,
+        scheme: formScheme,
+        solarModule: formSolarModule || config.supplyDropdownOptions.moduleOptions[0],
+        inverter: formInverter || config.supplyDropdownOptions.inverterOptions[0],
+        battery: formBattery,
+        batteryQty: formBattery.toLowerCase().includes('nil') || !formBattery ? 0 : formBatteryQty,
+        structureElevation: formStructure || config.supplyDropdownOptions.structureOptions[0],
+        structureFeet: formStructureFeet,
+        starModule: formStarModule,
+        starInverter: formStarInverter,
+        starBattery: formStarBattery,
+        starStructure: formStarStructure,
+        pricingMode: formPricingMode,
+        manualTotal: formManualPrice,
+        discountAmount: formDiscountAmount
+      },
+      config,
+      currentUser,
+      existingQuotation
+    );
+
+    const isRevision = Boolean(pendingRevisionQuotation) 
+      || (existingQuotation?.status === 'SENT') 
+      || (existingQuotation?.status === 'UNDER_REVISION');
+
+    const draftQuo: SolarQuotation = {
+      ...completeQuotation,
+      status: isRevision ? 'UNDER_REVISION' : 'DRAFT',
+      updatedAt: new Date().toISOString()
+    };
+
+    if (onSaveQuotation) {
+      onSaveQuotation(draftQuo);
+    }
+
+    setIsQuestionnaireOpen(false);
+    setEditingQuotationId(null);
+    setPendingRevisionQuotation(null);
+    setIsPreviewUnsaved(false);
   };
 
   const handleSaveDraftFromPreview = (quo: SolarQuotation) => {
-    const nextStatus = (quo.status === 'UNDER_REVISION' || quo.status === 'SENT') ? 'UNDER_REVISION' : 'DRAFT';
+    const isRevision = quo.status === 'UNDER_REVISION' 
+      || Boolean(pendingRevisionQuotation) 
+      || (editingQuotationId && quotations.find(q => q.id === editingQuotationId)?.status === 'SENT');
+
+    const nextStatus: QuotationStatus = isRevision ? 'UNDER_REVISION' : 'DRAFT';
     const draftQuo: SolarQuotation = {
       ...quo,
       status: nextStatus,
@@ -1170,6 +1656,9 @@ export default function QuotationDashboardView({
       onSaveQuotation(draftQuo);
     }
     setPreviewQuotation(null);
+    setEditingQuotationId(null);
+    setPendingRevisionQuotation(null);
+    setIsPreviewUnsaved(false);
   };
 
   const handleSubmitFromPreview = (quo: SolarQuotation) => {
@@ -1183,6 +1672,54 @@ export default function QuotationDashboardView({
       onSaveQuotation(sentQuo, true);
     }
     setPreviewQuotation(null);
+    setEditingQuotationId(null);
+    setPendingRevisionQuotation(null);
+    setIsPreviewUnsaved(false);
+  };
+
+  const handleRequestCloseQuestionnaire = () => {
+    const isDirty = Boolean(
+      formOpportunityId ||
+      formClientName.trim() ||
+      formCapacityKw > 0 ||
+      editingQuotationId ||
+      pendingRevisionQuotation
+    );
+
+    if (isDirty) {
+      setShowDiscardModal({ isOpen: true, type: 'QUESTIONNAIRE' });
+    } else {
+      setIsQuestionnaireOpen(false);
+      setEditingQuotationId(null);
+      setPendingRevisionQuotation(null);
+    }
+  };
+
+  const handleRequestClosePreview = () => {
+    if (isPreviewUnsaved) {
+      setShowDiscardModal({ isOpen: true, type: 'PREVIEW' });
+    } else {
+      setPreviewQuotation(null);
+    }
+  };
+
+  const handleConfirmDiscard = () => {
+    setShowDiscardModal({ isOpen: false, type: 'QUESTIONNAIRE' });
+    setIsQuestionnaireOpen(false);
+    setPreviewQuotation(null);
+    setEditingQuotationId(null);
+    setPendingRevisionQuotation(null);
+    setIsPreviewUnsaved(false);
+  };
+
+  const handleSaveDraftFromDiscardModal = () => {
+    const currentType = showDiscardModal.type;
+    setShowDiscardModal({ isOpen: false, type: 'QUESTIONNAIRE' });
+    if (currentType === 'QUESTIONNAIRE') {
+      handleSaveDraftFromQuestionnaire();
+    } else if (previewQuotation) {
+      handleSaveDraftFromPreview(previewQuotation);
+    }
   };
 
   const handleConfirmStatus = () => {
@@ -1863,7 +2400,10 @@ export default function QuotationDashboardView({
                         {/* 1. 5-Page Live Preview Modal */}
                         <button
                           type="button"
-                          onClick={() => setPreviewQuotation(quo)}
+                          onClick={() => {
+                            setPreviewQuotation(quo);
+                            setIsPreviewUnsaved(false);
+                          }}
                           className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
                           title="View Proposal"
                         >
@@ -2026,7 +2566,10 @@ export default function QuotationDashboardView({
                     {/* View */}
                     <button
                       type="button"
-                      onClick={() => setPreviewQuotation(quo)}
+                      onClick={() => {
+                        setPreviewQuotation(quo);
+                        setIsPreviewUnsaved(false);
+                      }}
                       className="p-2 hover:bg-indigo-50 rounded-lg text-slate-600 hover:text-indigo-600 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
                       title="View Proposal"
                     >
@@ -2143,10 +2686,7 @@ export default function QuotationDashboardView({
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setIsQuestionnaireOpen(false);
-                  setEditingQuotationId(null);
-                }}
+                onClick={handleRequestCloseQuestionnaire}
                 className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -2614,27 +3154,36 @@ export default function QuotationDashboardView({
             </div>
 
             {/* Modal Footer Actions */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <button
                 type="button"
-                onClick={() => {
-                  setIsQuestionnaireOpen(false);
-                  setEditingQuotationId(null);
-                }}
+                onClick={handleRequestCloseQuestionnaire}
                 className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
 
-              <button
-                type="button"
-                onClick={handleGenerateQuotation}
-                className="px-6 py-2.5 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center gap-2"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{editingQuotationId ? 'Update & Preview Proposal' : 'Generate Quotation & Preview'}</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveDraftFromQuestionnaire}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold rounded-xl text-xs transition-all border border-slate-700 shadow-xs cursor-pointer flex items-center gap-1.5"
+                  title="Save quotation draft without submitting"
+                >
+                  <Save className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Save as Draft</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateQuotation}
+                  className="px-5 py-2.5 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{editingQuotationId ? 'Update & Preview Proposal' : 'Generate Quotation & Preview'}</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2646,11 +3195,65 @@ export default function QuotationDashboardView({
       {previewQuotation && (
         <Quotation5PagePrintView
           quotation={previewQuotation}
-          onClose={() => setPreviewQuotation(null)}
+          onClose={handleRequestClosePreview}
           onEdit={(quo) => handleOpenEditQuestionnaire(quo)}
           onSaveDraft={(quo) => handleSaveDraftFromPreview(quo)}
           onSubmitQuotation={(quo) => handleSubmitFromPreview(quo)}
         />
+      )}
+
+      {/* ========================================================================= */}
+      {/* SOFT WARNING / DISCARD CONFIRMATION DIALOG                                */}
+      {/* ========================================================================= */}
+      {showDiscardModal.isOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/75 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Unsaved Quotation
+                </h3>
+                <p className="text-xs text-slate-500">
+                  You are leaving quotation preparation without saving
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+              {showDiscardModal.type === 'QUESTIONNAIRE'
+                ? 'Would you like to save this quotation as a draft or discard all unsaved changes and leave?'
+                : 'This quotation preview has not been saved as a draft or submitted yet. Would you like to save it as a draft or discard?'}
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDiscardModal({ isOpen: false, type: 'QUESTIONNAIRE' })}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer order-3 sm:order-1"
+              >
+                Keep Editing
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDiscard}
+                className="px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl cursor-pointer order-2"
+              >
+                Discard & Leave
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDraftFromDiscardModal}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 order-1 sm:order-3"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save as Draft</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ========================================================================= */}
@@ -2822,6 +3425,156 @@ export default function QuotationDashboardView({
               >
                 <Edit3 className="w-3.5 h-3.5" />
                 <span>Proceed to Edit ({revisionWarningDialog.revisionCode})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SELECTIVE MASTER CONFIG SYNC DIALOG FOR REVISIONS                         */}
+      {/* ========================================================================= */}
+      {revisionSyncDialog.isOpen && revisionSyncDialog.quotation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-xl w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-200/60">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    Selective Master Sync for Revision
+                  </h3>
+                  <p className="text-xs text-slate-500 font-mono">
+                    {revisionSyncDialog.quotation.offerNo} → <span className="font-bold text-amber-600">{revisionSyncDialog.revisedOfferNo}</span> ({revisionSyncDialog.revisionCode})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevisionSyncDialog(prev => ({ ...prev, isOpen: false, quotation: null }))}
+                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-blue-50/80 rounded-xl border border-blue-200/70 text-xs text-blue-900 space-y-1">
+              <p className="font-semibold text-slate-900">
+                Choose which Master Configuration updates to pull into this revision:
+              </p>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                By default, this revision retains all snapshot data from the original proposal (isolated snapshot). Check any specific section below if you wish to overwrite it with the latest global settings.
+              </p>
+            </div>
+
+            {/* Quick Actions (Select All / Keep All) */}
+            <div className="flex items-center justify-between text-xs px-1">
+              <span className="text-slate-500 font-medium text-[11px]">
+                Detected Differences ({revisionSyncDialog.detectedDiffs.length} section{revisionSyncDialog.detectedDiffs.length > 1 ? 's' : ''} modified):
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected: Record<string, boolean> = {};
+                    revisionSyncDialog.detectedDiffs.forEach(d => {
+                      allSelected[d.key] = true;
+                    });
+                    setRevisionSyncDialog(prev => ({
+                      ...prev,
+                      syncSelections: allSelected
+                    }));
+                  }}
+                  className="text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer text-[11px]"
+                >
+                  Select All
+                </button>
+                <span className="text-slate-300">|</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allOriginal: Record<string, boolean> = {};
+                    revisionSyncDialog.detectedDiffs.forEach(d => {
+                      allOriginal[d.key] = false;
+                    });
+                    setRevisionSyncDialog(prev => ({
+                      ...prev,
+                      syncSelections: allOriginal
+                    }));
+                  }}
+                  className="text-slate-500 hover:text-slate-700 font-bold hover:underline cursor-pointer text-[11px]"
+                >
+                  Keep All Original
+                </button>
+              </div>
+            </div>
+
+            {/* Checkbox Options Grid - ONLY render sections where modifications/differences were detected */}
+            <div className="overflow-y-auto max-h-72 space-y-2 pr-1 text-xs">
+              {revisionSyncDialog.detectedDiffs.map((item) => {
+                const isChecked = Boolean(revisionSyncDialog.syncSelections[item.key]);
+                return (
+                  <label
+                    key={item.key}
+                    className={`flex items-start gap-3 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      isChecked
+                        ? 'bg-amber-50/60 border-amber-300 text-slate-900 shadow-xs'
+                        : 'bg-white border-slate-200/80 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setRevisionSyncDialog(prev => ({
+                          ...prev,
+                          syncSelections: {
+                            ...prev.syncSelections,
+                            [item.key]: checked
+                          }
+                        }));
+                      }}
+                      className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-800 text-xs truncate">{item.title}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                          isChecked ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {isChecked ? 'Pull Latest Master' : 'Retain Original'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{item.desc}</p>
+                      {item.changesSummary && (
+                        <p className="text-[10.5px] text-amber-900/90 font-medium bg-amber-50/80 rounded px-1.5 py-0.5 mt-1 border border-amber-200/50">
+                          {item.changesSummary}
+                        </p>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setRevisionSyncDialog(prev => ({ ...prev, isOpen: false, quotation: null }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApplySyncAndEdit}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Open Questionnaire & Apply</span>
               </button>
             </div>
           </div>

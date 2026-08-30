@@ -61,21 +61,23 @@ export default function SettingsView({
     ];
   }, [availableModules]);
 
-  // Preference State
+  const userKey = (currentUser.username || 'user').toLowerCase();
+
+  // Preference State (Scoped to current user's preferences)
   const [defaultPaymentMode, setDefaultPaymentMode] = useState<'CASH' | 'ONLINE'>(() => {
-    return currentUser.preferences?.defaultPaymentMode || (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE') || 'CASH';
+    return currentUser.preferences?.defaultPaymentMode || (localStorage.getItem(`ommax_pref_${userKey}_payment_mode`) as 'CASH' | 'ONLINE') || 'CASH';
   });
   const [dateFormat, setDateFormat] = useState<'DD-MM-YYYY' | 'DD/MM/YYYY'>(() => {
-    return currentUser.preferences?.dateFormat || (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY') || 'DD-MM-YYYY';
+    return currentUser.preferences?.dateFormat || (localStorage.getItem(`ommax_pref_${userKey}_date_format`) as 'DD-MM-YYYY' | 'DD/MM/YYYY') || 'DD-MM-YYYY';
   });
   const [defaultModule, setDefaultModule] = useState<string>(() => {
-    return currentUser.preferences?.defaultModule || localStorage.getItem('ommax_pref_default_module') || 'CRM';
+    return currentUser.preferences?.defaultModule || localStorage.getItem(`ommax_pref_${userKey}_default_module`) || 'CRM';
   });
   const [defaultDateFilter, setDefaultDateFilter] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL'>(() => {
-    return currentUser.preferences?.defaultDateFilter || (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
+    return currentUser.preferences?.defaultDateFilter || (localStorage.getItem(`ommax_pref_${userKey}_date_filter`) as 'THIS_MONTH' | 'LAST_30' | 'ALL') || 'THIS_MONTH';
   });
   const [defaultCountryCode, setDefaultCountryCode] = useState<string>(() => {
-    return currentUser.preferences?.defaultCountryCode || localStorage.getItem('ommax_pref_country_code') || crmSettings?.defaultCountryCode || '+91';
+    return currentUser.preferences?.defaultCountryCode || localStorage.getItem(`ommax_pref_${userKey}_country_code`) || crmSettings?.defaultCountryCode || '+91';
   });
 
   const [prefSuccess, setPrefSuccess] = useState(false);
@@ -97,11 +99,12 @@ export default function SettingsView({
 
   // Sync preferences on mount or when returning to tab or when crmSettings/currentUser changes
   useEffect(() => {
-    const savedPaymentMode = currentUser.preferences?.defaultPaymentMode || (localStorage.getItem('ommax_pref_payment_mode') as 'CASH' | 'ONLINE');
-    const savedDateFormat = currentUser.preferences?.dateFormat || (localStorage.getItem('ommax_pref_date_format') as 'DD-MM-YYYY' | 'DD/MM/YYYY');
-    const savedDefaultModule = currentUser.preferences?.defaultModule || localStorage.getItem('ommax_pref_default_module');
-    const savedDateFilter = currentUser.preferences?.defaultDateFilter || (localStorage.getItem('ommax_pref_date_filter') as 'THIS_MONTH' | 'LAST_30' | 'ALL');
-    const savedCountryCode = currentUser.preferences?.defaultCountryCode || localStorage.getItem('ommax_pref_country_code');
+    const uKey = (currentUser.username || 'user').toLowerCase();
+    const savedPaymentMode = currentUser.preferences?.defaultPaymentMode || (localStorage.getItem(`ommax_pref_${uKey}_payment_mode`) as 'CASH' | 'ONLINE');
+    const savedDateFormat = currentUser.preferences?.dateFormat || (localStorage.getItem(`ommax_pref_${uKey}_date_format`) as 'DD-MM-YYYY' | 'DD/MM/YYYY');
+    const savedDefaultModule = currentUser.preferences?.defaultModule || localStorage.getItem(`ommax_pref_${uKey}_default_module`);
+    const savedDateFilter = currentUser.preferences?.defaultDateFilter || (localStorage.getItem(`ommax_pref_${uKey}_date_filter`) as 'THIS_MONTH' | 'LAST_30' | 'ALL');
+    const savedCountryCode = currentUser.preferences?.defaultCountryCode || localStorage.getItem(`ommax_pref_${uKey}_country_code`);
 
     if (savedPaymentMode) setDefaultPaymentMode(savedPaymentMode);
     if (savedDateFormat) setDateFormat(savedDateFormat);
@@ -112,7 +115,7 @@ export default function SettingsView({
     } else if (crmSettings?.defaultCountryCode) {
       setDefaultCountryCode(crmSettings.defaultCountryCode);
     }
-  }, [currentUser.preferences, crmSettings?.defaultCountryCode]);
+  }, [currentUser, crmSettings?.defaultCountryCode]);
 
   // Handle Change Password Form Submit
   const handleChangePassword = (e: React.FormEvent) => {
@@ -193,15 +196,19 @@ export default function SettingsView({
   // Handle Preferences Form Submit
   const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
+    const uKey = (currentUser.username || 'user').toLowerCase();
     
-    // Save to local storage for instant access
-    localStorage.setItem('ommax_pref_payment_mode', defaultPaymentMode);
-    localStorage.setItem('ommax_pref_date_format', dateFormat);
-    localStorage.setItem('ommax_pref_default_module', defaultModule);
-    localStorage.setItem('ommax_pref_date_filter', defaultDateFilter);
-    localStorage.setItem('ommax_pref_country_code', defaultCountryCode);
+    // Save to user-scoped local storage for instant access
+    localStorage.setItem(`ommax_pref_${uKey}_payment_mode`, defaultPaymentMode);
+    localStorage.setItem(`ommax_pref_${uKey}_date_format`, dateFormat);
+    localStorage.setItem(`ommax_pref_${uKey}_default_module`, defaultModule);
+    localStorage.setItem(`ommax_pref_${uKey}_date_filter`, defaultDateFilter);
+    localStorage.setItem(`ommax_pref_${uKey}_country_code`, defaultCountryCode);
 
-    // Save to Firestore user profile so settings persist across preview, published url, and all devices
+    // Also update active session date format for formatting helper utilities
+    localStorage.setItem('ommax_pref_date_format', dateFormat);
+
+    // Save to Firestore user profile so settings persist per-user across preview, published url, and all devices
     if (onUpdateUser) {
       onUpdateUser({
         ...currentUser,
@@ -212,13 +219,6 @@ export default function SettingsView({
           defaultDateFilter,
           defaultCountryCode
         }
-      });
-    }
-
-    if (onUpdateAppSettings && appSettings) {
-      onUpdateAppSettings({
-        ...appSettings,
-        dateFormat: dateFormat
       });
     }
 

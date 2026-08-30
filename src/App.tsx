@@ -81,8 +81,7 @@ export const APP_MODULES: AppModuleConfig[] = [
 ];
 
 export const getDefaultModuleState = (userPrefModule?: string): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
-  const savedMod = (userPrefModule || (typeof window !== 'undefined' ? localStorage.getItem('ommax_pref_default_module') : null)) as ParentModule | null;
-  const targetMod = savedMod || 'CRM';
+  const targetMod = (userPrefModule as ParentModule) || 'CRM';
   const found = APP_MODULES.find(m => m.id === targetMod) || APP_MODULES[0];
   return {
     defaultTab: found.defaultTab,
@@ -332,6 +331,11 @@ export default function App() {
             const list: User[] = [];
             snapshot.forEach((d) => list.push(d.data() as User));
             setUsers(list);
+            setCurrentUser(prev => {
+              if (!prev) return null;
+              const updated = list.find(u => (u.username && u.username.toLowerCase() === prev.username.toLowerCase()) || (u.id && u.id === prev.id));
+              return updated || prev;
+            });
           }
         }, (err) => console.warn('Firestore users sync notice:', err));
 
@@ -553,6 +557,13 @@ export default function App() {
   // Handler: Secure Login
   const handleLogin = (user: User) => {
     setCurrentUser(user);
+    const uKey = (user.username || 'user').toLowerCase();
+
+    // Set active user session date format for formatting utilities
+    const userDateFormat = user.preferences?.dateFormat || localStorage.getItem(`ommax_pref_${uKey}_date_format`);
+    if (userDateFormat) {
+      localStorage.setItem('ommax_pref_date_format', userDateFormat);
+    }
     
     // Add Login Audit log
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
@@ -568,7 +579,9 @@ export default function App() {
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
-    const initialNav = getDefaultModuleState(user.preferences?.defaultModule);
+
+    const prefModule = user.preferences?.defaultModule || localStorage.getItem(`ommax_pref_${uKey}_default_module`) || undefined;
+    const initialNav = getDefaultModuleState(prefModule);
     setActiveTab(initialNav.defaultTab);
     setOpenParentModule(initialNav.defaultParent);
   };
@@ -590,6 +603,7 @@ export default function App() {
       setLogs(prev => [newLog, ...prev]);
       setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
     }
+    localStorage.removeItem('ommax_pref_date_format');
     setCurrentUser(null);
     setIsMobileMenuOpen(false);
   };
