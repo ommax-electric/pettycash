@@ -216,6 +216,36 @@ export default function QuotationToolsView({
     isEnabled: true
   });
 
+  // Soft warning delete confirmation dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    itemLabel?: string;
+    category?: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const confirmDelete = (options: {
+    title: string;
+    description?: string;
+    itemLabel?: string;
+    category?: string;
+    onConfirm: () => void;
+  }) => {
+    setDeleteDialog({
+      isOpen: true,
+      title: options.title,
+      description: options.description || 'Are you sure you want to delete this configuration option?',
+      itemLabel: options.itemLabel,
+      category: options.category,
+      onConfirm: () => {
+        options.onConfirm();
+        setDeleteDialog(null);
+      }
+    });
+  };
+
   const handleSaveConfig = () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
@@ -261,6 +291,60 @@ export default function QuotationToolsView({
 
   return (
     <div className="space-y-6">
+      {/* Soft Warning Delete Confirmation Modal */}
+      {deleteDialog?.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-black text-slate-900 tracking-tight">
+                  {deleteDialog.title}
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  {deleteDialog.description}
+                </p>
+              </div>
+            </div>
+
+            {deleteDialog.itemLabel && (
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1">
+                {deleteDialog.category && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                    {deleteDialog.category}
+                  </span>
+                )}
+                <div className="text-xs font-extrabold text-slate-900 line-clamp-2">
+                  {deleteDialog.itemLabel}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteDialog(null)}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteDialog.onConfirm();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Option</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Master Configuration Hub Top Bar */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -764,159 +848,142 @@ export default function QuotationToolsView({
             <p className="text-[11px] text-slate-500 mt-1">
               Tip: Use <strong className="font-bold">*text*</strong> for bold and press <strong>Enter</strong> for new lines/paragraphs.
             </p>
-
-            {/* Live Rendered Preview in Master Config */}
-            <div className="mt-3 p-4 bg-amber-50/50 border border-amber-200/80 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10.5px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  Live Formatted Output Preview
-                </span>
-                <span className="text-[10px] text-slate-500 font-medium">
-                  Renders bold (*text*), dynamic values & multi-line paragraphs
-                </span>
-              </div>
-              <div className="text-slate-800 text-xs leading-relaxed space-y-2 bg-white p-3.5 rounded-xl border border-amber-100 shadow-2xs">
-                {(() => {
-                  const sampleInterpolated = interpolateOpeningText(config.introOpeningText, {
-                    connectionType: 'On-Grid Solar PV Plant',
-                    targetSegment: 'Residential Villa',
-                    scheme: 'PM Surya Ghar: Muft Bijli Yojana',
-                    capacityKw: 5,
-                    clientName: 'Mr Prakash',
-                    projectName: 'Mr Prakash'
-                  });
-                  const paragraphs = sampleInterpolated.split(/\r?\n\r?\n+/).map(p => p.trim()).filter(Boolean);
-                  if (paragraphs.length === 0) return <p className="italic text-slate-400">Empty template</p>;
-                  return paragraphs.map((para, idx) => (
-                    <p key={idx} className="whitespace-pre-line">{renderFormattedText(para)}</p>
-                  ));
-                })()}
-              </div>
-            </div>
           </div>
 
-          {/* Grid of 4 Pre-Defined Dropdown Configurations */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 pt-2">
-            {/* Dropdown 1: System Connection Types */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Plant Connection Types</span>
-                </h4>
-                <span className="text-[10px] font-mono font-bold text-slate-500">
-                  {config.availableSystemTypes.length} Options
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-tight">
-                Available in quotation dropdown (On-Grid / Off-Grid / Hybrid)
-              </p>
-              <div className="space-y-2">
-                {config.availableSystemTypes.map((st, idx) => {
-                  const isEditing = editingSystemTypeId === st.id;
-                  return (
-                    <div key={st.id} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={editingSystemTypeLabel}
-                            onChange={(e) => setEditingSystemTypeLabel(e.target.value)}
-                            placeholder="Option label"
-                            className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-bold"
-                          />
-                          <input
-                            type="text"
-                            value={editingSystemTypeDesc}
-                            onChange={(e) => setEditingSystemTypeDesc(e.target.value)}
-                            placeholder="Description / notes (optional)"
-                            className="w-full text-[11px] px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                          />
-                          <div className="flex items-center justify-end gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSystemTypeId(null);
-                                setEditingSystemTypeLabel('');
-                                setEditingSystemTypeDesc('');
-                              }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingSystemTypeLabel.trim()) return;
-                                const updated = config.availableSystemTypes.map((item, i) =>
-                                  i === idx ? { ...item, label: editingSystemTypeLabel.trim(), description: editingSystemTypeDesc.trim() } : item
-                                );
-                                setConfig({ ...config, availableSystemTypes: updated });
-                                setEditingSystemTypeId(null);
-                              }}
-                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold text-slate-800 truncate">{st.label}</div>
-                            {st.description && <div className="text-[10px] text-slate-400 mt-0.5">{st.description}</div>}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSystemTypeId(st.id);
-                                setEditingSystemTypeLabel(st.label);
-                                setEditingSystemTypeDesc(st.description || '');
-                              }}
-                              className="text-slate-400 hover:text-amber-600 p-1 cursor-pointer"
-                              title="Edit option"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {config.availableSystemTypes.length > 1 && (
+          {/* Grid of 4 Pre-Defined Dropdown Configurations (Clean 2-Column Responsive Bento Layout) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+            {/* Card 1: Plant Connection Types */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-2xs space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                      <Zap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 tracking-tight">Plant Connection Types</h4>
+                      <p className="text-[11px] text-slate-500">Quotation dropdown for plant sync type (On-Grid / Off-Grid / Hybrid)</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100/70 text-amber-950 font-bold text-[10px] font-mono">
+                    {config.availableSystemTypes.length} Types
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {config.availableSystemTypes.map((st, idx) => {
+                    const isEditing = editingSystemTypeId === st.id;
+                    return (
+                      <div key={st.id} className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingSystemTypeLabel}
+                              onChange={(e) => setEditingSystemTypeLabel(e.target.value)}
+                              placeholder="Option label"
+                              className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-bold"
+                            />
+                            <input
+                              type="text"
+                              value={editingSystemTypeDesc}
+                              onChange={(e) => setEditingSystemTypeDesc(e.target.value)}
+                              placeholder="Description / notes (optional)"
+                              className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                            />
+                            <div className="flex items-center justify-end gap-1.5 pt-1">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.availableSystemTypes.filter((_, i) => i !== idx);
-                                  setConfig({ ...config, availableSystemTypes: updated });
+                                  setEditingSystemTypeId(null);
+                                  setEditingSystemTypeLabel('');
+                                  setEditingSystemTypeDesc('');
                                 }}
-                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                title="Delete option"
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-semibold cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                Cancel
                               </button>
-                            )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!editingSystemTypeLabel.trim()) return;
+                                  const updated = config.availableSystemTypes.map((item, i) =>
+                                    i === idx ? { ...item, label: editingSystemTypeLabel.trim(), description: editingSystemTypeDesc.trim() } : item
+                                  );
+                                  setConfig({ ...config, availableSystemTypes: updated });
+                                  setEditingSystemTypeId(null);
+                                }}
+                                className="px-3 py-1 bg-[#f7b944] hover:bg-amber-400 text-slate-950 rounded-md text-[11px] font-extrabold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-extrabold text-slate-900">{st.label}</div>
+                              {st.description && <div className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{st.description}</div>}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSystemTypeId(st.id);
+                                  setEditingSystemTypeLabel(st.label);
+                                  setEditingSystemTypeDesc(st.description || '');
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                title="Edit option"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              {config.availableSystemTypes.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    confirmDelete({
+                                      title: 'Delete Plant Connection Type',
+                                      itemLabel: st.label,
+                                      category: 'Plant Connection Type',
+                                      description: `Are you sure you want to remove "${st.label}" from available connection types?`,
+                                      onConfirm: () => {
+                                        const updated = config.availableSystemTypes.filter((_, i) => i !== idx);
+                                        setConfig({ ...config, availableSystemTypes: updated });
+                                      }
+                                    });
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete option"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Add System Type */}
-              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+              <div className="pt-3 border-t border-slate-100 space-y-2 bg-slate-50/70 p-3 rounded-xl border">
                 <input
                   type="text"
                   placeholder="New connection type label..."
                   value={newSystemTypeLabel}
                   onChange={(e) => setNewSystemTypeLabel(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium"
+                  className="w-full text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium"
                 />
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="Description / subtitle (optional)"
                     value={newSystemTypeDesc}
                     onChange={(e) => setNewSystemTypeDesc(e.target.value)}
-                    className="flex-1 text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                    className="flex-1 text-[11px] px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
                   />
                   <button
                     type="button"
@@ -933,134 +1000,147 @@ export default function QuotationToolsView({
                       setNewSystemTypeLabel('');
                       setNewSystemTypeDesc('');
                     }}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-[#f7b944] rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
+                    <span>Add Type</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Dropdown 2: Application Segments */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Target Segments</span>
-                </h4>
-                <span className="text-[10px] font-mono font-bold text-slate-500">
-                  {config.availableSegments.length} Options
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-tight">
-                Available in quotation dropdown (Residential / Commercial / Industrial)
-              </p>
-              <div className="space-y-2">
-                {config.availableSegments.map((seg, idx) => {
-                  const isEditing = editingSegmentId === seg.id;
-                  return (
-                    <div key={seg.id} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={editingSegmentLabel}
-                            onChange={(e) => setEditingSegmentLabel(e.target.value)}
-                            placeholder="Segment name"
-                            className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-bold"
-                          />
-                          <input
-                            type="text"
-                            value={editingSegmentDesc}
-                            onChange={(e) => setEditingSegmentDesc(e.target.value)}
-                            placeholder="Description (optional)"
-                            className="w-full text-[11px] px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-                          />
-                          <div className="flex items-center justify-end gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSegmentId(null);
-                                setEditingSegmentLabel('');
-                                setEditingSegmentDesc('');
-                              }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingSegmentLabel.trim()) return;
-                                const updated = config.availableSegments.map((item, i) =>
-                                  i === idx ? { ...item, label: editingSegmentLabel.trim(), description: editingSegmentDesc.trim() } : item
-                                );
-                                setConfig({ ...config, availableSegments: updated });
-                                setEditingSegmentId(null);
-                              }}
-                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold text-slate-800 truncate">{seg.label}</div>
-                            {seg.description && <div className="text-[10px] text-slate-400 mt-0.5">{seg.description}</div>}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSegmentId(seg.id);
-                                setEditingSegmentLabel(seg.label);
-                                setEditingSegmentDesc(seg.description || '');
-                              }}
-                              className="text-slate-400 hover:text-blue-600 p-1 cursor-pointer"
-                              title="Edit option"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {config.availableSegments.length > 1 && (
+            {/* Card 2: Application Segments */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-2xs space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 tracking-tight">Target Application Segments</h4>
+                      <p className="text-[11px] text-slate-500">Customer category options (Residential Villa / Commercial / Industrial)</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-blue-100/70 text-blue-950 font-bold text-[10px] font-mono">
+                    {config.availableSegments.length} Segments
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {config.availableSegments.map((seg, idx) => {
+                    const isEditing = editingSegmentId === seg.id;
+                    return (
+                      <div key={seg.id} className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingSegmentLabel}
+                              onChange={(e) => setEditingSegmentLabel(e.target.value)}
+                              placeholder="Segment name"
+                              className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-bold"
+                            />
+                            <input
+                              type="text"
+                              value={editingSegmentDesc}
+                              onChange={(e) => setEditingSegmentDesc(e.target.value)}
+                              placeholder="Description (optional)"
+                              className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                            />
+                            <div className="flex items-center justify-end gap-1.5 pt-1">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.availableSegments.filter((_, i) => i !== idx);
-                                  setConfig({ ...config, availableSegments: updated });
+                                  setEditingSegmentId(null);
+                                  setEditingSegmentLabel('');
+                                  setEditingSegmentDesc('');
                                 }}
-                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                title="Delete option"
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-semibold cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                Cancel
                               </button>
-                            )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!editingSegmentLabel.trim()) return;
+                                  const updated = config.availableSegments.map((item, i) =>
+                                    i === idx ? { ...item, label: editingSegmentLabel.trim(), description: editingSegmentDesc.trim() } : item
+                                  );
+                                  setConfig({ ...config, availableSegments: updated });
+                                  setEditingSegmentId(null);
+                                }}
+                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[11px] font-bold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-extrabold text-slate-900">{seg.label}</div>
+                              {seg.description && <div className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{seg.description}</div>}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSegmentId(seg.id);
+                                  setEditingSegmentLabel(seg.label);
+                                  setEditingSegmentDesc(seg.description || '');
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                title="Edit option"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              {config.availableSegments.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    confirmDelete({
+                                      title: 'Delete Target Segment',
+                                      itemLabel: seg.label,
+                                      category: 'Application Segment',
+                                      description: `Are you sure you want to remove "${seg.label}" from target segments?`,
+                                      onConfirm: () => {
+                                        const updated = config.availableSegments.filter((_, i) => i !== idx);
+                                        setConfig({ ...config, availableSegments: updated });
+                                      }
+                                    });
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete option"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Add Target Segment */}
-              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+              <div className="pt-3 border-t border-slate-100 space-y-2 bg-slate-50/70 p-3 rounded-xl border">
                 <input
                   type="text"
-                  placeholder="New segment name (e.g. Agricultural)..."
+                  placeholder="New segment name (e.g. Agricultural Pumps & Cold Storage)..."
                   value={newSegmentLabel}
                   onChange={(e) => setNewSegmentLabel(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-medium"
+                  className="w-full text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-medium"
                 />
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="Description (optional)"
                     value={newSegmentDesc}
                     onChange={(e) => setNewSegmentDesc(e.target.value)}
-                    className="flex-1 text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                    className="flex-1 text-[11px] px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -1077,134 +1157,147 @@ export default function QuotationToolsView({
                       setNewSegmentLabel('');
                       setNewSegmentDesc('');
                     }}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-blue-400 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
+                    <span>Add Segment</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Dropdown 3: Schemes */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <Award className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Schemes & Subsidies</span>
-                </h4>
-                <span className="text-[10px] font-mono font-bold text-slate-500">
-                  {config.availableSchemes.length} Options
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-tight">
-                Available in quotation dropdown (PM Surya Ghar / Non Subsidy / State)
-              </p>
-              <div className="space-y-2">
-                {config.availableSchemes.map((scm, idx) => {
-                  const isEditing = editingSchemeId === scm.id;
-                  return (
-                    <div key={scm.id} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={editingSchemeLabel}
-                            onChange={(e) => setEditingSchemeLabel(e.target.value)}
-                            placeholder="Scheme name"
-                            className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-bold"
-                          />
-                          <input
-                            type="text"
-                            value={editingSchemeDesc}
-                            onChange={(e) => setEditingSchemeDesc(e.target.value)}
-                            placeholder="Subsidy details / notes"
-                            className="w-full text-[11px] px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
-                          />
-                          <div className="flex items-center justify-end gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSchemeId(null);
-                                setEditingSchemeLabel('');
-                                setEditingSchemeDesc('');
-                              }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingSchemeLabel.trim()) return;
-                                const updated = config.availableSchemes.map((item, i) =>
-                                  i === idx ? { ...item, label: editingSchemeLabel.trim(), description: editingSchemeDesc.trim() } : item
-                                );
-                                setConfig({ ...config, availableSchemes: updated });
-                                setEditingSchemeId(null);
-                              }}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold text-slate-800 truncate">{scm.label}</div>
-                            {scm.description && <div className="text-[10px] text-slate-400 mt-0.5">{scm.description}</div>}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSchemeId(scm.id);
-                                setEditingSchemeLabel(scm.label);
-                                setEditingSchemeDesc(scm.description || '');
-                              }}
-                              className="text-slate-400 hover:text-emerald-600 p-1 cursor-pointer"
-                              title="Edit option"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {config.availableSchemes.length > 1 && (
+            {/* Card 3: Schemes & Subsidies */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-2xs space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                      <Award className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 tracking-tight">Government Schemes & Subsidies</h4>
+                      <p className="text-[11px] text-slate-500">Central & State schemes (PM Surya Ghar, Non-Subsidy Capex, OPEX)</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100/70 text-emerald-950 font-bold text-[10px] font-mono">
+                    {config.availableSchemes.length} Schemes
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {config.availableSchemes.map((scm, idx) => {
+                    const isEditing = editingSchemeId === scm.id;
+                    return (
+                      <div key={scm.id} className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingSchemeLabel}
+                              onChange={(e) => setEditingSchemeLabel(e.target.value)}
+                              placeholder="Scheme name"
+                              className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-bold"
+                            />
+                            <input
+                              type="text"
+                              value={editingSchemeDesc}
+                              onChange={(e) => setEditingSchemeDesc(e.target.value)}
+                              placeholder="Subsidy details / notes"
+                              className="w-full text-[11px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <div className="flex items-center justify-end gap-1.5 pt-1">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.availableSchemes.filter((_, i) => i !== idx);
-                                  setConfig({ ...config, availableSchemes: updated });
+                                  setEditingSchemeId(null);
+                                  setEditingSchemeLabel('');
+                                  setEditingSchemeDesc('');
                                 }}
-                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                title="Delete option"
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-semibold cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                Cancel
                               </button>
-                            )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!editingSchemeLabel.trim()) return;
+                                  const updated = config.availableSchemes.map((item, i) =>
+                                    i === idx ? { ...item, label: editingSchemeLabel.trim(), description: editingSchemeDesc.trim() } : item
+                                  );
+                                  setConfig({ ...config, availableSchemes: updated });
+                                  setEditingSchemeId(null);
+                                }}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[11px] font-bold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-extrabold text-slate-900">{scm.label}</div>
+                              {scm.description && <div className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{scm.description}</div>}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSchemeId(scm.id);
+                                  setEditingSchemeLabel(scm.label);
+                                  setEditingSchemeDesc(scm.description || '');
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                title="Edit option"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              {config.availableSchemes.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    confirmDelete({
+                                      title: 'Delete Government Scheme',
+                                      itemLabel: scm.label,
+                                      category: 'Government Scheme / Subsidy',
+                                      description: `Are you sure you want to remove "${scm.label}" from available schemes?`,
+                                      onConfirm: () => {
+                                        const updated = config.availableSchemes.filter((_, i) => i !== idx);
+                                        setConfig({ ...config, availableSchemes: updated });
+                                      }
+                                    });
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete option"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Add Scheme */}
-              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+              <div className="pt-3 border-t border-slate-100 space-y-2 bg-slate-50/70 p-3 rounded-xl border">
                 <input
                   type="text"
-                  placeholder="New scheme name (e.g. PM Surya Ghar)..."
+                  placeholder="New scheme name (e.g. PM Surya Ghar: Muft Bijli Yojana)..."
                   value={newSchemeLabel}
                   onChange={(e) => setNewSchemeLabel(e.target.value)}
-                  className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-medium"
+                  className="w-full text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-medium"
                 />
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="Subsidy / financial notes (optional)"
                     value={newSchemeDesc}
                     onChange={(e) => setNewSchemeDesc(e.target.value)}
-                    className="flex-1 text-[11px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                    className="flex-1 text-[11px] px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
                   />
                   <button
                     type="button"
@@ -1221,125 +1314,205 @@ export default function QuotationToolsView({
                       setNewSchemeLabel('');
                       setNewSchemeDesc('');
                     }}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-emerald-400 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
+                    <span>Add Scheme</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Dropdown 4: Project Capacity Options */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <Sun className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Project Capacity Options (kWp)</span>
-                </h4>
-                <span className="text-[10px] font-mono font-bold text-slate-500">
-                  {(config.capacityOptions || []).length} Options
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-tight">
-                Populates the Project Capacity dropdown in Prepare Solar Quotation modal
-              </p>
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {(config.capacityOptions || []).map((cap, idx) => {
-                  const isEditing = editingCapacityIdx === idx;
-                  return (
-                    <div key={idx} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.1"
-                            value={editingCapacityVal}
-                            onChange={(e) => setEditingCapacityVal(e.target.value)}
-                            placeholder="Capacity in kWp (e.g. 5.5)"
-                            className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-bold"
-                          />
-                          <div className="flex items-center justify-end gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingCapacityIdx(null);
-                                setEditingCapacityVal('');
-                              }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const parsed = parseFloat(editingCapacityVal);
-                                if (isNaN(parsed) || parsed <= 0) return;
-                                const updated = [...(config.capacityOptions || [])];
-                                updated[idx] = parsed;
-                                updated.sort((a, b) => a - b);
-                                setConfig({ ...config, capacityOptions: updated });
-                                setEditingCapacityIdx(null);
-                                setEditingCapacityVal('');
-                              }}
-                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold text-slate-900 font-mono flex items-center gap-1.5">
-                              <span className="px-2.5 py-1 rounded-md bg-amber-100/70 text-amber-900 font-bold">{cap} kWp</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingCapacityIdx(idx);
-                                setEditingCapacityVal(String(cap));
-                              }}
-                              className="text-slate-400 hover:text-amber-600 p-1 cursor-pointer"
-                              title="Edit capacity"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            {(config.capacityOptions || []).length > 1 && (
+            {/* Card 4: Solar Module Rating & Project Capacity Options (kW vs. kWp Sizing) */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-2xs space-y-4 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-300 flex items-center justify-center text-amber-600">
+                      <Sun className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 tracking-tight">Solar Plate Rating & Capacity Options</h4>
+                      <p className="text-[11px] text-slate-500">Master module wattage (Wp) & auto DC/AC calculation matrix</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-amber-100/70 text-amber-950 font-bold text-[10px] font-mono">
+                    {(config.capacityOptions || []).length} Capacities
+                  </span>
+                </div>
+
+                {/* Master Module Wattage (Wp) & Panels Sizing Configuration */}
+                <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <label className="text-[11px] font-extrabold text-amber-950 flex items-center gap-1.5">
+                        <span>Current Solar Plate Rating (Wp)</span>
+                      </label>
+                      <p className="text-[10px] text-amber-800/80">Used to calculate exact kWp & panel count from system kW</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="100"
+                        max="1000"
+                        step="5"
+                        value={config.defaultSolarPlateWp || 550}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 550;
+                          setConfig({ ...config, defaultSolarPlateWp: val });
+                        }}
+                        className="w-24 px-2.5 py-1 text-xs font-mono font-black text-amber-950 bg-white border border-amber-300 rounded-lg text-center focus:outline-hidden focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                      />
+                      <span className="text-xs font-bold text-amber-900">Wp</span>
+                    </div>
+                  </div>
+
+                  {/* Quick Preset Buttons for Popular Panels */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span className="text-[10px] font-bold text-amber-800">Quick Ratings:</span>
+                    {[540, 545, 550, 580, 600, 650].map((wp) => {
+                      const isCurrent = (config.defaultSolarPlateWp || 550) === wp;
+                      return (
+                        <button
+                          key={wp}
+                          type="button"
+                          onClick={() => setConfig({ ...config, defaultSolarPlateWp: wp })}
+                          className={`px-2 py-0.5 rounded text-[10.5px] font-mono font-bold transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                              : 'bg-white hover:bg-amber-100/80 text-amber-900 border border-amber-200'
+                          }`}
+                        >
+                          {wp} Wp
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Engineering Formula Visual Banner */}
+                  <div className="pt-2 border-t border-amber-200/60 text-[10.5px] text-amber-900 flex items-center justify-between flex-wrap gap-2">
+                    <div className="font-mono">
+                      <strong>Formula:</strong> Panels = kW × 2 | <strong>kWp = (Panels × {config.defaultSolarPlateWp || 550} Wp) ÷ 1000</strong>
+                    </div>
+                    <div className="bg-white/80 px-2 py-0.5 rounded border border-amber-200 font-mono font-bold text-slate-800">
+                      e.g. 3 kW → 6 Plates = {((6 * (config.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp
+                    </div>
+                  </div>
+                </div>
+
+                {/* Capacity Options List */}
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {(config.capacityOptions || []).map((cap, idx) => {
+                    const isEditing = editingCapacityIdx === idx;
+                    const plateWp = config.defaultSolarPlateWp || 550;
+                    const platesCount = Math.round(cap * 2);
+                    const calcKwp = ((platesCount * plateWp) / 1000).toFixed(2);
+
+                    return (
+                      <div key={idx} className="p-2.5 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.1"
+                              value={editingCapacityVal}
+                              onChange={(e) => setEditingCapacityVal(e.target.value)}
+                              placeholder="Capacity in kW (e.g. 3 or 5)"
+                              className="w-full text-xs px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-bold"
+                            />
+                            <div className="flex items-center justify-end gap-1.5 pt-1">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = (config.capacityOptions || []).filter((_, i) => i !== idx);
-                                  setConfig({ ...config, capacityOptions: updated });
+                                  setEditingCapacityIdx(null);
+                                  setEditingCapacityVal('');
                                 }}
-                                className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                                title="Delete capacity"
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-semibold cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                Cancel
                               </button>
-                            )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parsed = parseFloat(editingCapacityVal);
+                                  if (isNaN(parsed) || parsed <= 0) return;
+                                  const updated = [...(config.capacityOptions || [])];
+                                  updated[idx] = parsed;
+                                  updated.sort((a, b) => a - b);
+                                  setConfig({ ...config, capacityOptions: updated });
+                                  setEditingCapacityIdx(null);
+                                  setEditingCapacityVal('');
+                                }}
+                                className="px-3 py-1 bg-[#f7b944] hover:bg-amber-400 text-slate-950 rounded-md text-[11px] font-extrabold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+                              <span className="px-2.5 py-1 rounded-md bg-slate-900 text-[#f7b944] font-mono text-xs font-extrabold shadow-2xs">
+                                {cap} kW
+                              </span>
+                              <span className="text-[11px] text-slate-500 font-medium">
+                                → <strong className="text-slate-800 font-mono font-bold">{platesCount} Plates</strong> ({calcKwp} kWp @ {plateWp}W)
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCapacityIdx(idx);
+                                  setEditingCapacityVal(String(cap));
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                title="Edit capacity"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              {(config.capacityOptions || []).length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    confirmDelete({
+                                      title: 'Delete Capacity Option',
+                                      itemLabel: `${cap} kW (${Math.round(cap * 2)} Plates / ${(((Math.round(cap * 2)) * (config.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp)`,
+                                      category: 'Project Capacity',
+                                      description: `Are you sure you want to delete ${cap} kW from the capacity presets?`,
+                                      onConfirm: () => {
+                                        const updated = (config.capacityOptions || []).filter((_, i) => i !== idx);
+                                        setConfig({ ...config, capacityOptions: updated });
+                                      }
+                                    });
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete capacity"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Add Capacity */}
-              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
-                <div className="flex gap-1.5">
+              <div className="pt-3 border-t border-slate-100 space-y-2 bg-slate-50/70 p-3 rounded-xl border">
+                <div className="flex gap-2">
                   <input
                     type="number"
                     step="0.01"
                     min="0.1"
-                    placeholder="New capacity (kWp)... e.g. 7.5"
+                    placeholder="New capacity in kW (e.g. 7.5)..."
                     value={newCapacityVal}
                     onChange={(e) => setNewCapacityVal(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium"
+                    className="flex-1 text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium"
                   />
                   <button
                     type="button"
@@ -1353,10 +1526,10 @@ export default function QuotationToolsView({
                       }
                       setNewCapacityVal('');
                     }}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-[#f7b944] rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
+                    <span>Add Capacity</span>
                   </button>
                 </div>
               </div>
@@ -1483,17 +1656,25 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
-                                  const optNormalized = opt.trim().toLowerCase();
-                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                                    const pName = p.name.trim().toLowerCase();
-                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                                  });
-                                  setConfig({
-                                    ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
-                                    productsCatalog: updatedCatalog
+                                  confirmDelete({
+                                    title: 'Delete Module Option',
+                                    itemLabel: opt,
+                                    category: 'PV Module Scope',
+                                    description: `Are you sure you want to remove "${opt}" from module options and catalog?`,
+                                    onConfirm: () => {
+                                      const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
+                                      const optNormalized = opt.trim().toLowerCase();
+                                      const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                        const pName = p.name.trim().toLowerCase();
+                                        const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                        return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                      });
+                                      setConfig({
+                                        ...config,
+                                        supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
+                                        productsCatalog: updatedCatalog
+                                      });
+                                    }
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1597,17 +1778,25 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
-                                  const optNormalized = opt.trim().toLowerCase();
-                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                                    const pName = p.name.trim().toLowerCase();
-                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                                  });
-                                  setConfig({
-                                    ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
-                                    productsCatalog: updatedCatalog
+                                  confirmDelete({
+                                    title: 'Delete Inverter Option',
+                                    itemLabel: opt,
+                                    category: 'Solar Inverter Scope',
+                                    description: `Are you sure you want to remove "${opt}" from inverter options and catalog?`,
+                                    onConfirm: () => {
+                                      const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
+                                      const optNormalized = opt.trim().toLowerCase();
+                                      const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                        const pName = p.name.trim().toLowerCase();
+                                        const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                        return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                      });
+                                      setConfig({
+                                        ...config,
+                                        supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
+                                        productsCatalog: updatedCatalog
+                                      });
+                                    }
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1711,17 +1900,25 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
-                                  const optNormalized = opt.trim().toLowerCase();
-                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                                    const pName = p.name.trim().toLowerCase();
-                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                                  });
-                                  setConfig({
-                                    ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
-                                    productsCatalog: updatedCatalog
+                                  confirmDelete({
+                                    title: 'Delete Battery Option',
+                                    itemLabel: opt,
+                                    category: 'Battery Storage Scope',
+                                    description: `Are you sure you want to remove "${opt}" from battery storage options and catalog?`,
+                                    onConfirm: () => {
+                                      const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
+                                      const optNormalized = opt.trim().toLowerCase();
+                                      const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                        const pName = p.name.trim().toLowerCase();
+                                        const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                        return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                      });
+                                      setConfig({
+                                        ...config,
+                                        supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
+                                        productsCatalog: updatedCatalog
+                                      });
+                                    }
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1825,17 +2022,25 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
-                                  const optNormalized = opt.trim().toLowerCase();
-                                  const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                                    const pName = p.name.trim().toLowerCase();
-                                    const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                                    return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                                  });
-                                  setConfig({
-                                    ...config,
-                                    supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
-                                    productsCatalog: updatedCatalog
+                                  confirmDelete({
+                                    title: 'Delete Mounting Structure Option',
+                                    itemLabel: opt,
+                                    category: 'Mounting Structure Scope',
+                                    description: `Are you sure you want to remove "${opt}" from mounting structure options and catalog?`,
+                                    onConfirm: () => {
+                                      const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
+                                      const optNormalized = opt.trim().toLowerCase();
+                                      const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                        const pName = p.name.trim().toLowerCase();
+                                        const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                        return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                      });
+                                      setConfig({
+                                        ...config,
+                                        supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
+                                        productsCatalog: updatedCatalog
+                                      });
+                                    }
                                   });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
@@ -1934,8 +2139,16 @@ export default function QuotationToolsView({
                           <button
                             type="button"
                             onClick={() => {
-                              const updated = config.defaultSupplyIncludes.filter((_, idx) => idx !== index);
-                              setConfig({ ...config, defaultSupplyIncludes: updated });
+                              confirmDelete({
+                                title: 'Remove Supply Includes Item',
+                                itemLabel: item,
+                                category: 'Supply Includes Default',
+                                description: `Are you sure you want to remove item #${index + 1} from default supply scope?`,
+                                onConfirm: () => {
+                                  const updated = config.defaultSupplyIncludes.filter((_, idx) => idx !== index);
+                                  setConfig({ ...config, defaultSupplyIncludes: updated });
+                                }
+                              });
                             }}
                             className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
                             title="Remove item"
@@ -2060,8 +2273,16 @@ export default function QuotationToolsView({
                           <button
                             type="button"
                             onClick={() => {
-                              const updated = config.defaultInstallationIncludes.filter((_, i) => i !== index);
-                              setConfig({ ...config, defaultInstallationIncludes: updated });
+                              confirmDelete({
+                                title: 'Remove Installation Clause',
+                                itemLabel: item,
+                                category: 'Installation Includes Default',
+                                description: `Are you sure you want to remove clause #${index + 1} from default installation scope?`,
+                                onConfirm: () => {
+                                  const updated = config.defaultInstallationIncludes.filter((_, i) => i !== index);
+                                  setConfig({ ...config, defaultInstallationIncludes: updated });
+                                }
+                              });
                             }}
                             className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                             title="Delete clause"
@@ -2340,8 +2561,16 @@ export default function QuotationToolsView({
                   <button
                     type="button"
                     onClick={() => {
-                      const updated = config.termsAndConditions.filter((_, i) => i !== index);
-                      setConfig({ ...config, termsAndConditions: updated });
+                      confirmDelete({
+                        title: 'Delete Terms & Conditions Clause',
+                        itemLabel: clause.slice(0, 40) + '...',
+                        category: 'Terms & Conditions',
+                        description: `Are you sure you want to remove Clause #${index + 1}?`,
+                        onConfirm: () => {
+                          const updated = config.termsAndConditions.filter((_, i) => i !== index);
+                          setConfig({ ...config, termsAndConditions: updated });
+                        }
+                      });
                     }}
                     className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
                   >
@@ -2490,8 +2719,16 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.inverterWarrantyOptions.filter((_, idx) => idx !== i);
-                                  setConfig({ ...config, inverterWarrantyOptions: updated });
+                                  confirmDelete({
+                                    title: 'Delete Inverter Warranty Option',
+                                    itemLabel: opt,
+                                    category: 'Inverter Warranty Matrix',
+                                    description: `Are you sure you want to remove "${opt}" from warranty choices?`,
+                                    onConfirm: () => {
+                                      const updated = config.inverterWarrantyOptions.filter((_, idx) => idx !== i);
+                                      setConfig({ ...config, inverterWarrantyOptions: updated });
+                                    }
+                                  });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
                                 title="Delete option"
@@ -2588,8 +2825,16 @@ export default function QuotationToolsView({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const updated = config.bosWarrantyOptions.filter((_, idx) => idx !== i);
-                                  setConfig({ ...config, bosWarrantyOptions: updated });
+                                  confirmDelete({
+                                    title: 'Delete BOS Warranty Option',
+                                    itemLabel: opt,
+                                    category: 'BOS Warranty Matrix',
+                                    description: `Are you sure you want to remove "${opt}" from warranty choices?`,
+                                    onConfirm: () => {
+                                      const updated = config.bosWarrantyOptions.filter((_, idx) => idx !== i);
+                                      setConfig({ ...config, bosWarrantyOptions: updated });
+                                    }
+                                  });
                                 }}
                                 className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
                                 title="Delete option"
@@ -2684,8 +2929,16 @@ export default function QuotationToolsView({
                   <button
                     type="button"
                     onClick={() => {
-                      const updated = config.completionMilestones.filter((_, i) => i !== idx);
-                      setConfig({ ...config, completionMilestones: updated });
+                      confirmDelete({
+                        title: 'Delete Milestone Phase',
+                        itemLabel: ms,
+                        category: 'Project Milestones',
+                        description: `Are you sure you want to remove Phase #${idx + 1}?`,
+                        onConfirm: () => {
+                          const updated = config.completionMilestones.filter((_, i) => i !== idx);
+                          setConfig({ ...config, completionMilestones: updated });
+                        }
+                      });
                     }}
                     className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
                   >
@@ -2926,8 +3179,16 @@ export default function QuotationToolsView({
                       <button
                         type="button"
                         onClick={() => {
-                          const updated = config.brandDeclarations.filter((_, i) => i !== index);
-                          setConfig({ ...config, brandDeclarations: updated });
+                          confirmDelete({
+                            title: 'Delete Brand Declaration Row',
+                            itemLabel: item.description,
+                            category: 'Brand Declarations',
+                            description: `Are you sure you want to remove row #${index + 1} (${item.description})?`,
+                            onConfirm: () => {
+                              const updated = config.brandDeclarations.filter((_, i) => i !== index);
+                              setConfig({ ...config, brandDeclarations: updated });
+                            }
+                          });
                         }}
                         className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
                       >
@@ -3037,8 +3298,16 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = (config.brandNotes || []).filter((_, i) => i !== index);
-                            setConfig({ ...config, brandNotes: updated });
+                            confirmDelete({
+                              title: 'Delete Brand Declaration Note',
+                              itemLabel: note,
+                              category: 'Brand Declaration Notes',
+                              description: `Are you sure you want to remove Note #${index + 1}?`,
+                              onConfirm: () => {
+                                const updated = (config.brandNotes || []).filter((_, i) => i !== index);
+                                setConfig({ ...config, brandNotes: updated });
+                              }
+                            });
                           }}
                           className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                           title="Delete note"
@@ -3129,8 +3398,16 @@ export default function QuotationToolsView({
                   <button
                     type="button"
                     onClick={() => {
-                      const updated = config.technicalAssumptions.filter((_, i) => i !== index);
-                      setConfig({ ...config, technicalAssumptions: updated });
+                      confirmDelete({
+                        title: 'Delete Technical Assumption',
+                        itemLabel: item.slice(0, 40) + '...',
+                        category: 'Technical Assumptions',
+                        description: `Are you sure you want to remove Assumption #${index + 1}?`,
+                        onConfirm: () => {
+                          const updated = config.technicalAssumptions.filter((_, i) => i !== index);
+                          setConfig({ ...config, technicalAssumptions: updated });
+                        }
+                      });
                     }}
                     className="text-slate-400 hover:text-red-600 p-1 cursor-pointer shrink-0 mt-1"
                   >
@@ -3253,8 +3530,16 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.exclusions.filter((_, i) => i !== index);
-                            setConfig({ ...config, exclusions: updated });
+                            confirmDelete({
+                              title: 'Delete Scope Exclusion',
+                              itemLabel: item,
+                              category: 'Scope Exclusions',
+                              description: `Are you sure you want to remove Exclusion #${index + 1}?`,
+                              onConfirm: () => {
+                                const updated = config.exclusions.filter((_, i) => i !== index);
+                                setConfig({ ...config, exclusions: updated });
+                              }
+                            });
                           }}
                           className="p-1 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                           title="Delete exclusion"
@@ -3401,7 +3686,17 @@ export default function QuotationToolsView({
                   {config.companyStampUrl && (
                     <button
                       type="button"
-                      onClick={() => setConfig({ ...config, companyStampUrl: '' })}
+                      onClick={() => {
+                        confirmDelete({
+                          title: 'Remove Company Signature Stamp',
+                          itemLabel: 'Company Stamp & Signature Image',
+                          category: 'Print Configuration',
+                          description: 'Are you sure you want to remove the default company stamp image?',
+                          onConfirm: () => {
+                            setConfig({ ...config, companyStampUrl: '' });
+                          }
+                        });
+                      }}
                       className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer shrink-0"
                       title="Remove signature stamp"
                     >
@@ -3545,19 +3840,27 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
-                            const optNormalized = opt.trim().toLowerCase();
-                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                              const pName = p.name.trim().toLowerCase();
-                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                            });
-                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
-                            setConfig({
-                              ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
-                              productsCatalog: updatedCatalog,
-                              starredSupplyOptions: updatedStarred
+                            confirmDelete({
+                              title: 'Delete Module Option',
+                              itemLabel: opt,
+                              category: 'PV Module Choice',
+                              description: `Are you sure you want to remove "${opt}" from proposal module choices and product catalog?`,
+                              onConfirm: () => {
+                                const updated = config.supplyDropdownOptions.moduleOptions.filter((_, idx) => idx !== i);
+                                const optNormalized = opt.trim().toLowerCase();
+                                const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                  const pName = p.name.trim().toLowerCase();
+                                  const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                  return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                });
+                                const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
+                                setConfig({
+                                  ...config,
+                                  supplyDropdownOptions: { ...config.supplyDropdownOptions, moduleOptions: updated },
+                                  productsCatalog: updatedCatalog,
+                                  starredSupplyOptions: updatedStarred
+                                });
+                              }
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
@@ -3588,19 +3891,27 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
-                            const optNormalized = opt.trim().toLowerCase();
-                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                              const pName = p.name.trim().toLowerCase();
-                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                            });
-                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
-                            setConfig({
-                              ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
-                              productsCatalog: updatedCatalog,
-                              starredSupplyOptions: updatedStarred
+                            confirmDelete({
+                              title: 'Delete Inverter Option',
+                              itemLabel: opt,
+                              category: 'Inverter Choice',
+                              description: `Are you sure you want to remove "${opt}" from proposal inverter choices and product catalog?`,
+                              onConfirm: () => {
+                                const updated = config.supplyDropdownOptions.inverterOptions.filter((_, idx) => idx !== i);
+                                const optNormalized = opt.trim().toLowerCase();
+                                const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                  const pName = p.name.trim().toLowerCase();
+                                  const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                  return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                });
+                                const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
+                                setConfig({
+                                  ...config,
+                                  supplyDropdownOptions: { ...config.supplyDropdownOptions, inverterOptions: updated },
+                                  productsCatalog: updatedCatalog,
+                                  starredSupplyOptions: updatedStarred
+                                });
+                              }
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
@@ -3631,19 +3942,27 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
-                            const optNormalized = opt.trim().toLowerCase();
-                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                              const pName = p.name.trim().toLowerCase();
-                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                            });
-                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
-                            setConfig({
-                              ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
-                              productsCatalog: updatedCatalog,
-                              starredSupplyOptions: updatedStarred
+                            confirmDelete({
+                              title: 'Delete Battery Option',
+                              itemLabel: opt,
+                              category: 'Battery Storage Choice',
+                              description: `Are you sure you want to remove "${opt}" from battery choices and product catalog?`,
+                              onConfirm: () => {
+                                const updated = config.supplyDropdownOptions.batteryOptions.filter((_, idx) => idx !== i);
+                                const optNormalized = opt.trim().toLowerCase();
+                                const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                  const pName = p.name.trim().toLowerCase();
+                                  const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                  return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                });
+                                const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
+                                setConfig({
+                                  ...config,
+                                  supplyDropdownOptions: { ...config.supplyDropdownOptions, batteryOptions: updated },
+                                  productsCatalog: updatedCatalog,
+                                  starredSupplyOptions: updatedStarred
+                                });
+                              }
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
@@ -3674,19 +3993,27 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
-                            const optNormalized = opt.trim().toLowerCase();
-                            const updatedCatalog = (config.productsCatalog || []).filter(p => {
-                              const pName = p.name.trim().toLowerCase();
-                              const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
-                              return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
-                            });
-                            const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
-                            setConfig({
-                              ...config,
-                              supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
-                              productsCatalog: updatedCatalog,
-                              starredSupplyOptions: updatedStarred
+                            confirmDelete({
+                              title: 'Delete Structure Option',
+                              itemLabel: opt,
+                              category: 'Structure Elevation Choice',
+                              description: `Are you sure you want to remove "${opt}" from structure choices and product catalog?`,
+                              onConfirm: () => {
+                                const updated = config.supplyDropdownOptions.structureOptions.filter((_, idx) => idx !== i);
+                                const optNormalized = opt.trim().toLowerCase();
+                                const updatedCatalog = (config.productsCatalog || []).filter(p => {
+                                  const pName = p.name.trim().toLowerCase();
+                                  const pBrandAndName = `${p.brand} ${p.name}`.trim().toLowerCase();
+                                  return pName !== optNormalized && pBrandAndName !== optNormalized && !optNormalized.includes(pName);
+                                });
+                                const updatedStarred = (config.starredSupplyOptions || []).filter(item => item !== opt);
+                                setConfig({
+                                  ...config,
+                                  supplyDropdownOptions: { ...config.supplyDropdownOptions, structureOptions: updated },
+                                  productsCatalog: updatedCatalog,
+                                  starredSupplyOptions: updatedStarred
+                                });
+                              }
                             });
                           }}
                           className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer shrink-0"
@@ -3848,8 +4175,16 @@ export default function QuotationToolsView({
                             <button
                               type="button"
                               onClick={() => {
-                                const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).filter((_, cIdx) => cIdx !== idx);
-                                setConfig({ ...config, defaultBoqItems: updated });
+                                confirmDelete({
+                                  title: 'Delete Default BOQ Item',
+                                  itemLabel: item.itemDescription,
+                                  category: 'Default BOQ Costing',
+                                  description: `Are you sure you want to remove item "${item.itemDescription}" (${item.brand || 'No brand'}) from default BOQ templates?`,
+                                  onConfirm: () => {
+                                    const updated = (config.defaultBoqItems || DEFAULT_BOQ_ITEMS_CONFIG).filter((_, cIdx) => cIdx !== idx);
+                                    setConfig({ ...config, defaultBoqItems: updated });
+                                  }
+                                });
                               }}
                               className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
                               title="Delete default item"
@@ -3963,8 +4298,16 @@ export default function QuotationToolsView({
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = config.productsCatalog.filter((_, i) => i !== idx);
-                            setConfig({ ...config, productsCatalog: updated });
+                            confirmDelete({
+                              title: 'Delete Catalog Product',
+                              itemLabel: prod.name,
+                              category: `${prod.category} Catalog Item`,
+                              description: `Are you sure you want to remove product "${prod.name}" (${prod.brand}) from the master component catalog?`,
+                              onConfirm: () => {
+                                const updated = config.productsCatalog.filter((_, i) => i !== idx);
+                                setConfig({ ...config, productsCatalog: updated });
+                              }
+                            });
                           }}
                           className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
                         >

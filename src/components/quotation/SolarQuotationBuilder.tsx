@@ -12,7 +12,8 @@ import {
   calculateSolarPricing,
   getNextOfferNumber,
   LetterheadConfig,
-  buildDefaultBOQItems
+  buildDefaultBOQItems,
+  deriveAcCapacityKw
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings } from '../../types';
@@ -369,7 +370,7 @@ export default function SolarQuotationBuilder({
 
     setFormData(prev => ({
       ...prev,
-      capacityKw: kw,
+      capacityKw: deriveAcCapacityKw(undefined, kw),
       capacityKwp: kw,
       subject: `Proposal for ${kw} kWp Roof top Solar`,
       subsidyNote: subsidyText,

@@ -451,6 +451,8 @@ export interface QuotationMasterConfig {
   availableSegments: { id: string; label: string; description?: string }[];
   availableSchemes: { id: string; label: string; description?: string }[];
   capacityOptions?: number[];
+  defaultSolarPlateWp?: number;
+  defaultPanelsPerKw?: number;
 
   // 3. Scope of Work
   supplyDropdownOptions: {
@@ -697,6 +699,8 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
     { id: 'OPEX_PPA', label: 'RESCO / OPEX / PPA Model', description: 'Zero upfront Capex - Tariff per unit basis' }
   ],
   capacityOptions: [1, 2, 2.22, 3, 3.33, 4, 4.95, 5, 5.50, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 100],
+  defaultSolarPlateWp: 550,
+  defaultPanelsPerKw: 2,
 
   supplyDropdownOptions: {
     moduleOptions: [
@@ -1051,6 +1055,37 @@ export function getStructureFeet(structureElevation?: string, structureFeet?: nu
     return 'Ground Mount';
   }
   return '7 to 10 Feet';
+}
+
+/**
+ * Derives AC Inverter/Grid capacity rating (kW) from DC peak module capacity (kWp).
+ * e.g. 3.33 kWp -> 3 kW, 4.95 kWp -> 5 kW, 2.22 kWp -> 2 kW, 5.50 kWp -> 5 kW, 1.10 kWp -> 1 kW
+ */
+export function deriveAcCapacityKw(capacityKw?: number, capacityKwp?: number): number {
+  if (capacityKw !== undefined && capacityKwp !== undefined && capacityKw !== capacityKwp && Number.isInteger(capacityKw) && capacityKw > 0) {
+    return capacityKw;
+  }
+  const cap = capacityKwp || capacityKw || 0;
+  if (!cap) return 0;
+  
+  // Specific known standard solar configurations:
+  if (cap === 3.33 || cap === 3.3 || cap === 3.30) return 3;
+  if (cap === 2.22 || cap === 2.2 || cap === 2.20) return 2;
+  if (cap === 1.1 || cap === 1.10 || cap === 1.11) return 1;
+  if (cap === 4.95 || cap === 5.5 || cap === 5.50) return 5;
+  if (cap === 9.9 || cap === 9.90 || cap === 11 || cap === 11.0) return 10;
+  if (cap === 4.4 || cap === 4.40 || cap === 4.44) return 4;
+  if (cap === 6.6 || cap === 6.60 || cap === 6.66) return 6;
+  if (cap === 7.7 || cap === 7.70 || cap === 7.77) return 7;
+  if (cap === 8.8 || cap === 8.80 || cap === 8.88) return 8;
+  
+  // If close to standard 1.1 DC-to-AC ratio
+  const dividedBy1Point1 = Math.round(cap / 1.1);
+  if (Math.abs(dividedBy1Point1 * 1.1 - cap) < 0.05) {
+    return dividedBy1Point1;
+  }
+  
+  return Math.round(cap);
 }
 
 export interface BuildBOQParams {

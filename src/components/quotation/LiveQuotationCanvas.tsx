@@ -17,7 +17,8 @@ import {
   SolarBenefitRow,
   renderFormattedText,
   interpolateOpeningText,
-  interpolateSubject
+  interpolateSubject,
+  deriveAcCapacityKw
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -154,7 +155,7 @@ export default function LiveQuotationCanvas({
       salutation: masterConfig.defaultToSalutation || 'Dear Valued Customer,',
       date: new Date().toISOString().split('T')[0],
       priceValidityDate: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      capacityKw: defaultCapacity,
+      capacityKw: deriveAcCapacityKw(undefined, defaultCapacity),
       capacityKwp: defaultCapacity,
       systemType: 'ON_GRID',
       gridEvacuationVoltage: '230V Single Phase / 415V Three Phase',
@@ -322,7 +323,7 @@ export default function LiveQuotationCanvas({
 
     setFormData(prev => ({
       ...prev,
-      capacityKw: validCap,
+      capacityKw: deriveAcCapacityKw(undefined, validCap),
       capacityKwp: validCap,
       title: `${validCap} kWp Rooftop Solar PV Power Plant Proposal`,
       subject: `Proposal for ${validCap} kWp Roof top Solar`,

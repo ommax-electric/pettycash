@@ -19,7 +19,8 @@ import {
   interpolateSubject,
   buildDefaultBOQItems,
   getStructureFeet,
-  cleanStructureDescription
+  cleanStructureDescription,
+  deriveAcCapacityKw
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -580,9 +581,11 @@ function createCompleteQuotation(
     ...defaultList
   ];
 
+  const acCapacityKw = deriveAcCapacityKw(undefined, capacity);
+
   // BOQ Items - Standardized base items + configured defaults from Pricing
   const boqItems: BOQItem[] = buildDefaultBOQItems({
-    capacityKw: capacity,
+    capacityKw: acCapacityKw,
     capacityKwp: capacity,
     solarModule: formData.solarModule,
     inverter: formData.inverter,
@@ -709,7 +712,7 @@ function createCompleteQuotation(
     contactPhone: formData.contactPhone || existingQuotation?.contactPhone,
     contactEmail: formData.contactEmail || existingQuotation?.contactEmail,
     
-    capacityKw: capacity,
+    capacityKw: acCapacityKw,
     capacityKwp: capacity,
     systemType: isBatteryActive ? 'HYBRID' : (formData.connectionType?.toLowerCase().includes('off') ? 'OFF_GRID' : 'ON_GRID'),
     gridEvacuationVoltage: capacity > 5 ? '415V Three Phase' : '230V Single Phase',
