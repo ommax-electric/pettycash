@@ -1800,78 +1800,86 @@ export default function QuotationDashboardView({
   }, [formPricingMode, formManualPrice, formCapacityKw, formBattery, formBatteryQty, formDiscountAmount, masterConfig]);
 
   return (
-    <div className="space-y-4">
-      {/* 1. TOP METRICS STRIP: 1x4 ON DESKTOP, 2x2 ON MOBILE */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+    <div className="space-y-4 pb-10 sm:pb-14">
+      {/* 1. TOP METRICS STRIP: 1x4 ON DESKTOP, 2x2 ON MOBILE (Matching Cashbook / Petty Cash Palette) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Raised */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs relative overflow-hidden flex items-center justify-between">
-          <div className="min-w-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block truncate">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
               Total Raised
             </span>
-            <div className="text-2xl font-black text-slate-900 mt-1 tracking-tight">
-              {metrics.totalRaised}
-            </div>
-            <div className="text-xs font-semibold text-slate-600 mt-0.5 truncate">
-              ₹ {metrics.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </div>
+            <span className="text-slate-700 bg-slate-100 p-1.5 rounded-lg shrink-0">
+              <FileText className="w-4 h-4 text-slate-700" />
+            </span>
           </div>
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center shrink-0">
-            <FileText className="w-5 h-5 text-slate-700" />
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
+              {metrics.totalRaised} <span className="text-xs font-bold text-slate-400">Quotes</span>
+            </p>
+            <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1 font-medium">
+              ₹ {metrics.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total value
+            </p>
           </div>
         </div>
 
         {/* Won Proposals */}
-        <div className="bg-white rounded-2xl border border-emerald-200/80 p-4 shadow-xs relative overflow-hidden flex items-center justify-between">
-          <div className="min-w-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block truncate">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
               Won / Converted
             </span>
-            <div className="text-2xl font-black text-emerald-700 mt-1 tracking-tight">
-              {metrics.wonCount}
-            </div>
-            <div className="text-xs font-semibold text-emerald-600 mt-0.5 truncate">
-              ₹ {metrics.wonValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </div>
+            <span className="text-emerald-600 bg-emerald-50 p-1.5 rounded-lg shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </span>
           </div>
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight leading-none">
+              {metrics.wonCount} <span className="text-xs font-bold text-emerald-500">Won</span>
+            </p>
+            <p className="text-[9px] text-emerald-600 mt-1.5 flex items-center gap-1 font-bold">
+              ₹ {metrics.wonValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} converted
+            </p>
           </div>
         </div>
 
         {/* Lost Proposals */}
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-4 shadow-xs relative overflow-hidden flex items-center justify-between">
-          <div className="min-w-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 block truncate">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
               Proposals Lost
             </span>
-            <div className="text-2xl font-black text-rose-700 mt-1 tracking-tight">
-              {metrics.lostCount}
-            </div>
-            <div className="text-xs font-semibold text-rose-600 mt-0.5 truncate">
-              ₹ {metrics.lostValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </div>
+            <span className="text-rose-600 bg-rose-50 p-1.5 rounded-lg shrink-0">
+              <XCircle className="w-4 h-4" />
+            </span>
           </div>
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
-            <XCircle className="w-5 h-5 text-rose-600" />
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-rose-600 tracking-tight leading-none">
+              {metrics.lostCount} <span className="text-xs font-bold text-rose-400">Lost</span>
+            </p>
+            <p className="text-[9px] text-rose-600 mt-1.5 flex items-center gap-1 font-medium">
+              ₹ {metrics.lostValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} value
+            </p>
           </div>
         </div>
 
         {/* Active In-Review / Drafts */}
-        <div className="bg-white rounded-2xl border border-amber-200/80 p-4 shadow-xs relative overflow-hidden flex items-center justify-between">
-          <div className="min-w-0">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 block truncate">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-100 flex flex-col justify-between min-h-[145px]">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider block leading-tight">
               Active / In-Review
             </span>
-            <div className="text-2xl font-black text-amber-800 mt-1 tracking-tight">
-              {metrics.activeCount}
-            </div>
-            <div className="text-xs font-semibold text-amber-700 mt-0.5 truncate">
-              ₹ {metrics.activeValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </div>
+            <span className="text-amber-600 bg-amber-50 p-1.5 rounded-lg shrink-0">
+              <Clock className="w-4 h-4" />
+            </span>
           </div>
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
-            <Clock className="w-5 h-5 text-amber-600" />
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
+              {metrics.activeCount} <span className="text-xs font-bold text-slate-400">Active</span>
+            </p>
+            <p className="text-[9px] text-slate-400 mt-1.5 flex items-center gap-1 font-medium">
+              ₹ {metrics.activeValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} in pipeline
+            </p>
           </div>
         </div>
       </div>
@@ -1879,10 +1887,10 @@ export default function QuotationDashboardView({
       {/* 2. TOP ACTION BAR: NEW QUOTATION BUTTON */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-black text-slate-900">
+          <h2 className="font-bold text-slate-800 text-sm tracking-tight">
             Proposals & Quotations
           </h2>
-          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[11px] font-bold">
+          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold">
             {filteredQuotations.length} {filteredQuotations.length === 1 ? 'quote' : 'quotes'}
           </span>
         </div>
@@ -1890,7 +1898,7 @@ export default function QuotationDashboardView({
         <button
           type="button"
           onClick={handleOpenNewQuestionnaire}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#f7b944] text-slate-950 rounded-xl text-xs font-extrabold shadow-xs hover:bg-[#e5aa3b] transition-all cursor-pointer whitespace-nowrap"
+          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#f7b944] text-slate-950 rounded-xl text-xs font-extrabold shadow-xs hover:bg-[#e5aa3b] transition-all cursor-pointer whitespace-nowrap"
         >
           <Plus className="w-4 h-4 stroke-[3]" />
           <span>New Quotation</span>
@@ -1898,7 +1906,7 @@ export default function QuotationDashboardView({
       </div>
 
       {/* 3. FILTERS TOOLBAR */}
-      <div className="bg-white p-2.5 sm:p-3 rounded-2xl border border-slate-200/80 shadow-xs">
+      <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-xs">
         <div className="flex items-center justify-between gap-2 sm:gap-3 w-full">
           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 shrink-0">
             <Filter className="w-3.5 h-3.5 text-slate-500" />
@@ -1911,7 +1919,7 @@ export default function QuotationDashboardView({
               <button
                 type="button"
                 onClick={() => setOpenFilter(openFilter === 'date' ? null : 'date')}
-                className={`w-full py-1.5 px-2 sm:px-2.5 bg-slate-50 border rounded-xl text-[11px] font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
+                className={`w-full py-1.5 px-2 sm:px-2.5 bg-white border rounded-xl text-[11px] font-semibold text-slate-700 transition-all h-[34px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
                   fromDate || toDate ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -1998,7 +2006,7 @@ export default function QuotationDashboardView({
               <button
                 type="button"
                 onClick={() => setOpenFilter(openFilter === 'status' ? null : 'status')}
-                className={`w-full py-1.5 px-2 sm:px-2.5 bg-slate-50 border rounded-xl text-[11px] font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
+                className={`w-full py-1.5 px-2 sm:px-2.5 bg-white border rounded-xl text-[11px] font-semibold text-slate-700 transition-all h-[34px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
                   selectedStatuses.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -2058,7 +2066,7 @@ export default function QuotationDashboardView({
               <button
                 type="button"
                 onClick={() => setOpenFilter(openFilter === 'owner' ? null : 'owner')}
-                className={`w-full py-1.5 px-2 sm:px-2.5 bg-slate-50 border rounded-xl text-[11px] font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
+                className={`w-full py-1.5 px-2 sm:px-2.5 bg-white border rounded-xl text-[11px] font-semibold text-slate-700 transition-all h-[34px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
                   selectedOwners.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -2128,7 +2136,7 @@ export default function QuotationDashboardView({
               <button
                 type="button"
                 onClick={() => setOpenFilter(openFilter === 'account' ? null : 'account')}
-                className={`w-full py-1.5 px-2 sm:px-2.5 bg-slate-50 border rounded-xl text-[11px] font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
+                className={`w-full py-1.5 px-2 sm:px-2.5 bg-white border rounded-xl text-[11px] font-semibold text-slate-700 transition-all h-[34px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
                   selectedAccounts.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -2198,7 +2206,7 @@ export default function QuotationDashboardView({
               <button
                 type="button"
                 onClick={() => setOpenFilter(openFilter === 'contact' ? null : 'contact')}
-                className={`w-full py-1.5 px-2 sm:px-2.5 bg-slate-50 border rounded-xl text-[11px] font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
+                className={`w-full py-1.5 px-2 sm:px-2.5 bg-white border rounded-xl text-[11px] font-semibold text-slate-700 transition-all h-[34px] cursor-pointer flex items-center justify-between shadow-2xs min-w-0 ${
                   selectedContacts.length > 0 ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -2278,11 +2286,11 @@ export default function QuotationDashboardView({
       </div>
 
       {/* 4. PROPOSALS LIST & TABLE (MOBILE RESPONSIVE WITHOUT HORIZONTAL SCROLL) */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden">
         {/* Desktop View Table */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs text-left border-collapse">
-            <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+            <thead className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
               <tr>
                 <th className="py-3 px-4">Offer No & Revision</th>
                 <th className="py-3 px-4">Client & Location</th>

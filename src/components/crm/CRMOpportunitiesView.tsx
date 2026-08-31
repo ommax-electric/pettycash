@@ -1095,15 +1095,15 @@ export default function CRMOpportunitiesView({
   // ==================== FILTERING LOGIC ====================
   const filteredOpportunities = useMemo(() => {
     return opportunities.filter(opp => {
-      // a. Calendar Date Filter (Expected Close Date or Created Date)
-      const oppDate = opp.expectedCloseDate || (opp.createdAt ? opp.createdAt.slice(0, 10) : '');
-      if (fromDate && oppDate && oppDate < fromDate) {
+      // a. Calendar Date Filter (Filtering by Opportunity Generated / Created Date)
+      const generatedDate = opp.createdAt ? (opp.createdAt.includes('T') ? opp.createdAt.split('T')[0] : opp.createdAt.slice(0, 10)) : '';
+      if (fromDate && generatedDate && generatedDate < fromDate) {
         return false;
       }
-      if (toDate && oppDate && oppDate > toDate) {
+      if (toDate && generatedDate && generatedDate > toDate) {
         return false;
       }
-      if ((fromDate || toDate) && !oppDate) {
+      if ((fromDate || toDate) && !generatedDate) {
         return false;
       }
 
@@ -1201,8 +1201,8 @@ export default function CRMOpportunitiesView({
     };
   };
 
-  // Date Presets Helper
-  const applyDatePreset = (preset: 'THIS_MONTH' | 'NEXT_MONTH' | 'THIS_QUARTER' | 'THIS_YEAR' | 'CLEAR') => {
+  // Date Presets Helper (Generated Date Presets)
+  const applyDatePreset = (preset: 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_QUARTER' | 'THIS_YEAR' | 'CLEAR') => {
     if (preset === 'CLEAR') {
       setFromDate('');
       setToDate('');
@@ -1214,20 +1214,31 @@ export default function CRMOpportunitiesView({
     const year = now.getFullYear();
     const month = now.getMonth();
 
-    if (preset === 'THIS_MONTH') {
-      const firstDay = new Date(year, month, 1).toISOString().slice(0, 10);
-      const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+    const formatDateStr = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'TODAY') {
+      const todayStr = formatDateStr(now);
+      setFromDate(todayStr);
+      setToDate(todayStr);
+    } else if (preset === 'THIS_MONTH') {
+      const firstDay = formatDateStr(new Date(year, month, 1));
+      const lastDay = formatDateStr(new Date(year, month + 1, 0));
       setFromDate(firstDay);
       setToDate(lastDay);
-    } else if (preset === 'NEXT_MONTH') {
-      const firstDay = new Date(year, month + 1, 1).toISOString().slice(0, 10);
-      const lastDay = new Date(year, month + 2, 0).toISOString().slice(0, 10);
+    } else if (preset === 'LAST_MONTH') {
+      const firstDay = formatDateStr(new Date(year, month - 1, 1));
+      const lastDay = formatDateStr(new Date(year, month, 0));
       setFromDate(firstDay);
       setToDate(lastDay);
     } else if (preset === 'THIS_QUARTER') {
       const quarterStartMonth = Math.floor(month / 3) * 3;
-      const firstDay = new Date(year, quarterStartMonth, 1).toISOString().slice(0, 10);
-      const lastDay = new Date(year, quarterStartMonth + 3, 0).toISOString().slice(0, 10);
+      const firstDay = formatDateStr(new Date(year, quarterStartMonth, 1));
+      const lastDay = formatDateStr(new Date(year, quarterStartMonth + 3, 0));
       setFromDate(firstDay);
       setToDate(lastDay);
     } else if (preset === 'THIS_YEAR') {
@@ -1568,7 +1579,7 @@ export default function CRMOpportunitiesView({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 w-full flex-1">
-            {/* Filter a: From - To Calendar Filter */}
+            {/* Filter a: From - To Calendar Filter (Opportunity Generated Date) */}
             <div className="relative">
               <button
                 type="button"
@@ -1576,6 +1587,7 @@ export default function CRMOpportunitiesView({
                 className={`w-full py-1.5 px-2.5 bg-slate-50 border rounded-xl text-[11px] md:text-xs font-semibold text-slate-800 transition-all h-[36px] cursor-pointer flex items-center justify-between shadow-2xs ${
                   (fromDate || toDate) ? 'border-amber-400 bg-amber-50/40 text-amber-950 font-bold' : 'border-slate-200 hover:border-slate-300'
                 }`}
+                title="Filter by Opportunity Generated Date"
               >
                 <div className="flex items-center gap-1.5 truncate">
                   <Calendar className="w-3.5 h-3.5 text-amber-600 shrink-0" />
@@ -1586,7 +1598,7 @@ export default function CRMOpportunitiesView({
                       ? `From: ${fromDate}`
                       : toDate
                       ? `To: ${toDate}`
-                      : 'Close / Target Date'}
+                      : 'Generated Date'}
                   </span>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
@@ -1597,7 +1609,10 @@ export default function CRMOpportunitiesView({
                   <div className="fixed inset-0 z-20" onClick={() => setOpenFilter(null)} />
                   <div className="absolute left-0 top-full mt-1.5 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-3.5 text-xs">
                     <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                      <span className="font-extrabold text-slate-800 text-[11px]">Date Range Filter</span>
+                      <div>
+                        <span className="font-extrabold text-slate-800 text-[11px] block">Generated Date Filter</span>
+                        <span className="text-[9.5px] text-slate-400">Filter by deal creation date</span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => applyDatePreset('CLEAR')}
@@ -1611,29 +1626,36 @@ export default function CRMOpportunitiesView({
                     <div className="grid grid-cols-2 gap-1.5 mb-3">
                       <button
                         type="button"
+                        onClick={() => applyDatePreset('TODAY')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => applyDatePreset('THIS_MONTH')}
-                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
                       >
                         This Month
                       </button>
                       <button
                         type="button"
-                        onClick={() => applyDatePreset('NEXT_MONTH')}
-                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                        onClick={() => applyDatePreset('LAST_MONTH')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
                       >
-                        Next Month
+                        Last Month
                       </button>
                       <button
                         type="button"
                         onClick={() => applyDatePreset('THIS_QUARTER')}
-                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
                       >
                         This Quarter
                       </button>
                       <button
                         type="button"
                         onClick={() => applyDatePreset('THIS_YEAR')}
-                        className="px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors"
+                        className="col-span-2 px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-900 rounded-lg text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer text-center"
                       >
                         This Year
                       </button>
@@ -1671,7 +1693,7 @@ export default function CRMOpportunitiesView({
                       <button
                         type="button"
                         onClick={() => setOpenFilter(null)}
-                        className="px-3 py-1 bg-[#f7b944] text-slate-950 font-bold rounded-lg text-xs hover:bg-[#e0a330]"
+                        className="px-3 py-1 bg-[#f7b944] text-slate-950 font-bold rounded-lg text-xs hover:bg-[#e0a330] cursor-pointer"
                       >
                         Done
                       </button>
