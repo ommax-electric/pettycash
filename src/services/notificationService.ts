@@ -166,6 +166,14 @@ export async function sendEmailNotification(
       if (adminUser?.email) adminEmail = adminUser.email;
     }
 
+    // Resolve cash admin email from settings or localStorage or fallback to ADMIN user
+    const configuredCashAdmin = (
+      integrationSettings?.cashAdminEmail ||
+      localStorage.getItem('petty_cash_cash_admin_email') ||
+      ''
+    ).trim();
+    const cashAdminEmail = configuredCashAdmin || adminEmail;
+
     let subjectTemplate = '';
     let bodyTemplate = '';
 
@@ -198,12 +206,17 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyNew : null) ||
         localStorage.getItem('petty_cash_email_body_new') ||
         'Hello Finance Team,\n\nA new petty cash voucher has been registered:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
-      if (defaultRecipients.length > 0) {
-        targetRecipients.push(...defaultRecipients);
-      } else if (adminEmail) {
+      
+      // When new expense added: only allocated manager gets email
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      } else if (cashAdminEmail && cashAdminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(cashAdminEmail);
+      } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
         targetRecipients.push(adminEmail);
+      } else if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients.filter(e => e.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()));
       }
-      if (claimantEmail) targetRecipients.push(claimantEmail);
     } else if (type === 'REQUEST_SUBMITTED') {
       cardTitle = 'Petty Cash Claim Pending Approval';
       cardBorderColor = '#ff7900';
@@ -214,10 +227,11 @@ export async function sendEmailNotification(
         localStorage.getItem('petty_cash_email_body_req_submitted') ||
         'Hello Manager / Approver,\n\nA new petty cash claim has been submitted for your approval:\n\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.';
       
-      // ONLY send approval request to assigned reporting manager (or admin if no manager)
-      // Strictly exclude claimant email from receiving approval request emails for their own claim
+      // When new claim submitted: only allocated manager gets email
       if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
         targetRecipients.push(managerEmail);
+      } else if (cashAdminEmail && cashAdminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(cashAdminEmail);
       } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
         targetRecipients.push(adminEmail);
       } else if (defaultRecipients.length > 0) {
@@ -232,9 +246,16 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestApproved : null) ||
         localStorage.getItem('petty_cash_email_body_req_approved') ||
         'Hello Finance Admin & Claimant,\n\nPetty cash voucher #{voucher_id} requested by {paid_to} has been APPROVED by {approved_by} and is ready for payment disbursement:\n\nVoucher ID: #{voucher_id}\nClaimant / Paid To: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nApproved By: {approved_by}\nDate: {date}\nRemarks: {remarks}\n\nCurrent Cash Balance: {balance}\n\nPlease log in to the Petty Cash Portal to issue cash and mark as paid.';
+      
+      // When manager approves: user gets email (applied expense) and Cash admin gets email (to issue cash)
       if (claimantEmail) targetRecipients.push(claimantEmail);
-      if (adminEmail) targetRecipients.push(adminEmail);
-      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+      if (cashAdminEmail) {
+        targetRecipients.push(cashAdminEmail);
+      } else if (adminEmail) {
+        targetRecipients.push(adminEmail);
+      } else if (defaultRecipients.length > 0) {
+        targetRecipients.push(defaultRecipients[0]);
+      }
     } else if (type === 'REQUEST_PAID') {
       cardTitle = 'Petty Cash Payment Issued';
       cardBorderColor = '#6CC417';
@@ -244,9 +265,14 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyRequestPaid : null) ||
         localStorage.getItem('petty_cash_email_body_req_paid') ||
         'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} has been DISBURSED and marked as PAID by {paid_by}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nIssued / Paid By: {paid_by}\nApproved By: {approved_by}\n\nCurrent Cash Balance: {balance}\n\nThank you.';
+      
+      // When Cash admin marks paid (distribute the cash): manager and user get emails
       if (claimantEmail) targetRecipients.push(claimantEmail);
-      if (managerEmail) targetRecipients.push(managerEmail);
-      if (adminEmail) targetRecipients.push(adminEmail);
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(adminEmail);
+      }
     } else if (type === 'REQUEST_REJECTED') {
       cardTitle = 'Petty Cash Claim Rejected';
       cardBorderColor = '#ef4444';
@@ -282,8 +308,8 @@ export async function sendEmailNotification(
         if (mgrUser?.email) targetMgrEmail = mgrUser.email;
       }
       if (targetMgrEmail) targetRecipients.push(targetMgrEmail);
-      if (adminEmail && adminEmail !== targetMgrEmail) targetRecipients.push(adminEmail);
-      if (defaultRecipients.length > 0 && targetRecipients.length === 0) targetRecipients.push(...defaultRecipients);
+      else if (adminEmail && adminEmail !== targetMgrEmail) targetRecipients.push(adminEmail);
+      else if (defaultRecipients.length > 0 && targetRecipients.length === 0) targetRecipients.push(...defaultRecipients);
     } else if (type === 'INWARD') {
       cardTitle = 'Deposit Alert';
       cardBorderColor = '#00bc7d';
@@ -293,6 +319,8 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInward : null) ||
         localStorage.getItem('petty_cash_email_body_inward') ||
         'Hello Finance Team,\n\nA new petty cash inward deposit has been recorded:\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nThis is an automated alert from your Corporate Petty Cash Register.';
+      
+      // When new deposit happens: email triggers for recipient email only
       if (defaultRecipients.length > 0) {
         targetRecipients.push(...defaultRecipients);
       } else if (adminEmail) {
@@ -307,8 +335,13 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyInwardEdit : null) ||
         localStorage.getItem('petty_cash_email_body_inward_edit') ||
         'Hello Finance Team,\n\nDeposit Changes Alert for Petty Cash Deposit #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher/Ref ID: #{voucher_id}\nAmount: {amount}\nReceived From / Source: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
-      if (adminEmail) targetRecipients.push(adminEmail);
-      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+
+      // When deposit changes happen: email triggers for recipient email only
+      if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients);
+      } else if (adminEmail) {
+        targetRecipients.push(adminEmail);
+      }
     } else {
       cardTitle = 'Voucher Changes Alert';
       cardBorderColor = '#f7b944';
@@ -318,8 +351,17 @@ export async function sendEmailNotification(
       bodyTemplate = (integrationSettings ? integrationSettings.emailBodyEdit : null) ||
         localStorage.getItem('petty_cash_email_body_edit') ||
         'Hello Finance Team,\n\nChanges Alert for Petty Cash Voucher #{voucher_id}:\n{changed_fields} changed by {updated_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nPaid To: {paid_to}\nParticulars: {particulars}\nCategory: {category}\nRemarks: {remarks}\nDate: {date}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review it in the system register.';
-      if (adminEmail) targetRecipients.push(adminEmail);
-      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+      
+      // When expense changes happen: only allocated manager gets email
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      } else if (cashAdminEmail && cashAdminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(cashAdminEmail);
+      } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(adminEmail);
+      } else if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients.filter(e => e.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()));
+      }
     }
 
     // Fallback: If targetRecipients is still empty
@@ -364,8 +406,10 @@ export async function sendEmailNotification(
 
       let bodyText = bodyTemplate;
       if (!includeBalance) {
-        bodyText = bodyText.replace(/\n\n(Current Cash Balance|Cash Balance): \{balance\}/gi, '');
-        bodyText = bodyText.replace(/(Current Cash Balance|Cash Balance): \{balance\}/gi, '');
+        bodyText = bodyText
+          .replace(/\n\s*(Current Cash Balance|Cash Balance|Cash on Hand|Balance)[\s\S]*?\{balance\}/gi, '')
+          .replace(/(Current Cash Balance|Cash Balance|Cash on Hand|Balance):[^\n]*/gi, '')
+          .replace(/\{balance\}/gi, '');
       }
 
       const emailBodyParsed = bodyText
@@ -461,11 +505,10 @@ export async function sendEmailNotification(
       return { success: true, message: 'Email process completed.' };
     };
 
-    // If claimantEmail is among recipients for claim actions (REQUEST_SUBMITTED, APPROVED, PAID, REJECTED),
-    // separate claimant (no organization balance shown) from management (balance shown)
+    // If claimantEmail is among recipients, separate claimant (no cash on hand balance shown) from management (balance shown)
     const normalizedClaimant = claimantEmail ? claimantEmail.trim().toLowerCase() : '';
 
-    if (normalizedClaimant && ['REQUEST_SUBMITTED', 'REQUEST_APPROVED', 'REQUEST_PAID', 'REQUEST_REJECTED'].includes(type)) {
+    if (normalizedClaimant && allUniqueRecipients.some(r => r.toLowerCase() === normalizedClaimant)) {
       const claimantRecList = allUniqueRecipients.filter(r => r.toLowerCase() === normalizedClaimant);
       const managementRecList = allUniqueRecipients.filter(r => r.toLowerCase() !== normalizedClaimant);
 
@@ -481,7 +524,7 @@ export async function sendEmailNotification(
 
       return {
         success: claimantRes.success && managementRes.success,
-        message: 'Emails dispatched (Claimant without cash balance, Management with cash balance).'
+        message: 'Emails dispatched (User without cash on hand balance, Management with cash balance).'
       };
     }
 

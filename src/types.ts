@@ -50,6 +50,7 @@ export interface IntegrationSettings {
   msSenderName?: string;
   emailRecipients?: string;
   pettyCashRecipients?: string;
+  cashAdminEmail?: string;
   crmRecipients?: string;
   emailSubjectNew?: string;
   emailBodyNew?: string;

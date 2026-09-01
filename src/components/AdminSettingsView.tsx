@@ -415,6 +415,8 @@ export default function AdminSettingsView({
       msSenderEmail,
       msSenderName,
       emailRecipients,
+      pettyCashRecipients,
+      cashAdminEmail,
       emailSubjectNew,
       emailBodyNew,
       emailSubjectEdit,
@@ -592,6 +594,9 @@ export default function AdminSettingsView({
   const [pettyCashRecipients, setPettyCashRecipients] = useState<string>(() => {
     return integrationSettings?.pettyCashRecipients || integrationSettings?.emailRecipients || localStorage.getItem('petty_cash_email_recipients') || 'info@ommaxelectric.com, admin@ommaxelectric.com';
   });
+  const [cashAdminEmail, setCashAdminEmail] = useState<string>(() => {
+    return integrationSettings?.cashAdminEmail || localStorage.getItem('petty_cash_cash_admin_email') || 'cashadmin@ommaxelectric.com';
+  });
   const [crmRecipients, setCrmRecipients] = useState<string>(() => {
     return integrationSettings?.crmRecipients || localStorage.getItem('crm_email_recipients') || 'sales@ommaxelectric.com, crm@ommaxelectric.com';
   });
@@ -722,6 +727,7 @@ export default function AdminSettingsView({
       setMsSenderName(integrationSettings.msSenderName || 'Petty Cash');
       setEmailRecipients(integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
       setPettyCashRecipients(integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || 'info@ommaxelectric.com, admin@ommaxelectric.com');
+      setCashAdminEmail(integrationSettings.cashAdminEmail || 'cashadmin@ommaxelectric.com');
       setCrmRecipients(integrationSettings.crmRecipients || 'sales@ommaxelectric.com, crm@ommaxelectric.com');
       setCrmEmailSubjectNewOpp(integrationSettings.crmEmailSubjectNewOpp || DEFAULT_CRM_SUBJECT_NEW_OPP);
       setCrmEmailBodyNewOpp(integrationSettings.crmEmailBodyNewOpp || DEFAULT_CRM_BODY_NEW_OPP);
@@ -780,6 +786,7 @@ export default function AdminSettingsView({
       msSenderName,
       emailRecipients: pettyCashRecipients,
       pettyCashRecipients,
+      cashAdminEmail,
       emailSubjectNew,
       emailBodyNew,
       emailSubjectEdit,
@@ -810,6 +817,7 @@ export default function AdminSettingsView({
       localStorage.setItem('ms_graph_sender_email', msSenderEmail);
       localStorage.setItem('ms_graph_sender_name', msSenderName);
       localStorage.setItem('petty_cash_email_recipients', pettyCashRecipients);
+      localStorage.setItem('petty_cash_cash_admin_email', cashAdminEmail);
       localStorage.setItem('petty_cash_email_subject_new', emailSubjectNew);
       localStorage.setItem('petty_cash_email_body_new', emailBodyNew);
       localStorage.setItem('petty_cash_email_subject_edit', emailSubjectEdit);
@@ -3613,26 +3621,59 @@ export default function AdminSettingsView({
 
                 {/* Templates Form */}
                 <form onSubmit={handleSaveEmailSettings} className="space-y-4">
-                  {/* RECIPIENT EMAIL ADDRESSES (PETTY CASH) */}
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
-                        <Mail className="w-4 h-4" />
+                  {/* RECIPIENT EMAIL & CASH ADMIN EMAIL ADDRESSES */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Petty Cash Recipient Email Addresses */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                            <Mail className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-xs text-slate-800">Petty Cash Recipient Email Addresses</h4>
+                            <p className="text-[11px] text-slate-500">Finance team & auditors who receive inward deposit and deposit change alerts.</p>
+                          </div>
+                        </div>
                       </div>
                       <div>
-                        <h4 className="font-bold text-xs text-slate-800">Petty Cash Recipient Email Addresses</h4>
-                        <p className="text-[11px] text-slate-500">Finance team, auditors, and custodians who receive automated petty cash voucher alerts and approval notifications.</p>
+                        <input
+                          type="text"
+                          value={pettyCashRecipients}
+                          onChange={(e) => setPettyCashRecipients(e.target.value)}
+                          placeholder="cfo@company.com, auditor@company.com, admin@company.com"
+                          className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                          required
+                        />
+                        <span className="text-[10px] text-slate-400 mt-1 block">Separate multiple recipient email addresses with commas</span>
                       </div>
                     </div>
-                    <input
-                      type="text"
-                      value={pettyCashRecipients}
-                      onChange={(e) => setPettyCashRecipients(e.target.value)}
-                      placeholder="cfo@company.com, auditor@company.com, admin@company.com"
-                      className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                      required
-                    />
-                    <span className="text-[10px] text-slate-400">Separate multiple recipient email addresses with commas</span>
+
+                    {/* Cash Admin Email Address */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                            <Mail className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-xs text-slate-800">Cash Admin Email Address</h4>
+                            <p className="text-[11px] text-slate-500">Cashier / Finance Admin who receives action emails when a claim is approved to disburse & issue cash.</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <input
+                          type="email"
+                          value={cashAdminEmail}
+                          onChange={(e) => setCashAdminEmail(e.target.value)}
+                          placeholder="cashadmin@ommaxelectric.com"
+                          className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-xs font-mono"
+                          required
+                        />
+                        <span className="text-[10px] text-slate-400 mt-1 block">Cash admin recipient for approved claim disbursement notifications</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* ACCORDION 1: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
