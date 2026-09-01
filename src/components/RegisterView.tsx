@@ -360,7 +360,7 @@ export default function RegisterView({
   const [formType, setFormType] = useState<TransactionType>(forceType || 'OUT');
   const [formReference, setFormReference] = useState('');
   const [formAmount, setFormAmount] = useState('');
-  const [formCategory, setFormCategory] = useState(categories[0]?.name || 'Office Supplies');
+  const [formCategory, setFormCategory] = useState('');
   const [formMerchant, setFormMerchant] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formRemarks, setFormRemarks] = useState('');
@@ -784,6 +784,7 @@ export default function RegisterView({
     setFormType(forceType || 'OUT');
     setFormReference('');
     setFormAmount('');
+    setFormCategory('');
     setFormMerchant('');
     setShowMerchantSuggestions(false);
     setFormDescription('');
@@ -807,9 +808,7 @@ export default function RegisterView({
     } else {
       const nextNum = getNextOutwardVoucherNumber(transactions);
       setFormReference(String(nextNum));
-      if (expenseCategories.length > 0) {
-        setFormCategory(expenseCategories[0].name);
-      }
+      setFormCategory('');
       setFormMerchant(currentUser.fullName || '');
     }
     setShowMerchantSuggestions(false);
@@ -888,6 +887,10 @@ export default function RegisterView({
       // Outward / Expense: Paid to (merchant), category, particulars (description), amount, and Voucher No. are required.
       if (!merchVal) {
         setFormError('Paid To is required.');
+        return;
+      }
+      if (!formCategory || !formCategory.trim()) {
+        setFormError('Please choose an Expense Category.');
         return;
       }
       if (!refVal) {
@@ -1028,6 +1031,8 @@ export default function RegisterView({
               }).catch(e => console.warn('Cloudinary old file cleanup on edit error:', e));
             }
 
+            const effectivePaymentType = currentUser.role === 'ADMIN' ? (formPaymentType || 'CASH') : 'CASH';
+
             if (onUpdateTransaction) {
               onUpdateTransaction({
                 ...editingTransaction,
@@ -1043,7 +1048,7 @@ export default function RegisterView({
                 receiptUrl: finalReceiptUrl || null,
                 remarks: formRemarks.trim(),
                 projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
-                paymentType: formPaymentType || 'CASH'
+                paymentType: effectivePaymentType
               });
             }
           } else {
@@ -1057,6 +1062,8 @@ export default function RegisterView({
 
             const reqUser = currentUser.fullName || currentUser.username || 'User';
             const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? reqUser : 'admin');
+
+            const effectivePaymentType = currentUser.role === 'ADMIN' ? (formPaymentType || 'CASH') : 'CASH';
 
             onAddTransaction({
               date: formDate,
@@ -1074,7 +1081,7 @@ export default function RegisterView({
               receiptUrl: finalReceiptUrl || null,
               remarks: formRemarks.trim(),
               projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
-              paymentType: formPaymentType || 'CASH'
+              paymentType: effectivePaymentType
             });
           }
         } catch (err) {
@@ -5452,13 +5459,24 @@ export default function RegisterView({
                           </label>
                           <select 
                             id="form-payment-type"
-                            value={formPaymentType}
-                            onChange={(e) => setFormPaymentType(e.target.value as 'CASH' | 'ONLINE')}
+                            value={currentUser.role === 'ADMIN' ? formPaymentType : 'CASH'}
+                            onChange={(e) => {
+                              if (currentUser.role === 'ADMIN') {
+                                setFormPaymentType(e.target.value as 'CASH' | 'ONLINE');
+                              }
+                            }}
+                            disabled={currentUser.role !== 'ADMIN'}
                             required
-                            className="w-full py-2.5 px-3 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-600 transition-all cursor-pointer font-semibold"
+                            className={`w-full py-2.5 px-3 border rounded-xl text-xs transition-all font-semibold ${
+                              currentUser.role !== 'ADMIN'
+                                ? 'bg-slate-100/80 border-slate-200 text-slate-700 font-bold cursor-not-allowed'
+                                : 'bg-slate-50/50 border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden text-slate-600 cursor-pointer'
+                            }`}
                           >
                             <option value="CASH">Cash</option>
-                            <option value="ONLINE">Online</option>
+                            {currentUser.role === 'ADMIN' && (
+                              <option value="ONLINE">Online</option>
+                            )}
                           </select>
                         </div>
                       )}
@@ -5477,6 +5495,10 @@ export default function RegisterView({
                           required
                           className="w-full py-2.5 px-3 bg-slate-50/50 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-600 transition-all cursor-pointer font-semibold"
                         >
+                          <option value="" disabled>Choose Category</option>
+                          {formCategory && !expenseCategories.some(cat => cat.name === formCategory) && (
+                            <option value={formCategory}>{formCategory}</option>
+                          )}
                           {expenseCategories.map((cat, idx) => (
                             <option key={idx} value={cat.name}>{cat.name}</option>
                           ))}
