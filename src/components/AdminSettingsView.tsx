@@ -5000,7 +5000,7 @@ export default function AdminSettingsView({
         )}
 
         {/* ======================================================== */}
-        {/* TAB 5: SYSTEM OPERATIONS (BACKUP, RESTORE, ATTACHMENT MIGRATION, WIPE) */}
+        {/* TAB 5: SYSTEM OPERATIONS (BACKUP, RESTORE, WIPE) */}
         {/* ======================================================== */}
         {activeTab === 'SYSTEM_OPERATIONS' && (
           <motion.div
@@ -5071,64 +5071,9 @@ export default function AdminSettingsView({
                   />
                 </label>
               </div>
-
             </div>
 
-            {/* 3. Cloudinary Attachment Migration Card */}
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-6 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                    <HardDrive className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-slate-900">Migrate Attachments to Cloudinary Storage</h3>
-                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                      Move all existing receipt images & PDF attachments stored as Base64 strings in Firestore directly to Cloudinary under Petty Cash/Year/Month folders to free up database storage space.
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs font-bold bg-amber-200/80 text-amber-950 px-3 py-1 rounded-full font-mono shrink-0">
-                  {(transactions || []).filter(t => {
-                    if (!t.receiptUrl) return false;
-                    if (t.receiptUrl.startsWith('data:')) return true;
-                    if (!t.receiptUrl.includes('cloudinary.com')) return true;
-                    const cleanUrl = t.receiptUrl.split('?')[0];
-                    return !/\.(pdf|png|jpg|jpeg|webp|gif|svg)$/i.test(cleanUrl);
-                  }).length} Pending
-                </span>
-              </div>
-
-              {cloudinaryMigrationStatus.message && (
-                <div className="bg-white/90 border border-amber-200 p-3.5 rounded-xl text-xs text-amber-900 font-medium flex items-center gap-2">
-                  {cloudinaryMigrationStatus.loading ? (
-                    <RefreshCw className="w-4 h-4 text-amber-600 animate-spin shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  )}
-                  <span>{cloudinaryMigrationStatus.message}</span>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-amber-200/60">
-                <p className="text-[11px] text-slate-500 font-medium">
-                  {cloudinaryCloudName
-                    ? `Ready to migrate to Cloudinary cloud '${cloudinaryCloudName}'`
-                    : 'Requires Cloudinary Cloud Name (configured in Integrations tab)'}
-                </p>
-
-                <button
-                  onClick={handleMigrateFirestoreToCloudinary}
-                  disabled={cloudinaryMigrationStatus.loading || !cloudinaryCloudName}
-                  className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
-                >
-                  <Upload className="w-4 h-4" />
-                  {cloudinaryMigrationStatus.loading ? 'Migrating Attachments...' : 'Start Migration to Cloudinary'}
-                </button>
-              </div>
-            </div>
-
-            {/* 4. Wipe All Data Card */}
+            {/* 3. Wipe All Data Card */}
             <div className="bg-rose-50/60 rounded-2xl border border-rose-200 p-6 space-y-4">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">

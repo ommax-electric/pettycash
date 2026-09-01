@@ -18,7 +18,8 @@ import {
   renderFormattedText,
   interpolateOpeningText,
   interpolateSubject,
-  deriveAcCapacityKw
+  deriveAcCapacityKw,
+  deriveDcCapacityKwp
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -55,7 +56,7 @@ import Quotation5PagePrintView from './Quotation5PagePrintView';
 
 const MASTER_CONFIG_STORAGE_KEY = 'ommax_solar_quotation_master_config';
 
-const CAPACITY_PRESETS = [2.22, 3.33, 4.95, 5.00, 5.50, 10.00, 15.00, 20.00] as const;
+const CAPACITY_PRESETS = [1, 2, 3, 4, 5, 10, 15, 20] as const;
 
 interface LiveQuotationCanvasProps {
   initialQuotation?: SolarQuotation | null;
@@ -308,12 +309,13 @@ export default function LiveQuotationCanvas({
   // Recalculate BOQ & Pricing when capacity or basic cost changes
   const handleCapacityChange = (newCapacity: number) => {
     const validCap = Math.max(0.5, newCapacity || 1);
+    const dcKwp = deriveDcCapacityKwp(validCap);
     const newBasic = Math.round(validCap * 63000);
     const pricing = calculateSolarPricing(newBasic, formData.specialDiscount || 0);
 
     const updatedBOQ: BOQItem[] = formData.boqItems.map(item => {
       if (item.slNo === 1 || item.slNo === 5 || item.slNo === 6 || item.slNo === 7) {
-        return { ...item, quantity: `${validCap} kWp` };
+        return { ...item, quantity: `${dcKwp} kWp` };
       }
       if (item.slNo === 2 && item.itemDescription.includes('kVA')) {
         return { ...item, itemDescription: `Solar Inverter – ${Math.ceil(validCap)} kVA Single Phase On-Grid Inverter Make: SERVOTEC` };
@@ -323,10 +325,10 @@ export default function LiveQuotationCanvas({
 
     setFormData(prev => ({
       ...prev,
-      capacityKw: deriveAcCapacityKw(undefined, validCap),
-      capacityKwp: validCap,
-      title: `${validCap} kWp Rooftop Solar PV Power Plant Proposal`,
-      subject: `Proposal for ${validCap} kWp Roof top Solar`,
+      capacityKw: validCap,
+      capacityKwp: dcKwp,
+      title: `${validCap} kW Rooftop Solar PV Power Plant Proposal`,
+      subject: `Proposal for ${validCap} kW Roof top Solar`,
       boqItems: updatedBOQ,
       basicCost: newBasic,
       gstGoodsAmount: pricing.gstGoods,
@@ -573,34 +575,31 @@ export default function LiveQuotationCanvas({
                 </div>
               </div>
 
-              {/* CAPACITY (kWp) DROPDOWN SELECTOR & QUICK BUTTONS */}
+              {/* CAPACITY (kW) DROPDOWN SELECTOR & QUICK BUTTONS */}
               <div className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-200 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-black text-amber-950 flex items-center gap-1.5">
                     <Zap className="w-3.5 h-3.5 text-amber-600" />
-                    <span>System Capacity (kWp) *</span>
+                    <span>System Capacity (kW) *</span>
                   </label>
                   <span className="text-[10px] font-bold text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded-md font-mono">
-                    {formData.capacityKwp} kWp Active
+                    {formData.capacityKw || 5} kW ({formData.capacityKwp || deriveDcCapacityKwp(formData.capacityKw || 5)} kWp)
                   </span>
                 </div>
 
-                {/* Dropdown with exact requested kWp values */}
+                {/* Dropdown with kW values */}
                 <select
-                  value={formData.capacityKwp}
-                  onChange={(e) => handleCapacityChange(parseFloat(e.target.value) || 4.95)}
+                  value={formData.capacityKw || 5}
+                  onChange={(e) => handleCapacityChange(parseFloat(e.target.value) || 5)}
                   className="w-full text-xs font-bold px-3 py-2 bg-white border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500 cursor-pointer text-slate-900 shadow-2xs"
                 >
-                  <option value={2.22}>2.22 kWp (4 x 550 Wp DCR Panels)</option>
-                  <option value={3.33}>3.33 kWp (6 x 550 Wp DCR Panels)</option>
-                  <option value={4.95}>4.95 kWp (9 x 550 Wp DCR Panels - 5 kW Class)</option>
-                  <option value={5.00}>5.00 kWp (Standard 5 kW System)</option>
-                  <option value={5.50}>5.50 kWp (10 x 550 Wp DCR Panels)</option>
-                  <option value={10.00}>10.00 kWp (Commercial Three Phase)</option>
-                  <option value={15.00}>15.00 kWp (Commercial High-Yield)</option>
-                  <option value={20.00}>20.00 kWp (Industrial / Heavy Commercial)</option>
-                  {!CAPACITY_PRESETS.includes(formData.capacityKwp as any) && (
-                    <option value={formData.capacityKwp}>Custom: {formData.capacityKwp} kWp</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30].map(kw => (
+                    <option key={kw} value={kw}>
+                      {kw} kW ({Math.round(kw * 2)} Panels / {deriveDcCapacityKwp(kw)} kWp)
+                    </option>
+                  ))}
+                  {![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30].includes(formData.capacityKw) && (
+                    <option value={formData.capacityKw}>Custom: {formData.capacityKw} kW</option>
                   )}
                 </select>
 
@@ -614,12 +613,12 @@ export default function LiveQuotationCanvas({
                         type="button"
                         onClick={() => handleCapacityChange(cap)}
                         className={`text-[10.5px] py-1 px-1 rounded-lg font-bold transition-all text-center cursor-pointer ${
-                          formData.capacityKwp === cap
+                          formData.capacityKw === cap
                             ? 'bg-slate-900 text-[#f7b944] shadow-xs ring-1 ring-amber-400 font-black'
                             : 'bg-white text-slate-700 hover:bg-amber-100 border border-amber-200/80'
                         }`}
                       >
-                        {cap.toFixed(2)}
+                        {cap} kW
                       </button>
                     ))}
                   </div>

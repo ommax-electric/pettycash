@@ -6,7 +6,8 @@ import {
   renderFormattedText,
   interpolateOpeningText,
   interpolateSubject,
-  deriveAcCapacityKw
+  deriveAcCapacityKw,
+  deriveDcCapacityKwp
 } from '../../quotation/types';
 import { Printer, Download, X, ZoomIn, ZoomOut, CheckCircle2, ShieldCheck, Phone, Mail, Globe, MapPin, QrCode, Edit3, Save, Send, ArrowLeft } from 'lucide-react';
 import { formatDateToDMY } from '../../types';
@@ -387,7 +388,7 @@ export default function Quotation5PagePrintView({
               </span>
             </div>
             <p className="text-[11px] text-slate-400">
-              {quotation.projectName} • {quotation.capacityKwp || quotation.capacityKw} kWp Solar PV Power Plant
+              {quotation.projectName} • {deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp Solar PV Power Plant
             </p>
           </div>
         </div>
@@ -521,7 +522,7 @@ export default function Quotation5PagePrintView({
                 <div className="grid grid-cols-[100px_10px_1fr] items-baseline whitespace-nowrap">
                   <span className="font-bold text-slate-700 whitespace-nowrap">Project Capacity</span>
                   <span className="text-slate-500 font-bold">:</span>
-                  <span className="font-bold text-slate-900 whitespace-nowrap">{quotation.capacityKwp || quotation.capacityKw} kWp</span>
+                  <span className="font-bold text-slate-900 whitespace-nowrap">{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp</span>
                 </div>
               </div>
 
@@ -545,9 +546,9 @@ export default function Quotation5PagePrintView({
                 <span className="font-bold">Subject : </span>
                 <span className="font-normal">
                   {renderFormattedText(
-                    interpolateSubject(quotation.subject || `Proposal for ${quotation.capacityKw} kWp Roof top Solar`, {
-                      capacityKw: quotation.capacityKw,
-                      capacityKwp: quotation.capacityKwp || quotation.capacityKw,
+                    interpolateSubject(quotation.subject || `Proposal for ${quotation.capacityKw} kW Roof top Solar`, {
+                      capacityKw: deriveAcCapacityKw(quotation.capacityKw, quotation.capacityKwp),
+                      capacityKwp: deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp),
                       connectionType: quotation.connectionType,
                       scheme: quotation.scheme,
                       clientName: quotation.clientName,
@@ -681,7 +682,7 @@ export default function Quotation5PagePrintView({
                   <div className="divide-y divide-slate-300">
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Site Location</span><span className="text-slate-500 font-bold">:</span><span>{siteLocationFormatted}</span></div>
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kW)</span><span className="text-slate-500 font-bold">:</span><span>{deriveAcCapacityKw(quotation.capacityKw, quotation.capacityKwp)} kW</span></div>
-                    <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kWp)</span><span className="text-slate-500 font-bold">:</span><span>{quotation.capacityKwp || quotation.capacityKw} kWp</span></div>
+                    <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kWp)</span><span className="text-slate-500 font-bold">:</span><span>{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp</span></div>
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Grid Evacuation Voltage (kV)</span><span className="text-slate-500 font-bold">:</span><span>{quotation.gridEvacuationVoltage || '—'}</span></div>
                   </div>
                 </div>

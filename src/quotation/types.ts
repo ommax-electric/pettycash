@@ -698,7 +698,7 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
     { id: 'STATE_SUBSIDY', label: 'State Renewable Energy Incentive Scheme', description: 'State Nodal Agency specific incentive' },
     { id: 'OPEX_PPA', label: 'RESCO / OPEX / PPA Model', description: 'Zero upfront Capex - Tariff per unit basis' }
   ],
-  capacityOptions: [1, 2, 2.22, 3, 3.33, 4, 4.95, 5, 5.50, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 100],
+  capacityOptions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 100],
   defaultSolarPlateWp: 550,
   defaultPanelsPerKw: 2,
 
@@ -1086,6 +1086,42 @@ export function deriveAcCapacityKw(capacityKw?: number, capacityKwp?: number): n
   }
   
   return Math.round(cap);
+}
+
+/**
+ * Derives DC peak module capacity (kWp) from AC capacity rating (kW) and solar module wattage rating (Wp).
+ * e.g. 3 kW -> 6 panels * 550 Wp = 3.30 kWp
+ */
+export function deriveDcCapacityKwp(
+  capacityKw?: number,
+  capacityKwp?: number,
+  solarPlateWp: number = 550,
+  solarModuleText?: string
+): number {
+  // If capacityKwp is already set and different from capacityKw (and strictly > 0), respect explicit value
+  if (capacityKwp !== undefined && capacityKwp > 0 && capacityKw !== undefined && capacityKwp !== capacityKw) {
+    return capacityKwp;
+  }
+
+  const acKw = capacityKw || capacityKwp || 0;
+  if (!acKw) return 0;
+
+  // Check if solarModuleText provides a specific wattage rating like "545 Wp", "550 Wp", "540 Wp"
+  let plateWp = solarPlateWp || 550;
+  if (solarModuleText) {
+    const match = solarModuleText.match(/(\d{3,4})\s*Wp?/i);
+    if (match && match[1]) {
+      const parsed = parseInt(match[1], 10);
+      if (parsed >= 200 && parsed <= 800) {
+        plateWp = parsed;
+      }
+    }
+  }
+
+  // Standard formula: Panels = System kW * 2, kWp = (Panels * Plate Wp) / 1000
+  const panels = Math.round(acKw * 2);
+  const calculated = (panels * plateWp) / 1000;
+  return parseFloat(calculated.toFixed(2));
 }
 
 export interface BuildBOQParams {

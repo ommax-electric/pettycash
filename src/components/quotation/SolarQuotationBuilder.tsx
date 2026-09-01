@@ -13,7 +13,8 @@ import {
   getNextOfferNumber,
   LetterheadConfig,
   buildDefaultBOQItems,
-  deriveAcCapacityKw
+  deriveAcCapacityKw,
+  deriveDcCapacityKwp
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings } from '../../types';
@@ -359,20 +360,21 @@ export default function SolarQuotationBuilder({
       subsidyText = 'Subsidy of Rs. 78,000 for 3kW, Rs. 60,000 for 2kW and Rs. 30,000 for 1kW will be credited to the customer\'s account after uploading required documents on the portal.';
     }
 
+    const dcKwp = deriveDcCapacityKwp(kw);
     // Auto-update BOQ items reflecting new capacity
     const updatedBOQ = formData.boqItems.map(item => {
-      if (item.slNo === 1) return { ...item, quantity: `${kw} kWp` };
+      if (item.slNo === 1) return { ...item, quantity: `${dcKwp} kWp` };
       if (item.slNo === 3) return { ...item, itemDescription: `Table RCC Mounting Structure Elevation for ${Math.ceil(kw)} kW` };
       if (item.slNo === 4) return { ...item, itemDescription: `${Math.ceil(kw)} kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC` };
-      if (item.slNo === 5 || item.slNo === 6 || item.slNo === 7) return { ...item, quantity: `${kw} kWp` };
+      if (item.slNo === 5 || item.slNo === 6 || item.slNo === 7) return { ...item, quantity: `${dcKwp} kWp` };
       return item;
     });
 
     setFormData(prev => ({
       ...prev,
-      capacityKw: deriveAcCapacityKw(undefined, kw),
-      capacityKwp: kw,
-      subject: `Proposal for ${kw} kWp Roof top Solar`,
+      capacityKw: kw,
+      capacityKwp: dcKwp,
+      subject: `Proposal for ${kw} kW Roof top Solar`,
       subsidyNote: subsidyText,
       boqItems: updatedBOQ
     }));
@@ -500,44 +502,41 @@ export default function SolarQuotationBuilder({
             <div className="pt-3 border-t border-slate-100 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-700">
-                  Capacity (kWp) *
+                  Capacity (kW) *
                 </label>
                 <span className="text-[10px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded font-mono">
-                  {formData.capacityKwp || formData.capacityKw} kWp
+                  {formData.capacityKw || 5} kW ({formData.capacityKwp || deriveDcCapacityKwp(formData.capacityKw || 5)} kWp)
                 </span>
               </div>
               
               <select
-                value={formData.capacityKwp || formData.capacityKw}
-                onChange={(e) => handleCapacityChange(parseFloat(e.target.value) || 4.95)}
+                value={formData.capacityKw || 5}
+                onChange={(e) => handleCapacityChange(parseFloat(e.target.value) || 5)}
                 className="w-full text-xs font-bold px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
               >
-                <option value={2.22}>2.22 kWp (4 x 550 Wp Panels)</option>
-                <option value={3.33}>3.33 kWp (6 x 550 Wp Panels)</option>
-                <option value={4.95}>4.95 kWp (9 x 550 Wp Panels - 5 kW Class)</option>
-                <option value={5.00}>5.00 kWp (Standard 5 kW System)</option>
-                <option value={5.50}>5.50 kWp (10 x 550 Wp Panels)</option>
-                <option value={10.00}>10.00 kWp (Commercial Three Phase)</option>
-                <option value={15.00}>15.00 kWp (Commercial 15 kWp)</option>
-                <option value={20.00}>20.00 kWp (Industrial 20 kWp)</option>
-                {![2.22, 3.33, 4.95, 5.00, 5.50, 10.00, 15.00, 20.00].includes(formData.capacityKwp || formData.capacityKw) && (
-                  <option value={formData.capacityKwp || formData.capacityKw}>Custom: {formData.capacityKwp || formData.capacityKw} kWp</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30].map(kw => (
+                  <option key={kw} value={kw}>
+                    {kw} kW ({Math.round(kw * 2)} Panels / {deriveDcCapacityKwp(kw)} kWp)
+                  </option>
+                ))}
+                {![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30].includes(formData.capacityKw) && (
+                  <option value={formData.capacityKw}>Custom: {formData.capacityKw} kW</option>
                 )}
               </select>
 
               <div className="grid grid-cols-4 gap-1 pt-1">
-                {[2.22, 3.33, 4.95, 5.00, 5.50, 10.00, 15.00, 20.00].map(kw => (
+                {[1, 2, 3, 4, 5, 10, 15, 20].map(kw => (
                   <button
                     key={kw}
                     type="button"
                     onClick={() => handleCapacityChange(kw)}
                     className={`py-1 px-1 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer text-center ${
-                      (formData.capacityKwp === kw || formData.capacityKw === kw)
+                      formData.capacityKw === kw
                         ? 'bg-[#f7b944] text-slate-950 border-amber-500 shadow-2xs font-extrabold'
                         : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    {kw.toFixed(2)}
+                    {kw} kW
                   </button>
                 ))}
               </div>

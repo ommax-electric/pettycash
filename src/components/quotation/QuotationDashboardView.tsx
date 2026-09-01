@@ -20,7 +20,8 @@ import {
   buildDefaultBOQItems,
   getStructureFeet,
   cleanStructureDescription,
-  deriveAcCapacityKw
+  deriveAcCapacityKw,
+  deriveDcCapacityKwp
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings, formatDateToDMY } from '../../types';
@@ -85,7 +86,7 @@ const ALL_STATUSES: { id: QuotationStatus; label: string }[] = [
   { id: 'LOST', label: 'Lost' }
 ];
 
-const STANDARD_CAPACITIES = [2.22, 3.33, 4.95, 5.00, 5.50, 10.00, 15.00, 20.00];
+const STANDARD_CAPACITIES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 100];
 const PAGE_SIZE = 10;
 const MASTER_CONFIG_STORAGE_KEY = 'ommax_solar_quotation_master_config';
 
@@ -581,12 +582,13 @@ function createCompleteQuotation(
     ...defaultList
   ];
 
-  const acCapacityKw = deriveAcCapacityKw(undefined, capacity);
+  const acCapacityKw = capacity;
+  const dcCapacityKwp = deriveDcCapacityKwp(capacity, undefined, masterConfig.defaultSolarPlateWp, formData.solarModule);
 
   // BOQ Items - Standardized base items + configured defaults from Pricing
   const boqItems: BOQItem[] = buildDefaultBOQItems({
     capacityKw: acCapacityKw,
-    capacityKwp: capacity,
+    capacityKwp: dcCapacityKwp,
     solarModule: formData.solarModule,
     inverter: formData.inverter,
     battery: formData.battery,
@@ -628,7 +630,7 @@ function createCompleteQuotation(
   if (existingQuotation && (revNum > 0 || existingQuotation.status === 'SENT' || existingQuotation.status === 'UNDER_REVISION')) {
     const changes: string[] = [];
     if (existingQuotation.capacityKw !== capacity) {
-      changes.push(`Capacity: ${existingQuotation.capacityKw} kWp → ${capacity} kWp`);
+      changes.push(`Capacity: ${existingQuotation.capacityKw} kW → ${capacity} kW`);
     }
     if (Math.abs(existingQuotation.grandTotal - grandTotal) > 1) {
       changes.push(`Total Amount: ₹${existingQuotation.grandTotal.toLocaleString('en-IN')} → ₹${grandTotal.toLocaleString('en-IN')}`);
@@ -674,8 +676,8 @@ function createCompleteQuotation(
   }
 
   const generatedSubject = interpolateSubject(masterConfig.defaultSubjectTemplate, {
-    capacityKw: capacity,
-    capacityKwp: capacity,
+    capacityKw: acCapacityKw,
+    capacityKwp: dcCapacityKwp,
     connectionType: formData.connectionType,
     clientName: formData.clientName,
     projectName: formData.clientName,
@@ -691,7 +693,7 @@ function createCompleteQuotation(
     revisionCode,
     revisionHistory: historyList,
     letterhead: existingQuotation?.letterhead || masterConfig.letterhead || DEFAULT_LETTERHEAD_CONFIG,
-    title: `Solar Proposal – ${formData.clientName} (${capacity} kWp)`,
+    title: `Solar Proposal – ${formData.clientName} (${acCapacityKw} kW)`,
     type: 'SOLAR_EPC',
     status,
     
@@ -713,7 +715,7 @@ function createCompleteQuotation(
     contactEmail: formData.contactEmail || existingQuotation?.contactEmail,
     
     capacityKw: acCapacityKw,
-    capacityKwp: capacity,
+    capacityKwp: dcCapacityKwp,
     systemType: isBatteryActive ? 'HYBRID' : (formData.connectionType?.toLowerCase().includes('off') ? 'OFF_GRID' : 'ON_GRID'),
     gridEvacuationVoltage: capacity > 5 ? '415V Three Phase' : '230V Single Phase',
     
@@ -2370,7 +2372,7 @@ export default function QuotationDashboardView({
                     {/* Capacity */}
                     <td className="py-3 px-3 text-center">
                       <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md text-[11px]">
-                        {quo.capacityKw} kWp
+                        {quo.capacityKw} kW
                       </span>
                     </td>
 
@@ -2549,7 +2551,7 @@ export default function QuotationDashboardView({
                   <div>
                     <span className="text-[10px] text-slate-500 block font-semibold">Capacity</span>
                     <span className="font-bold text-slate-800 text-[11px]">
-                      {quo.capacityKw} kWp
+                      {quo.capacityKw} kW
                     </span>
                   </div>
                   <div className="text-right">
@@ -2867,7 +2869,7 @@ export default function QuotationDashboardView({
                 {/* Project Capacity */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Project Capacity (kWp) *
+                    Project Capacity (kW) *
                   </label>
                   <select
                     value={formCapacityKw}
@@ -2877,7 +2879,7 @@ export default function QuotationDashboardView({
                     <option value={0}>Choose Project Capacity</option>
                     {(masterConfig.capacityOptions && masterConfig.capacityOptions.length > 0 ? masterConfig.capacityOptions : STANDARD_CAPACITIES).map(cap => (
                       <option key={cap} value={cap}>
-                        {cap.toFixed(2)} kWp
+                        {cap} kW
                       </option>
                     ))}
                   </select>
@@ -3342,7 +3344,7 @@ export default function QuotationDashboardView({
             <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs space-y-1">
               <div><strong>Offer No:</strong> {deleteProposalDialog.quotation.offerNo}</div>
               <div><strong>Client:</strong> {deleteProposalDialog.quotation.clientName}</div>
-              <div><strong>Capacity:</strong> {deleteProposalDialog.quotation.capacityKw} kWp</div>
+              <div><strong>Capacity:</strong> {deleteProposalDialog.quotation.capacityKw} kW</div>
               <div><strong>Total:</strong> ₹{deleteProposalDialog.quotation.grandTotal.toLocaleString('en-IN')}</div>
               <p className="text-[11px] text-emerald-700 font-semibold pt-1 border-t border-slate-200">
                 Deleting this proposal will release Offer No. <strong>{deleteProposalDialog.quotation.offerNo}</strong> for reuse.
@@ -3631,7 +3633,7 @@ export default function QuotationDashboardView({
                 <div>
                   <span className="text-[10px] text-slate-500 font-bold block">Capacity</span>
                   <span className="font-extrabold text-slate-900 text-sm">
-                    {revisionDetailsDialog.quotation.capacityKw} kWp
+                    {revisionDetailsDialog.quotation.capacityKw} kW
                   </span>
                 </div>
                 <div className="text-right">
@@ -3696,7 +3698,7 @@ export default function QuotationDashboardView({
                       Revision Version: {revisionDetailsDialog.quotation.revisionCode || 'R-01'}
                     </p>
                     <ul className="space-y-1.5 list-disc pl-4 text-slate-700">
-                      <li>Capacity: <strong>{revisionDetailsDialog.quotation.capacityKw} kWp</strong></li>
+                      <li>Capacity: <strong>{revisionDetailsDialog.quotation.capacityKw} kW</strong></li>
                       <li>Grand Total (EPC): <strong>₹{revisionDetailsDialog.quotation.grandTotal.toLocaleString('en-IN')}</strong></li>
                       <li>Scheme: <strong>{revisionDetailsDialog.quotation.scheme}</strong></li>
                       <li>Connection Type: <strong>{revisionDetailsDialog.quotation.connectionType}</strong></li>
