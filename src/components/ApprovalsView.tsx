@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CheckCircle2, XCircle, IndianRupee, Clock,
-  Eye, FileText, Check, X, Paperclip, ExternalLink, ArrowRightLeft
+  Eye, FileText, Check, X, Paperclip, ExternalLink, ArrowRightLeft,
+  HelpCircle, MessageSquareQuote
 } from 'lucide-react';
 import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc, isAssignedManagerForTxn, isMatchUserIdentifier } from '../utils';
@@ -16,6 +17,7 @@ interface ApprovalsViewProps {
   onPayRequest: (id: string, paidBy: string) => void;
   onRejectRequest: (id: string, reason: string, rejectedBy: string) => void;
   onReRouteRequest?: (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => void;
+  onRaiseQuery?: (txn: Transaction, initialMessage: string) => Promise<void> | void;
   appSettings?: AppSettings;
 }
 
@@ -27,6 +29,7 @@ export default function ApprovalsView({
   onPayRequest,
   onRejectRequest,
   onReRouteRequest,
+  onRaiseQuery,
   appSettings
 }: ApprovalsViewProps) {
   const currencySymbol = appSettings?.currencySymbol || '₹';
@@ -114,6 +117,12 @@ export default function ApprovalsView({
   const [targetManager, setTargetManager] = useState<string>('');
   const [reRouteReasonInput, setReRouteReasonInput] = useState<string>('');
   const [reRouteError, setReRouteError] = useState<string>('');
+
+  // Query Modal state
+  const [queryingTxn, setQueryingTxn] = useState<Transaction | null>(null);
+  const [queryInputText, setQueryInputText] = useState<string>('');
+  const [queryError, setQueryError] = useState<string>('');
+  const [isSubmittingQuery, setIsSubmittingQuery] = useState(false);
 
   // Dynamic Confirmation Popup State
   const [confirmApprovalPopup, setConfirmApprovalPopup] = useState<{
@@ -404,18 +413,32 @@ export default function ApprovalsView({
                                 </button>
 
                                 {isManagerRole && (
-                                  <button
-                                    onClick={() => {
-                                      setReRoutingTxn(txn);
-                                      setTargetManager('');
-                                      setReRouteReasonInput('');
-                                      setReRouteError('');
-                                    }}
-                                    className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold transition-colors shadow-xs cursor-pointer"
-                                    title="Re-Route Request to Another Manager"
-                                  >
-                                    <ArrowRightLeft className="w-4 h-4" />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setQueryingTxn(txn);
+                                        setQueryInputText('');
+                                        setQueryError('');
+                                      }}
+                                      className="p-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                                      title="Raise Query / Clarification to Submitter"
+                                    >
+                                      <HelpCircle className="w-4 h-4" />
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setReRoutingTxn(txn);
+                                        setTargetManager('');
+                                        setReRouteReasonInput('');
+                                        setReRouteError('');
+                                      }}
+                                      className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                                      title="Re-Route Request to Another Manager"
+                                    >
+                                      <ArrowRightLeft className="w-4 h-4" />
+                                    </button>
+                                  </>
                                 )}
                               </>
                             )}
@@ -539,18 +562,31 @@ export default function ApprovalsView({
                             <X className="w-4 h-4" />
                           </button>
                           {isManagerRole && (
-                            <button
-                              onClick={() => {
-                                setReRoutingTxn(txn);
-                                setTargetManager('');
-                                setReRouteReasonInput('');
-                                setReRouteError('');
-                              }}
-                              className="flex-1 py-2 px-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
-                              title="Re-Route Request to Another Manager"
-                            >
-                              <ArrowRightLeft className="w-4 h-4" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  setQueryingTxn(txn);
+                                  setQueryInputText('');
+                                  setQueryError('');
+                                }}
+                                className="flex-1 py-2 px-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                                title="Raise Query"
+                              >
+                                <HelpCircle className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setReRoutingTxn(txn);
+                                  setTargetManager('');
+                                  setReRouteReasonInput('');
+                                  setReRouteError('');
+                                }}
+                                className="flex-1 py-2 px-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                                title="Re-Route Request to Another Manager"
+                              >
+                                <ArrowRightLeft className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
                         </div>
                       )}
@@ -870,22 +906,39 @@ export default function ApprovalsView({
                         <span>Reject</span>
                       </button>
                       {isManagerRole && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const t = selectedTxn;
-                            setSelectedTxn(null);
-                            setReRoutingTxn(t);
-                            setTargetManager('');
-                            setReRouteReasonInput('');
-                            setReRouteError('');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
-                          title="Re-Route Request to Another Manager"
-                        >
-                          <ArrowRightLeft className="w-3.5 h-3.5" />
-                          <span>Re-Route</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const t = selectedTxn;
+                              setSelectedTxn(null);
+                              setQueryingTxn(t);
+                              setQueryInputText('');
+                              setQueryError('');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
+                            title="Raise Query / Clarification"
+                          >
+                            <HelpCircle className="w-3.5 h-3.5" />
+                            <span>Query</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const t = selectedTxn;
+                              setSelectedTxn(null);
+                              setReRoutingTxn(t);
+                              setTargetManager('');
+                              setReRouteReasonInput('');
+                              setReRouteError('');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
+                            title="Re-Route Request to Another Manager"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>Re-Route</span>
+                          </button>
+                        </>
                       )}
                     </>
                   )}
@@ -1132,6 +1185,115 @@ export default function ApprovalsView({
                 >
                   <ArrowRightLeft className="w-4 h-4" />
                   <span>Confirm Re-Route</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Raise Query Modal Dialog */}
+      <AnimatePresence>
+        {queryingTxn && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-xl bg-violet-50 dark:bg-violet-950/30 text-violet-600">
+                    <HelpCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 dark:text-slate-100 text-base">
+                      Raise Clarification Query
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Submit a question or request for additional documentation
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQueryingTxn(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Target Voucher summary */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                    #{queryingTxn.reference || queryingTxn.id}
+                  </span>
+                  <span className="font-extrabold text-rose-600 dark:text-rose-400">
+                    {currencySymbol}{queryingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <p className="text-slate-700 dark:text-slate-300 font-semibold">{queryingTxn.description}</p>
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-0.5">
+                  <span>Claimant: <strong className="text-slate-700 dark:text-slate-300">{queryingTxn.requestedBy || queryingTxn.recordedBy || queryingTxn.merchant}</strong></span>
+                  <span>•</span>
+                  <span>Category: <strong className="text-slate-700 dark:text-slate-300">{queryingTxn.category}</strong></span>
+                </div>
+              </div>
+
+              {/* Message input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Clarification Required / Query Note: <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  value={queryInputText}
+                  onChange={(e) => {
+                    setQueryInputText(e.target.value);
+                    if (queryError) setQueryError('');
+                  }}
+                  placeholder="e.g. Please provide GST tax breakdown or specify project site details..."
+                  className="w-full p-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-xs focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900 dark:text-slate-100"
+                />
+                {queryError && (
+                  <p className="text-xs font-semibold text-rose-600">{queryError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setQueryingTxn(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingQuery}
+                  onClick={async () => {
+                    if (!queryInputText.trim()) {
+                      setQueryError('Please enter what clarification is needed.');
+                      return;
+                    }
+                    if (onRaiseQuery && queryingTxn) {
+                      setIsSubmittingQuery(true);
+                      try {
+                        await onRaiseQuery(queryingTxn, queryInputText.trim());
+                        triggerSuccessAlert(`Query sent to ${queryingTxn.requestedBy || queryingTxn.merchant} for voucher #${queryingTxn.reference || queryingTxn.id}!`);
+                        setQueryingTxn(null);
+                        setQueryInputText('');
+                      } finally {
+                        setIsSubmittingQuery(false);
+                      }
+                    }
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <HelpCircle className="w-4 h-4" />
+                  <span>Send Query to Submitter</span>
                 </button>
               </div>
             </motion.div>

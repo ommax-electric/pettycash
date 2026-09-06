@@ -1,5 +1,35 @@
 export type UserRole = 'ADMIN' | 'MANAGER' | 'CUSTODIAN' | 'AUDITOR' | 'USER';
 
+export const APP_VERSION = '3.1';
+
+export function getNextAppVersion(currentVersion: string = APP_VERSION): string {
+  const match = currentVersion.trim().match(/^v?(\d+)\.(\d+)$/);
+  if (!match) return '3.2';
+  const major = parseInt(match[1], 10);
+  const minor = parseInt(match[2], 10);
+  if (minor >= 9) {
+    return `${major + 1}.0`;
+  }
+  return `${major}.${minor + 1}`;
+}
+
+export type ParentModule = 'CRM' | 'QUOTATION' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
+
+export interface ParentModuleOption {
+  id: ParentModule;
+  label: string;
+  description: string;
+}
+
+export const ALL_PARENT_MODULES: ParentModuleOption[] = [
+  { id: 'CRM', label: 'CRM', description: 'Accounts, Contacts, and Opportunity pipeline' },
+  { id: 'QUOTATION', label: 'Quotation', description: 'Solar proposals, canvas builder, and pricing tools' },
+  { id: 'HRMS', label: 'HRMS', description: 'Employee directory and HR management' },
+  { id: 'CASH_BOOK', label: 'Cash Book', description: 'Financial overview, petty cash inward, outward, and approvals' },
+  { id: 'SETTINGS', label: 'Settings', description: 'Personal preferences and system defaults' },
+  { id: 'ADMIN_SETTINGS', label: 'Admin Settings', description: 'User management, audit trails, and master configuration' }
+];
+
 export interface UserPreferences {
   defaultPaymentMode?: 'CASH' | 'ONLINE';
   dateFormat?: 'DD-MM-YYYY' | 'DD/MM/YYYY';
@@ -20,6 +50,7 @@ export interface User {
   reportingTo?: string; // Username/FullName of reporting manager
   isManager?: boolean;
   preferences?: UserPreferences;
+  allowedModules?: ParentModule[];
 }
 
 export interface AppSettings {
@@ -32,6 +63,7 @@ export interface AppSettings {
   companyStampOpacity?: number; // opacity e.g. 0.1 to 1.0
   companyStampWidth?: number; // stamp image width in px e.g. 50 to 150
   allowManualVoucherNumbering?: boolean;
+  appVersion?: string;
 }
 
 export interface IntegrationSettings {
@@ -70,6 +102,10 @@ export interface IntegrationSettings {
   emailBodyRequestRejected?: string;
   emailSubjectRequestRerouted?: string;
   emailBodyRequestRerouted?: string;
+  emailSubjectQuery?: string;
+  emailBodyQuery?: string;
+  emailSubjectQueryResponse?: string;
+  emailBodyQueryResponse?: string;
   crmEmailSubjectNewOpp?: string;
   crmEmailBodyNewOpp?: string;
   crmEmailSubjectWinOpp?: string;
@@ -100,6 +136,39 @@ export interface EditHistoryEntry {
   }[];
 }
 
+export interface QueryMessage {
+  id: string;
+  senderId?: string;
+  senderName: string;
+  senderRole: UserRole;
+  senderEmail?: string;
+  message: string;
+  timestamp: string;
+  attachments?: {
+    name: string;
+    url: string;
+    size?: string;
+  }[];
+}
+
+export interface ExpenseQuery {
+  id: string;
+  transactionId: string;
+  voucherNo: string;
+  amount: number;
+  category: string;
+  particulars: string;
+  requestedBy: string;
+  managerName: string;
+  status: 'OPEN' | 'CLOSED';
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string;
+  closedBy?: string;
+  closeReason?: string;
+  messages: QueryMessage[];
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -119,6 +188,9 @@ export interface Transaction {
   paymentType?: 'CASH' | 'ONLINE';
   editHistory?: EditHistoryEntry[];
   workflowHistory?: WorkflowHistoryEntry[];
+  queryStatus?: 'OPEN' | 'CLOSED';
+  hasQuery?: boolean;
+  latestQueryId?: string;
   requestedBy?: string; // Full name or username of requester
   approverName?: string; // Full name or username of manager assigned to approve
   approvedBy?: string; // Full name of manager who approved
@@ -204,9 +276,10 @@ export interface ActivityLog {
   timestamp: string;
   user: string;
   role: UserRole;
+  module?: string;
   action: string;
   details: string;
-  ipAddress: string;
+  ipAddress?: string;
 }
 
 export interface DashboardStats {

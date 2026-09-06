@@ -56,14 +56,21 @@ export function calculateCashBalance(transactions: Transaction[], currencySymbol
  * Dispatches Corporate Email notification via configured SMTP / API endpoint
  */
 export async function sendEmailNotification(
-  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT' | 'REQUEST_SUBMITTED' | 'REQUEST_APPROVED' | 'REQUEST_PAID' | 'REQUEST_REJECTED' | 'REQUEST_REROUTED',
+  type: 'NEW' | 'EDIT' | 'INWARD' | 'INWARD_EDIT' | 'REQUEST_SUBMITTED' | 'REQUEST_APPROVED' | 'REQUEST_PAID' | 'REQUEST_REJECTED' | 'REQUEST_REROUTED' | 'QUERY_RAISED' | 'QUERY_RESPONSE',
   txn: Transaction,
   currentUser: User | null,
   transactionsList: Transaction[],
   appSettings: AppSettings,
   changedFieldLabels: string[] = [],
   integrationSettings?: IntegrationSettings | null,
-  usersList?: User[]
+  usersList?: User[],
+  extraData?: {
+    queryBy?: string;
+    queryMessage?: string;
+    managerName?: string;
+    responseBy?: string;
+    responseMessage?: string;
+  }
 ): Promise<{ success: boolean; message: string }> {
   try {
     const isEmailEnabled = integrationSettings 
@@ -98,33 +105,43 @@ export async function sendEmailNotification(
 
     if (usersList && usersList.length > 0) {
       // 1. Identify claimant user object
+      const reqStr = (txn.requestedBy || txn.recordedBy || txn.merchant || '').trim().toLowerCase();
       const claimantUser = usersList.find(u => {
-        if (currentUser && (
+        if (reqStr) {
+          const uFull = (u.fullName || '').toLowerCase();
+          const uUser = (u.username || '').toLowerCase();
+          const uEmail = (u.email || '').toLowerCase();
+          const uEmp = (u.empId || '').toLowerCase();
+          if (
+            uFull === reqStr ||
+            uUser === reqStr ||
+            uEmail === reqStr ||
+            uEmp === reqStr ||
+            (reqStr.length > 2 && (uFull.includes(reqStr) || reqStr.includes(uFull)))
+          ) {
+            return true;
+          }
+        }
+        if (type !== 'QUERY_RAISED' && currentUser && (
           (u.username && u.username.toLowerCase() === currentUser.username.toLowerCase()) ||
           (u.fullName && u.fullName.toLowerCase() === currentUser.fullName.toLowerCase()) ||
           (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
         )) {
           return true;
         }
-        const reqStr = (txn.requestedBy || txn.recordedBy || txn.merchant || '').trim().toLowerCase();
-        if (!reqStr) return false;
-        return (
-          (u.fullName && u.fullName.toLowerCase() === reqStr) ||
-          (u.username && u.username.toLowerCase() === reqStr) ||
-          (u.email && u.email.toLowerCase() === reqStr) ||
-          (u.empId && u.empId.toLowerCase() === reqStr) ||
-          (u.fullName && (reqStr.includes(u.fullName.toLowerCase()) || u.fullName.toLowerCase().includes(reqStr)))
-        );
+        return false;
       });
 
       if (claimantUser?.email) claimantEmail = claimantUser.email;
-      else if (currentUser?.email) claimantEmail = currentUser.email;
+      else if (type !== 'QUERY_RAISED' && currentUser?.email) claimantEmail = currentUser.email;
 
       // 2. Identify reporting manager string (prioritize non-generic txn.approverName, claimantUser.reportingTo, or currentUser.reportingTo)
       const genericTerms = ['admin', 'administrator', 'manager', 'custodian', 'auditor', 'user'];
       let reportingToTarget = '';
 
-      if (txn.approverName && !genericTerms.includes(txn.approverName.trim().toLowerCase())) {
+      if (extraData?.managerName && !genericTerms.includes(extraData.managerName.trim().toLowerCase())) {
+        reportingToTarget = extraData.managerName.trim();
+      } else if (txn.approverName && !genericTerms.includes(txn.approverName.trim().toLowerCase())) {
         reportingToTarget = txn.approverName.trim();
       } else if (claimantUser?.reportingTo && !genericTerms.includes(claimantUser.reportingTo.trim().toLowerCase())) {
         reportingToTarget = claimantUser.reportingTo.trim();
@@ -157,7 +174,7 @@ export async function sendEmailNotification(
       }
 
       // If resolved manager is the claimant themselves, clear managerEmail (cannot approve own claim)
-      if (managerEmail && claimantEmail && managerEmail.trim().toLowerCase() === claimantEmail.trim().toLowerCase()) {
+      if (type !== 'QUERY_RESPONSE' && managerEmail && claimantEmail && managerEmail.trim().toLowerCase() === claimantEmail.trim().toLowerCase()) {
         managerEmail = '';
       }
 
@@ -310,6 +327,29 @@ export async function sendEmailNotification(
       if (targetMgrEmail) targetRecipients.push(targetMgrEmail);
       else if (adminEmail && adminEmail !== targetMgrEmail) targetRecipients.push(adminEmail);
       else if (defaultRecipients.length > 0 && targetRecipients.length === 0) targetRecipients.push(...defaultRecipients);
+    } else if (type === 'QUERY_RAISED') {
+      cardTitle = 'Petty Cash Query & Clarification';
+      cardBorderColor = '#8b5cf6';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectQuery : null) ||
+        localStorage.getItem('petty_cash_email_subject_query') ||
+        '[Petty Cash Query] Clarification Required for Voucher #{voucher_id} - {amount}';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyQuery : null) ||
+        localStorage.getItem('petty_cash_email_body_query') ||
+        'Hello {paid_to},\n\nYour manager ({query_by}) has raised a query regarding your petty cash claim #{voucher_id}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\n\nQuery / Clarification Requested:\n{query_message}\n\nPlease open the Petty Cash Query Portal to reply and provide clarification or update your receipt.';
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+    } else if (type === 'QUERY_RESPONSE') {
+      cardTitle = 'Petty Cash Query Response';
+      cardBorderColor = '#7c3aed';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectQueryResponse : null) ||
+        localStorage.getItem('petty_cash_email_subject_query_response') ||
+        '[Petty Cash Query Response] Clarification Submitted for Voucher #{voucher_id} - {amount}';
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyQueryResponse : null) ||
+        localStorage.getItem('petty_cash_email_body_query_response') ||
+        'Hello {manager_name},\n\n{response_by} has submitted a reply / clarification regarding petty cash claim #{voucher_id}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\n\nClaimant\'s Reply / Remarks:\n{response_message}\n\nPlease open the Petty Cash Portal to review the response and take approval action.';
+      if (managerEmail) targetRecipients.push(managerEmail);
+      else if (cashAdminEmail) targetRecipients.push(cashAdminEmail);
+      else if (adminEmail) targetRecipients.push(adminEmail);
+      else if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
     } else if (type === 'INWARD') {
       cardTitle = 'Deposit Alert';
       cardBorderColor = '#00bc7d';
@@ -429,7 +469,12 @@ export async function sendEmailNotification(
         .replace(/\{rejected_by\}/g, rejecterName)
         .replace(/\{re_routed_to\}/g, txn.approverName || 'Manager')
         .replace(/\{re_routed_by\}/g, txn.reRoutedBy || updaterName)
-        .replace(/\{re_route_reason\}/g, txn.reRouteReason || 'N/A');
+        .replace(/\{re_route_reason\}/g, txn.reRouteReason || 'N/A')
+        .replace(/\{query_by\}/g, extraData?.queryBy || updaterName || 'Manager')
+        .replace(/\{query_message\}/g, extraData?.queryMessage || 'Clarification requested.')
+        .replace(/\{manager_name\}/g, extraData?.managerName || txn.approverName || 'Manager')
+        .replace(/\{response_by\}/g, extraData?.responseBy || updaterName || 'Claimant')
+        .replace(/\{response_message\}/g, extraData?.responseMessage || 'Clarification response submitted.');
 
       const emailBodyHtml = buildModernHtmlEmailFromText(cardTitle, emailBodyParsed, cardBorderColor, type);
 

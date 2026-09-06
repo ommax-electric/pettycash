@@ -327,3 +327,24 @@ export const isAssignedManagerForTxn = (
   return false;
 };
 
+/**
+ * Checks if the current user is the submitter/creator of a transaction claim
+ */
+export const isTxnSubmitter = (
+  txn: { requestedBy?: string; recordedBy?: string; merchant?: string },
+  currentUser?: User | null
+): boolean => {
+  if (!currentUser) return false;
+  const isMatchCurrent = (val?: string | null): boolean => {
+    if (!val) return false;
+    return (
+      isMatchUserIdentifier(val, currentUser.username) ||
+      isMatchUserIdentifier(val, currentUser.fullName) ||
+      isMatchUserIdentifier(val, currentUser.email) ||
+      isMatchUserIdentifier(val, currentUser.empId)
+    );
+  };
+  return isMatchCurrent(txn.requestedBy) || isMatchCurrent(txn.recordedBy) || isMatchCurrent(txn.merchant);
+};
+
+

@@ -47,12 +47,12 @@ export const INITIAL_SOLAR_QUOTATIONS: SolarQuotation[] = [
     supplyIncludes: [...DEFAULT_SUPPLY_INCLUDES],
     installationIncludes: [...DEFAULT_INSTALLATION_INCLUDES],
     boqItems: [
-      { id: 'boq-1', slNo: 1, itemDescription: 'SERVOTEC HHV [550 Wp] Mono Perc DCR', quantity: '4.95 kWp' },
+      { id: 'boq-1', slNo: 1, itemDescription: '550 Wp Mono Perc DCR Panels', quantity: '4.95 kWp', brand: 'Servotec' },
       { id: 'boq-2', slNo: 2, itemDescription: 'Nil', quantity: 'Nil' },
-      { id: 'boq-3', slNo: 3, itemDescription: 'Table RCC Mounting Structure Elevation for 5 kW', quantity: '7 Feet' },
-      { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC', quantity: '1 Nos' },
-      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: '4.95 kWp' },
-      { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: '4.95 kWp' },
+      { id: 'boq-3', slNo: 3, itemDescription: 'Table RCC Mounting Structure Elevation for 5 kW', quantity: '7 Feet', brand: 'JSW' },
+      { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter', quantity: '1 Nos', brand: 'Servotec' },
+      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: '4.95 kWp', brand: 'Polycab' },
+      { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: '4.95 kWp', brand: 'Polycab' },
       { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: '4.95 kWp' }
     ],
     basicCost: baseCost,

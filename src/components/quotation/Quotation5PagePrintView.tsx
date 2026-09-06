@@ -3,9 +3,13 @@ import {
   SolarQuotation, 
   SolarBenefitRow, 
   DEFAULT_SAVINGS_BENEFITS,
+  DEFAULT_WARRANTY_CLAUSES,
+  DEFAULT_COMPLETION_MILESTONES,
   renderFormattedText,
   interpolateOpeningText,
   interpolateSubject,
+  stripEquipmentBrandNames,
+  isNilItem,
   deriveAcCapacityKw,
   deriveDcCapacityKwp
 } from '../../quotation/types';
@@ -87,6 +91,58 @@ function getToolsBenefitsTable(): SolarBenefitRow[] {
   return DEFAULT_SAVINGS_BENEFITS;
 }
 
+// Helper function to get live Warranty clauses from Tools configuration
+function getToolsWarrantyClauses(): string[] {
+  try {
+    const raw = localStorage.getItem('ommax_solar_quotation_master_config');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.warrantyClauses && Array.isArray(parsed.warrantyClauses) && parsed.warrantyClauses.length > 0) {
+        return parsed.warrantyClauses;
+      }
+    }
+  } catch (e) {
+    // fallback
+  }
+  return DEFAULT_WARRANTY_CLAUSES;
+}
+
+// Helper function to get live Project Completion milestones from Tools configuration
+function getToolsCompletionMilestones(): string[] {
+  try {
+    const raw = localStorage.getItem('ommax_solar_quotation_master_config');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.completionMilestones && Array.isArray(parsed.completionMilestones) && parsed.completionMilestones.length > 0) {
+        return parsed.completionMilestones;
+      }
+    }
+  } catch (e) {
+    // fallback
+  }
+  return DEFAULT_COMPLETION_MILESTONES;
+}
+
+// Helper function to get live Tariff Assumptions from Tools configuration
+function getToolsTariffAssumptions(): string[] {
+  try {
+    const raw = localStorage.getItem('ommax_solar_quotation_master_config');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.tariffAssumptions && Array.isArray(parsed.tariffAssumptions) && parsed.tariffAssumptions.length > 0) {
+        return parsed.tariffAssumptions;
+      }
+    }
+  } catch (e) {
+    // fallback
+  }
+  return [
+    'Based on actual project performance in Chennai: **3 kW = 800 to 900 units/Bi-month**',
+    'TNEB electricity tariff considered: **₹8/unit**',
+    '*Future EB tariff increases will further improve the savings and ROI.*'
+  ];
+}
+
 // Helper function to format site location as City - PIN Code (e.g. Ariyalur - 621704)
 function formatSiteLocation(location?: string): string {
   if (!location) return 'Ariyalur - 621704';
@@ -123,6 +179,73 @@ function formatSiteLocation(location?: string): string {
   return trimmed;
 }
 
+/**
+ * Generates the standardized PDF filename for Quotations:
+ * Non-revised: SP26270037_Ms_R.Balu
+ * Revised:     SP26270037-R1_Ms_R.Balu (or -R2, etc.)
+ */
+export function getQuotationPdfFilename(quotation: SolarQuotation): string {
+  // 1. Extract base quotation / offer number
+  const rawOffer = (quotation.offerNo || quotation.quotationNo || 'QUOTATION').trim();
+  const offerRevMatch = rawOffer.match(/^(.*?)(?:[-_ ]*R[-_ ]*(\d+))$/i);
+  const baseOffer = offerRevMatch ? offerRevMatch[1].trim() : rawOffer;
+
+  // 2. Determine revision number
+  let revNum = 0;
+  if (typeof quotation.revisionIndex === 'number' && quotation.revisionIndex > 0) {
+    revNum = quotation.revisionIndex;
+  } else if (offerRevMatch && offerRevMatch[2]) {
+    revNum = parseInt(offerRevMatch[2], 10) || 0;
+  } else if (quotation.revisionCode && !/^R[-_ ]*0+$/i.test(quotation.revisionCode.trim())) {
+    const codeMatch = quotation.revisionCode.match(/R[-_ ]*(\d+)/i);
+    if (codeMatch && codeMatch[1]) {
+      revNum = parseInt(codeMatch[1], 10) || 0;
+    }
+  }
+
+  // 3. Format quotation number component
+  const quotationNumber = revNum > 0 ? `${baseOffer}-R${revNum}` : baseOffer;
+
+  // 4. Sanitize and format client name component
+  let rawClient = (quotation.clientName || '').trim();
+  if (!rawClient && quotation.accountName) {
+    rawClient = quotation.accountName.trim();
+  }
+  if (!rawClient && quotation.contactName) {
+    rawClient = quotation.contactName.trim();
+  }
+  if (!rawClient) {
+    rawClient = 'Client';
+  }
+
+  // If salutation exists and not already in clientName, prepend it
+  if (!/^(?:M\/s\.?|Ms\.?|Mr\.?|Mrs\.?|Dr\.?)/i.test(rawClient) && quotation.salutation) {
+    rawClient = `${quotation.salutation.trim()} ${rawClient}`;
+  }
+
+  // Normalize "M/s.", "M/s", "Ms.", "Ms" at the beginning to "Ms_"
+  rawClient = rawClient.replace(/^(?:M\/s\.?|Ms\.?)\s*/i, 'Ms_');
+
+  // Normalize other common honorifics if present at the beginning
+  rawClient = rawClient.replace(/^(?:Mr\.)\s*/i, 'Mr_');
+  rawClient = rawClient.replace(/^(?:Mrs\.)\s*/i, 'Mrs_');
+  rawClient = rawClient.replace(/^(?:Dr\.)\s*/i, 'Dr_');
+
+  // Replace filesystem-unsafe characters (e.g. \ / : * ? " < > |) with underscore
+  rawClient = rawClient.replace(/[\\/:*?"<>|]+/g, '_');
+
+  // Replace whitespace with underscore
+  rawClient = rawClient.replace(/\s+/g, '_');
+
+  // Collapse consecutive underscores
+  rawClient = rawClient.replace(/_+/g, '_');
+
+  // Strip leading or trailing underscores
+  rawClient = rawClient.replace(/^_+|_+$/g, '');
+
+  return `${quotationNumber}_${rawClient || 'Client'}`;
+}
+
 export default function Quotation5PagePrintView({
   quotation,
   onClose,
@@ -135,6 +258,17 @@ export default function Quotation5PagePrintView({
   const [showSubmitModal, setShowSubmitModal] = React.useState<boolean>(false);
   const pagesContainerRef = React.useRef<HTMLDivElement>(null);
 
+  const pdfFileName = React.useMemo(() => getQuotationPdfFilename(quotation), [quotation]);
+
+  // Set document.title while print view is active so browser "Save as PDF" defaults to this name
+  React.useEffect(() => {
+    const originalTitle = document.title;
+    document.title = pdfFileName;
+    return () => {
+      document.title = originalTitle;
+    };
+  }, [pdfFileName]);
+
   const handleNativePrint = React.useCallback(() => {
     if (onPrint) {
       onPrint();
@@ -146,6 +280,9 @@ export default function Quotation5PagePrintView({
       setZoomLevel(100);
     }
 
+    // Ensure document.title is set to target filename right before printing
+    document.title = pdfFileName;
+
     // Direct window.print() ensures full browser stylesheet integration and identical behavior to Ctrl+P
     setTimeout(() => {
       window.print();
@@ -153,7 +290,7 @@ export default function Quotation5PagePrintView({
         setTimeout(() => setZoomLevel(prevZoom), 300);
       }
     }, 150);
-  }, [onPrint, zoomLevel]);
+  }, [onPrint, zoomLevel, pdfFileName]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -451,6 +588,7 @@ export default function Quotation5PagePrintView({
 
           <button
             onClick={handleNativePrint}
+            title={`Print or Save as PDF (${pdfFileName})`}
             className="flex items-center gap-2 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs transition-all shadow-md cursor-pointer"
           >
             <Printer className="w-4 h-4" />
@@ -591,8 +729,13 @@ export default function Quotation5PagePrintView({
                   <div className="text-xs font-bold text-slate-800 mb-1.5">Supply Includes:</div>
                   <ul className="text-[11.5px] text-slate-700 space-y-1.5 list-disc pl-5 leading-snug">
                     {(() => {
-                      const isBoqBatteryNil = !quotation.boqItems?.some(b => (b.slNo === 3 || b.id === 'boq-3' || b.itemDescription?.toLowerCase().includes('battery')) && b.quantity && !b.quantity.toLowerCase().includes('nil') && b.quantity !== '0' && b.quantity !== '0 Nos');
-                      const isBoqStructureNil = !quotation.boqItems?.some(b => (b.slNo === 4 || b.id === 'boq-4' || b.itemDescription?.toLowerCase().includes('structure') || b.itemDescription?.toLowerCase().includes('mounting')) && b.quantity && !b.quantity.toLowerCase().includes('nil') && b.quantity !== '0' && b.quantity !== '0 Feet' && b.quantity !== '0 ft');
+                      const isBoqBatteryNil = !quotation.boqItems?.some(b => (b.slNo === 3 || b.id === 'boq-3' || b.itemDescription?.toLowerCase().includes('battery')) && !isNilItem(b.quantity) && !isNilItem(b.itemDescription));
+                      const isBoqStructureNil = !quotation.boqItems?.some(b => (b.slNo === 4 || b.id === 'boq-4' || b.itemDescription?.toLowerCase().includes('structure') || b.itemDescription?.toLowerCase().includes('mounting')) && !isNilItem(b.quantity) && !isNilItem(b.itemDescription));
+
+                      const allQuotationBrands = Array.from(new Set([
+                        ...(quotation.brandDeclarations?.map(b => b.brand) || []),
+                        ...(quotation.boqItems?.map(b => b.brand) || [])
+                      ].filter(Boolean)));
 
                       let rawList = [...(quotation.supplyIncludes || [])];
 
@@ -600,7 +743,7 @@ export default function Quotation5PagePrintView({
                       if (!isBoqStructureNil) {
                         const hasStructureInSupply = rawList.some(item => {
                           const lower = item.toLowerCase();
-                          return (lower.includes('structure') || lower.includes('mounting') || lower.includes('flush mount') || lower.includes('rcc')) && !lower.includes('nil');
+                          return (lower.includes('structure') || lower.includes('mounting') || lower.includes('flush mount') || lower.includes('rcc')) && !isNilItem(lower);
                         });
                         if (!hasStructureInSupply) {
                           const boqStruct = quotation.boqItems?.find(b => b.slNo === 4 || b.id === 'boq-4' || b.itemDescription?.toLowerCase().includes('structure') || b.itemDescription?.toLowerCase().includes('mounting'));
@@ -610,6 +753,7 @@ export default function Quotation5PagePrintView({
                         }
                       }
 
+                      const seenItems = new Set<string>();
                       return rawList
                         .map((item) => {
                           // Strip dropdown headings/prefixes so only chosen items are shown
@@ -619,18 +763,23 @@ export default function Quotation5PagePrintView({
                           cleanItem = cleanItem.replace(/\s*\(\s*nill?[^)]*\)/gi, '').trim();
                           // Replace any remaining "Nill" with "Nil"
                           cleanItem = cleanItem.replace(/\bNill\b/gi, 'Nil');
+                          // Strip manufacturer / brand names from Supply Includes scope
+                          cleanItem = stripEquipmentBrandNames(cleanItem, allQuotationBrands);
                           return cleanItem;
                         })
                         .filter((cleanItem) => {
                           if (!cleanItem || !cleanItem.trim()) return false;
+                          if (isNilItem(cleanItem)) return false;
                           const lower = cleanItem.toLowerCase().trim();
-                          // Omit if it's "Nil", "0", or bare category names that denote zero/nil items
-                          if (lower === 'nil' || lower.includes('nill') || lower === '0' || lower === '0 nos' || lower === '0 feet') return false;
                           
                           // If BOQ indicates battery is Nil, omit any battery supply line
                           if (isBoqBatteryNil && lower.includes('battery')) return false;
                           // If BOQ indicates structure is Nil, omit any structure supply line
                           if (isBoqStructureNil && (lower.includes('structure') || lower.includes('mounting'))) return false;
+
+                          // Prevent any duplicate items from appearing in preview
+                          if (seenItems.has(lower)) return false;
+                          seenItems.add(lower);
 
                           return true;
                         })
@@ -645,9 +794,15 @@ export default function Quotation5PagePrintView({
                 <div>
                   <div className="text-xs font-bold text-slate-800 mb-1.5">Installation Includes:</div>
                   <ul className="text-[11.5px] text-slate-700 space-y-1.5 list-disc pl-5 leading-snug">
-                    {quotation.installationIncludes.map((item, idx) => (
-                      <li key={idx}>{renderFormattedText(item)}</li>
-                    ))}
+                    {(() => {
+                      const allQuotationBrands = Array.from(new Set([
+                        ...(quotation.brandDeclarations?.map(b => b.brand) || []),
+                        ...(quotation.boqItems?.map(b => b.brand) || [])
+                      ].filter(Boolean)));
+                      return quotation.installationIncludes.map((item, idx) => (
+                        <li key={idx}>{renderFormattedText(stripEquipmentBrandNames(item, allQuotationBrands))}</li>
+                      ));
+                    })()}
                   </ul>
                 </div>
               </div>
@@ -699,54 +854,53 @@ export default function Quotation5PagePrintView({
                   </tr>
                 </thead>
                 <tbody className="text-[11px]">
-                  {quotation.boqItems.map((item, index) => {
-                    let desc = item.itemDescription || '';
-                    // Strip dropdown headings/prefixes so only chosen items are shown
-                    desc = desc.replace(/^(?:solar\s*pv\s*modules?|solar\s*inverter|grid-tied\s*\/\s*hybrid\s*solar\s*inverter|battery(?:\s*energy)?(?:\s*storage)?|mounting\s*structure|module\s*mounting\s*structure)\s*[-–:]\s*/i, '').trim();
-                    // Clean elevation feet from structure description if present (elevation feet belongs in Quantity column only)
-                    desc = desc.replace(/\s*\((?:elevated\s*)?\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft|height)\)/gi, '');
-                    desc = desc.replace(/\s*elevation\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)/gi, '');
-                    desc = desc.replace(/\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)\s*(?:height)?/gi, '');
-                    desc = desc.replace(/\s*\(\s*\)/g, '').trim();
+                  {(() => {
+                    // Filter out rows where quantity or description is Nil, 0, or excluded
+                    const activeRows = quotation.boqItems.filter(item => {
+                      if (isNilItem(item.quantity) || isNilItem(item.itemDescription)) return false;
+                      return true;
+                    });
 
-                    // Clean quantity
-                    let qty = item.quantity || '';
-                    if (qty.toLowerCase() === 'nill') qty = 'Nil';
+                    const allQuotationBrands = Array.from(new Set([
+                      ...(quotation.brandDeclarations?.map(b => b.brand) || []),
+                      ...(quotation.boqItems?.map(b => b.brand) || [])
+                    ].filter(Boolean)));
 
-                    // Check for item 3 (Battery) and item 4 (Mounting Structure) nil states
-                    const isBatteryRow = item.slNo === 3 || item.id === 'boq-3' || (item.itemDescription && item.itemDescription.toLowerCase().includes('battery'));
-                    const isStructureRow = item.slNo === 4 || item.id === 'boq-4' || (item.itemDescription && (item.itemDescription.toLowerCase().includes('structure') || item.itemDescription.toLowerCase().includes('mounting')));
+                    return activeRows.map((item, index) => {
+                      let desc = item.itemDescription || '';
+                      // Strip dropdown headings/prefixes so only chosen items are shown
+                      desc = desc.replace(/^(?:solar\s*pv\s*modules?|solar\s*inverter|grid-tied\s*\/\s*hybrid\s*solar\s*inverter|battery(?:\s*energy)?(?:\s*storage)?|mounting\s*structure|module\s*mounting\s*structure)\s*[-–:]\s*/i, '').trim();
+                      // Clean elevation feet from structure description if present (elevation feet belongs in Quantity column only)
+                      desc = desc.replace(/\s*\((?:elevated\s*)?\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft|height)\)/gi, '');
+                      desc = desc.replace(/\s*elevation\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)/gi, '');
+                      desc = desc.replace(/\s*\d+(?:\s*(?:to|-)\s*\d+)?\+?\s*(?:feet|ft)\s*(?:height)?/gi, '');
+                      desc = desc.replace(/\s*\(\s*\)/g, '').trim();
 
-                    if (isBatteryRow) {
-                      if (qty.toLowerCase().includes('nil') || qty === '0' || qty === '0 Nos' || desc.toLowerCase().includes('nil') || !desc) {
-                        desc = 'Battery';
-                        qty = 'Nil';
-                      }
-                    } else if (isStructureRow) {
-                      if (qty.toLowerCase().includes('nil') || qty === '0' || qty === '0 Feet' || qty === '0 ft' || desc.toLowerCase().includes('nil') || !desc) {
-                        desc = 'Mounting Structure';
-                        qty = 'Nil';
-                      }
-                    }
+                      // Strip any brand/manufacturer names from Annexure BOQ
+                      desc = stripEquipmentBrandNames(desc, [item.brand, ...allQuotationBrands]);
+                      if (!desc) desc = stripEquipmentBrandNames(item.itemDescription, [item.brand, ...allQuotationBrands]);
 
-                    if (!desc) desc = item.itemDescription;
+                      // Clean quantity
+                      let qty = item.quantity || '';
+                      if (qty.toLowerCase() === 'nill') qty = 'Nil';
 
-                    return (
-                      <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                        <td className="border border-slate-300 py-1.5 px-2 text-center font-bold">{item.slNo}</td>
-                        <td className="border border-slate-300 py-1.5 px-3 text-left">{desc}</td>
-                        <td className="border border-slate-300 py-1.5 px-3 text-center">{qty}</td>
-                        {index === 0 && (
-                          <td 
-                            rowSpan={quotation.boqItems.length} 
-                            className="border border-slate-400 py-2 px-3 text-right font-black align-middle text-sm text-slate-900 bg-amber-50/30 tabular-nums"
-                          >
-                            {quotation.basicCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr key={item.id || index} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                          <td className="border border-slate-300 py-1.5 px-2 text-center font-bold">{index + 1}</td>
+                          <td className="border border-slate-300 py-1.5 px-3 text-left">{desc}</td>
+                          <td className="border border-slate-300 py-1.5 px-3 text-center">{qty}</td>
+                          {index === 0 && (
+                            <td 
+                              rowSpan={activeRows.length} 
+                              className="border border-slate-400 py-2 px-3 text-right font-black align-middle text-sm text-slate-900 bg-amber-50/30 tabular-nums"
+                            >
+                              {quotation.basicCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    });
+                  })()}
                   <tr className="bg-slate-100 font-bold text-[11.5px] border-t-2 border-slate-400">
                     <td className="border border-slate-300 py-1.5 px-2 text-center">A</td>
                     <td colSpan={2} className="border border-slate-300 py-1.5 px-3 uppercase text-slate-900">
@@ -899,26 +1053,27 @@ export default function Quotation5PagePrintView({
                 <h3 className="text-xs font-black tracking-wider text-slate-900 uppercase mb-2">
                   WARRANTY
                 </h3>
-                <div className="text-[11px] text-slate-800 space-y-2 leading-snug font-sans">
-                  <div className="grid grid-cols-[160px_12px_1fr] items-baseline">
-                    <span className="font-bold text-slate-900">Solar Modules</span>
-                    <span className="text-slate-500 font-bold">:</span>
-                    <span>{quotation.moduleWarrantyYears} Year Warranty (12 years manufacturing defect warranty - 0–12 years: 90% performance warranty - 12–25 years: 81% performance warranty)</span>
-                  </div>
-                  <div className="grid grid-cols-[160px_12px_1fr] items-baseline">
-                    <span className="font-bold text-slate-900">Grid Tied Inverter</span>
-                    <span className="text-slate-500 font-bold">:</span>
-                    <span>{quotation.inverterWarrantyYears} years warranty from date of supply</span>
-                  </div>
-                  <div className="grid grid-cols-[160px_12px_1fr] items-baseline">
-                    <span className="font-bold text-slate-900">Balance of System</span>
-                    <span className="text-slate-500 font-bold">:</span>
-                    <span>{quotation.balanceOfSystemWarrantyYears} year warranty from date of supply</span>
-                  </div>
-                  <div className="text-[10px] text-slate-600 italic mt-1">
-                    Consumables such as fuses, surge protection devices, AC adaptors, contactor coils, switches, etc., are excluded from warranty.
-                  </div>
-                </div>
+                <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-800 leading-snug font-sans">
+                  {(() => {
+                    const clauses = (quotation.warrantyClauses && quotation.warrantyClauses.length > 0)
+                      ? quotation.warrantyClauses
+                      : getToolsWarrantyClauses();
+                    return clauses.map((clause, idx) => {
+                      const trimmed = clause.trim();
+                      const isFlushNoBullet = trimmed.startsWith('~~') || trimmed.startsWith('~-');
+                      const isNoBullet = isFlushNoBullet || trimmed.startsWith('~') || trimmed.toLowerCase().startsWith('no-bullet:') || trimmed.startsWith('•-');
+                      const cleanClause = clause.replace(/^~~?\s*/, '').replace(/^~-\s*/, '').replace(/^•-\s*/, '').replace(/^no-bullet:\s*/i, '');
+                      return (
+                        <li 
+                          key={idx} 
+                          className={`whitespace-pre-line leading-relaxed ${isFlushNoBullet ? 'list-none -ml-5' : isNoBullet ? 'list-none' : ''}`}
+                        >
+                          {renderFormattedText(cleanClause)}
+                        </li>
+                      );
+                    });
+                  })()}
+                </ul>
               </div>
 
               {/* Project Completion */}
@@ -926,9 +1081,25 @@ export default function Quotation5PagePrintView({
                 <h3 className="text-xs font-black tracking-wider text-slate-900 uppercase mb-1.5">
                   PROJECT COMPLETION
                 </h3>
-                <p className="text-[11px] text-slate-800 leading-snug">
-                  {quotation.projectCompletionWeeks} from the date of receipt of purchase order along with advance payment and drawing approval.
-                </p>
+                {(() => {
+                  const milestones = (quotation.completionMilestones && quotation.completionMilestones.length > 0)
+                    ? quotation.completionMilestones
+                    : getToolsCompletionMilestones();
+                  if (milestones && milestones.length > 0) {
+                    return (
+                      <ol className="text-[11px] text-slate-800 space-y-1.5 list-decimal pl-5 leading-snug font-sans">
+                        {milestones.map((ms, idx) => (
+                          <li key={idx} className="whitespace-pre-line leading-relaxed">{renderFormattedText(ms)}</li>
+                        ))}
+                      </ol>
+                    );
+                  }
+                  return (
+                    <p className="text-[11px] text-slate-800 leading-snug font-sans">
+                      {quotation.projectCompletionWeeks || '2 to 3 weeks'} from the date of receipt of purchase order along with advance payment and drawing approval.
+                    </p>
+                  );
+                })()}
               </div>
             </div>
 
@@ -978,9 +1149,23 @@ export default function Quotation5PagePrintView({
                 <div className="text-[11px] text-slate-700 space-y-1.5 mt-3">
                   <div className="font-bold text-slate-800">Assumptions:</div>
                   <ul className="list-disc pl-5 space-y-1">
-                    {quotation.tariffAssumptions.map((assump, idx) => (
-                      <li key={idx}>{renderFormattedText(assump)}</li>
-                    ))}
+                    {((quotation.tariffAssumptions && quotation.tariffAssumptions.length > 0)
+                      ? quotation.tariffAssumptions
+                      : getToolsTariffAssumptions()
+                    ).map((assump, idx) => {
+                      const trimmed = assump.trim();
+                      const isFlushNoBullet = trimmed.startsWith('~~') || trimmed.startsWith('~-');
+                      const isNoBullet = isFlushNoBullet || trimmed.startsWith('~') || trimmed.toLowerCase().startsWith('no-bullet:') || trimmed.startsWith('•-');
+                      const cleanAssump = assump.replace(/^~~?\s*/, '').replace(/^~-\s*/, '').replace(/^•-\s*/, '').replace(/^no-bullet:\s*/i, '');
+                      return (
+                        <li 
+                          key={idx} 
+                          className={`whitespace-pre-line leading-relaxed ${isFlushNoBullet ? 'list-none -ml-5' : isNoBullet ? 'list-none' : ''}`}
+                        >
+                          {renderFormattedText(cleanAssump)}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               </div>

@@ -109,8 +109,8 @@ export default function SolarQuotationBuilder({
       supplyIncludes: [...DEFAULT_SUPPLY_INCLUDES],
       installationIncludes: [...DEFAULT_INSTALLATION_INCLUDES],
       boqItems: [
-        { id: 'boq-1', slNo: 1, itemDescription: 'SERVOTEC HHV [550 Wp] Mono Perc DCR', quantity: '4.95 kWp' },
-        { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter Make: SERVOTEC', quantity: '1 Nos' },
+        { id: 'boq-1', slNo: 1, itemDescription: '550 Wp Mono Perc DCR Panels', quantity: '4.95 kWp' },
+        { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter', quantity: '1 Nos' },
         { id: 'boq-3', slNo: 3, itemDescription: 'Nil', quantity: 'Nil' },
         { id: 'boq-4', slNo: 4, itemDescription: 'Table RCC Structure', quantity: '7 Feet' },
         { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: '4.95 kWp' },
@@ -365,7 +365,7 @@ export default function SolarQuotationBuilder({
     const updatedBOQ = formData.boqItems.map(item => {
       if (item.slNo === 1) return { ...item, quantity: `${dcKwp} kWp` };
       if (item.slNo === 3) return { ...item, itemDescription: `Table RCC Mounting Structure Elevation for ${Math.ceil(kw)} kW` };
-      if (item.slNo === 4) return { ...item, itemDescription: `${Math.ceil(kw)} kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC` };
+      if (item.slNo === 4) return { ...item, itemDescription: `${Math.ceil(kw)} kVA Single Phase On-Grid Hybrid Inverter` };
       if (item.slNo === 5 || item.slNo === 6 || item.slNo === 7) return { ...item, quantity: `${dcKwp} kWp` };
       return item;
     });

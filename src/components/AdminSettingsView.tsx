@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sliders, 
@@ -52,7 +52,7 @@ import {
   Star,
   Package
 } from 'lucide-react';
-import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction } from '../types';
+import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction, ParentModule, ALL_PARENT_MODULES, APP_VERSION, getNextAppVersion } from '../types';
 import { CRMSettings, DEFAULT_CRM_SETTINGS, STANDARD_COUNTRY_CODES, getCountryFromCode, getAllCountryCodes, CountryCodeConfig } from '../crm/types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendEmailNotification, sendCRMEmailNotification, calculateCashBalance } from '../services/notificationService';
@@ -84,8 +84,10 @@ export interface AdminSettingsViewProps {
   onBackupData: () => void;
   onRestoreData: (jsonContent: string) => boolean | Promise<boolean>;
   onWipeAllData: () => void | Promise<void>;
+  onClearLogs?: () => void | Promise<void>;
   activeSubTab?: AdminTab;
   onSubTabChange?: (tab: AdminTab) => void;
+  availableModules?: { id: string; label: string }[];
 }
 
 export default function AdminSettingsView({
@@ -110,8 +112,10 @@ export default function AdminSettingsView({
   onBackupData,
   onRestoreData,
   onWipeAllData,
+  onClearLogs,
   activeSubTab,
-  onSubTabChange
+  onSubTabChange,
+  availableModules
 }: AdminSettingsViewProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>(activeSubTab || 'APP_SETTINGS');
   const [appSettingsSubTab, setAppSettingsSubTab] = useState<'PETTY_CASH' | 'CRM' | 'HRMS'>('PETTY_CASH');
@@ -142,6 +146,7 @@ export default function AdminSettingsView({
   const [stampOpacity, setStampOpacity] = useState<number>(appSettings.companyStampOpacity ?? 0.85);
   const [stampWidth, setStampWidth] = useState<number>(appSettings.companyStampWidth ?? 85);
   const [allowManualVoucher, setAllowManualVoucher] = useState<boolean>(appSettings.allowManualVoucherNumbering || false);
+  const [formAppVersion, setFormAppVersion] = useState<string>(appSettings.appVersion || APP_VERSION);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
   useEffect(() => {
@@ -154,6 +159,7 @@ export default function AdminSettingsView({
     setStampOpacity(appSettings.companyStampOpacity ?? 0.85);
     setStampWidth(appSettings.companyStampWidth ?? 85);
     setAllowManualVoucher(appSettings.allowManualVoucherNumbering || false);
+    setFormAppVersion(appSettings.appVersion || APP_VERSION);
   }, [appSettings]);
 
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,20 +247,27 @@ export default function AdminSettingsView({
   const [userEmail, setUserEmail] = useState('');
   const [userPassword, setUserPassword] = useState('');
   const [showModalPassword, setShowModalPassword] = useState(false);
-  const [userRole, setUserRole] = useState<UserRole>('CUSTODIAN');
+  const [userRole, setUserRole] = useState<UserRole>('USER');
+  const [userAllowedModules, setUserAllowedModules] = useState<ParentModule[]>(['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS']);
+  const [isModuleDropdownOpen, setIsModuleDropdownOpen] = useState(false);
   const [userReportingTo, setUserReportingTo] = useState<string>('');
   const [userError, setUserError] = useState('');
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
   const [showPasswords, setShowPasswords] = useState<{ [username: string]: boolean }>({});
 
   // --- 3. System Audit Filter State ---
+  const [auditFilterModule, setAuditFilterModule] = useState<string>('ALL');
+  const [auditFilterUser, setAuditFilterUser] = useState<string>('ALL');
   const [auditFilterAction, setAuditFilterAction] = useState<string>('ALL');
+  const [isClearLogsModalOpen, setIsClearLogsModalOpen] = useState(false);
+  const [clearLogsConfirmInput, setClearLogsConfirmInput] = useState('');
 
   // --- 4. System Operations State ---
   const [restoreSuccess, setRestoreSuccess] = useState('');
   const [restoreError, setRestoreError] = useState('');
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [wipeConfirmInput, setWipeConfirmInput] = useState('');
+  const [versionSaveSuccess, setVersionSaveSuccess] = useState(false);
 
   // Batch Migration State for Legacy Cloudinary/External Attachments
   const [isMigratingAttachments, setIsMigratingAttachments] = useState(false);
@@ -309,7 +322,9 @@ export default function AdminSettingsView({
     reqApproved: false,
     reqPaid: false,
     reqRejected: false,
-    reqRerouted: false
+    reqRerouted: false,
+    queryRaised: false,
+    queryResponse: false
   });
 
   const toggleEmailAccordion = (key: string) => {
@@ -717,6 +732,27 @@ export default function AdminSettingsView({
     return fromSettings || stored || DEFAULT_EMAIL_BODY_REQ_REROUTED;
   });
 
+  // Query Clarification Workflow Email Templates: Query Raised (Manager -> Employee) and Query Response (Employee -> Manager)
+  const DEFAULT_EMAIL_SUBJECT_QUERY = '[Petty Cash Query] Clarification Required for Voucher #{voucher_id} - {amount}';
+  const DEFAULT_EMAIL_BODY_QUERY = 'Hello {paid_to},\n\nYour manager ({query_by}) has raised a query regarding your petty cash claim #{voucher_id}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\n\nQuery / Clarification Requested:\n{query_message}\n\nPlease open the Petty Cash Query Portal to reply and provide clarification or update your receipt.';
+
+  const DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE = '[Petty Cash Query Response] Clarification Submitted for Voucher #{voucher_id} - {amount}';
+  const DEFAULT_EMAIL_BODY_QUERY_RESPONSE = 'Hello {manager_name},\n\n{response_by} has submitted a reply / clarification regarding petty cash claim #{voucher_id}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\n\nClaimant\'s Reply / Remarks:\n{response_message}\n\nPlease open the Petty Cash Portal to review the response and take approval action.';
+
+  const [emailSubjectQuery, setEmailSubjectQuery] = useState<string>(() => {
+    return integrationSettings?.emailSubjectQuery || localStorage.getItem('petty_cash_email_subject_query') || DEFAULT_EMAIL_SUBJECT_QUERY;
+  });
+  const [emailBodyQuery, setEmailBodyQuery] = useState<string>(() => {
+    return integrationSettings?.emailBodyQuery || localStorage.getItem('petty_cash_email_body_query') || DEFAULT_EMAIL_BODY_QUERY;
+  });
+
+  const [emailSubjectQueryResponse, setEmailSubjectQueryResponse] = useState<string>(() => {
+    return integrationSettings?.emailSubjectQueryResponse || localStorage.getItem('petty_cash_email_subject_query_response') || DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE;
+  });
+  const [emailBodyQueryResponse, setEmailBodyQueryResponse] = useState<string>(() => {
+    return integrationSettings?.emailBodyQueryResponse || localStorage.getItem('petty_cash_email_body_query_response') || DEFAULT_EMAIL_BODY_QUERY_RESPONSE;
+  });
+
   useEffect(() => {
     if (integrationSettings) {
       setEmailEnabled(integrationSettings.emailEnabled);
@@ -758,6 +794,10 @@ export default function AdminSettingsView({
       } else {
         setEmailBodyReqRerouted(reroutedBody);
       }
+      setEmailSubjectQuery(integrationSettings.emailSubjectQuery || DEFAULT_EMAIL_SUBJECT_QUERY);
+      setEmailBodyQuery(integrationSettings.emailBodyQuery || DEFAULT_EMAIL_BODY_QUERY);
+      setEmailSubjectQueryResponse(integrationSettings.emailSubjectQueryResponse || DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE);
+      setEmailBodyQueryResponse(integrationSettings.emailBodyQueryResponse || DEFAULT_EMAIL_BODY_QUERY_RESPONSE);
       setCloudinaryEnabled(integrationSettings.cloudinaryEnabled ?? false);
       setCloudinaryCloudName(integrationSettings.cloudinaryCloudName || '');
       setCloudinaryApiKey(integrationSettings.cloudinaryApiKey || '');
@@ -804,7 +844,11 @@ export default function AdminSettingsView({
       emailSubjectRequestRejected: emailSubjectReqRejected,
       emailBodyRequestRejected: emailBodyReqRejected,
       emailSubjectRequestRerouted: emailSubjectReqRerouted,
-      emailBodyRequestRerouted: emailBodyReqRerouted
+      emailBodyRequestRerouted: emailBodyReqRerouted,
+      emailSubjectQuery,
+      emailBodyQuery,
+      emailSubjectQueryResponse,
+      emailBodyQueryResponse
     };
 
     if (onUpdateIntegrationSettings) {
@@ -836,6 +880,10 @@ export default function AdminSettingsView({
       localStorage.setItem('petty_cash_email_body_req_rejected', emailBodyReqRejected);
       localStorage.setItem('petty_cash_email_subject_req_rerouted', emailSubjectReqRerouted);
       localStorage.setItem('petty_cash_email_body_req_rerouted', emailBodyReqRerouted);
+      localStorage.setItem('petty_cash_email_subject_query', emailSubjectQuery);
+      localStorage.setItem('petty_cash_email_body_query', emailBodyQuery);
+      localStorage.setItem('petty_cash_email_subject_query_response', emailSubjectQueryResponse);
+      localStorage.setItem('petty_cash_email_body_query_response', emailBodyQueryResponse);
     }
     setIntegrationSuccess('Petty Cash email settings & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
@@ -990,6 +1038,12 @@ export default function AdminSettingsView({
     setEmailSubjectReqRerouted('[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You');
     setEmailBodyReqRerouted(DEFAULT_EMAIL_BODY_REQ_REROUTED);
     
+    setEmailSubjectQuery(DEFAULT_EMAIL_SUBJECT_QUERY);
+    setEmailBodyQuery(DEFAULT_EMAIL_BODY_QUERY);
+    
+    setEmailSubjectQueryResponse(DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE);
+    setEmailBodyQueryResponse(DEFAULT_EMAIL_BODY_QUERY_RESPONSE);
+    
     setIntegrationSuccess('All Petty Cash email templates have been reset to corporate defaults.');
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
@@ -1095,7 +1149,8 @@ export default function AdminSettingsView({
       companyStampRotate: stampRotate,
       companyStampOpacity: stampOpacity,
       companyStampWidth: stampWidth,
-      allowManualVoucherNumbering: allowManualVoucher
+      allowManualVoucherNumbering: allowManualVoucher,
+      appVersion: formAppVersion.trim() || APP_VERSION
     });
     setSettingsSuccess(true);
     setTimeout(() => setSettingsSuccess(false), 3000);
@@ -1609,7 +1664,8 @@ export default function AdminSettingsView({
     setUserEmail('');
     setUserPassword('');
     setShowModalPassword(false);
-    setUserRole('CUSTODIAN');
+    setUserRole('USER');
+    setUserAllowedModules(['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS']);
     setUserReportingTo('');
     setUserError('');
     setIsUserModalOpen(true);
@@ -1623,7 +1679,8 @@ export default function AdminSettingsView({
     setUserEmail(u.email || '');
     setUserPassword(u.password || '');
     setShowModalPassword(false);
-    setUserRole(u.role);
+    setUserRole(u.role === 'CUSTODIAN' ? 'USER' : u.role);
+    setUserAllowedModules(u.allowedModules && u.allowedModules.length > 0 ? u.allowedModules : ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS']);
     setUserReportingTo(u.reportingTo || '');
     setUserError('');
     setIsUserModalOpen(true);
@@ -1655,6 +1712,7 @@ export default function AdminSettingsView({
 
     const trimmedEmpId = userEmpId.trim();
     const trimmedUsername = userUsername.trim().toLowerCase();
+    const finalAllowedModules = userAllowedModules.length > 0 ? userAllowedModules : ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS'];
 
     if (!editingUser) {
       const usernameExists = users.some(u => u.username.toLowerCase() === trimmedUsername);
@@ -1676,7 +1734,8 @@ export default function AdminSettingsView({
         email: userEmail.trim(),
         role: userRole,
         password: userPassword.trim() || 'user123',
-        reportingTo: userReportingTo.trim()
+        reportingTo: userReportingTo.trim(),
+        allowedModules: finalAllowedModules
       });
     } else {
       onUpdateUser({
@@ -1686,7 +1745,8 @@ export default function AdminSettingsView({
         email: userEmail.trim(),
         role: userRole,
         password: userPassword.trim() || editingUser.password,
-        reportingTo: userReportingTo.trim()
+        reportingTo: userReportingTo.trim(),
+        allowedModules: finalAllowedModules
       });
     }
 
@@ -1705,15 +1765,15 @@ export default function AdminSettingsView({
     csvRows.push(['Ommax Electric Private Limited - System Audit Report']);
     csvRows.push([`Generated On: ${new Date().toLocaleString()}`, `Generated By: ${currentUser.fullName}`]);
     csvRows.push([]);
-    csvRows.push(['Log ID', 'Timestamp', 'User Name', 'Role', 'IP Address', 'Action Code', 'Activity Details']);
+    csvRows.push(['Log ID', 'Timestamp', 'Module', 'User Name', 'Role', 'Action Code', 'Activity Details']);
 
     filteredLogs.forEach(log => {
       csvRows.push([
         log.id,
         formatTimestampInTimezone(log.timestamp, appSettings.timezone, appSettings.dateFormat),
+        getLogParentModule(log),
         log.user.replace(/"/g, '""'),
         log.role,
-        log.ipAddress,
         log.action,
         log.details.replace(/"/g, '""')
       ]);
@@ -1727,6 +1787,14 @@ export default function AdminSettingsView({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleClearLogsConfirm = async () => {
+    if (clearLogsConfirmInput.trim().toUpperCase() === 'CLEAR' && onClearLogs) {
+      await onClearLogs();
+      setIsClearLogsModalOpen(false);
+      setClearLogsConfirmInput('');
+    }
   };
 
   // ----------------------------------------------------
@@ -1758,6 +1826,24 @@ export default function AdminSettingsView({
     e.target.value = ''; // reset file input
   };
 
+  const handleSaveSystemAppVersion = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateAppSettings({
+      currencySymbol: formCurrency.trim() || '₹',
+      dateFormat: formDateFormat,
+      timezone: formTimezone,
+      companyStampUrl: stampUrl.trim(),
+      companyStampEnabled: stampEnabled,
+      companyStampRotate: stampRotate,
+      companyStampOpacity: stampOpacity,
+      companyStampWidth: stampWidth,
+      allowManualVoucherNumbering: allowManualVoucher,
+      appVersion: formAppVersion.trim() || APP_VERSION
+    });
+    setVersionSaveSuccess(true);
+    setTimeout(() => setVersionSaveSuccess(false), 3000);
+  };
+
   const handleWipeDataConfirm = async () => {
     if (wipeConfirmInput.trim().toUpperCase() === 'WIPE') {
       await onWipeAllData();
@@ -1766,13 +1852,74 @@ export default function AdminSettingsView({
     }
   };
 
+  // Derive user list strictly from active system user base (users prop)
+  const activeUserOptions = useMemo(() => {
+    return users
+      .map(u => u.fullName || u.username)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [users]);
+
+  // Helper to determine parent module from log item
+  const getLogParentModule = (log: ActivityLog): string => {
+    if (log.module) {
+      if (log.module === 'Petty Cash' || log.module === 'Queries') return 'Cash Book';
+      if (log.module === 'System Ops') return 'Admin Settings';
+      return log.module;
+    }
+    if (log.action.startsWith('CRM_') || log.action.includes('ACCOUNT') || log.action.includes('CONTACT') || log.action.includes('OPPORTUNITY')) return 'CRM';
+    if (log.action.startsWith('QUOTATION_') || log.action.includes('QUOTATION')) return 'Quotation';
+    if (log.action.startsWith('HRMS_')) return 'HRMS';
+    if (log.action.startsWith('SETTINGS_') || log.action === 'CHANGE_PASSWORD') return 'Settings';
+    if (log.action.startsWith('QUERY_') || log.action.startsWith('EXPENSE_QUERY')) return 'Cash Book';
+    if (log.action.startsWith('USER_') || log.action.startsWith('APP_') || log.action.startsWith('SYSTEM_') || log.action.startsWith('LOGS_') || log.action.startsWith('CATEGORY_') || log.action.startsWith('INTEGRATION_')) return 'Admin Settings';
+    return 'Cash Book';
+  };
+
+  // Dynamically compute list of parent modules:
+  // Base 6 standard parent modules: CRM, Quotation, HRMS, Cash Book, Settings, Admin Settings
+  // Plus any passed in availableModules or future parent modules found in activity logs
+  const parentModuleOptions = useMemo(() => {
+    const defaultModules = ['CRM', 'Quotation', 'HRMS', 'Cash Book', 'Settings', 'Admin Settings'];
+    const moduleSet = new Set<string>(defaultModules);
+
+    if (availableModules && Array.isArray(availableModules)) {
+      availableModules.forEach(m => {
+        if (m.label && !moduleSet.has(m.label)) {
+          moduleSet.add(m.label);
+        }
+      });
+    }
+
+    // Auto-discover any new/future parent modules directly from logs
+    logs.forEach(log => {
+      const pMod = getLogParentModule(log);
+      if (pMod && !moduleSet.has(pMod)) {
+        moduleSet.add(pMod);
+      }
+    });
+
+    return Array.from(moduleSet);
+  }, [availableModules, logs]);
+
   // Filter audit logs
   const filteredLogs = logs.filter(log => {
-    if (auditFilterAction === 'ALL') return true;
+    // Parent Module Filter
+    if (auditFilterModule !== 'ALL') {
+      const parentMod = getLogParentModule(log);
+      if (parentMod.toLowerCase() !== auditFilterModule.toLowerCase()) return false;
+    }
+
+    // User Filter
+    if (auditFilterUser !== 'ALL') {
+      if (log.user !== auditFilterUser) return false;
+    }
+
+    // Action Category Filter
     if (auditFilterAction === 'LOGIN') return log.action === 'LOGIN_SUCCESS' || log.action === 'LOGOUT';
     if (auditFilterAction === 'LEDGER') return log.action.startsWith('TXN_');
     if (auditFilterAction === 'USER_ADMIN') return log.action.startsWith('USER_');
-    if (auditFilterAction === 'SYSTEM') return log.action.startsWith('SYSTEM_') || log.action.startsWith('APP_') || log.action.startsWith('CATEGORY_');
+    if (auditFilterAction === 'SYSTEM') return log.action.startsWith('SYSTEM_') || log.action.startsWith('APP_') || log.action.startsWith('CATEGORY_') || log.action.startsWith('LOGS_');
     return true;
   });
 
@@ -1856,7 +2003,7 @@ export default function AdminSettingsView({
                 </div>
               )}
 
-              <form onSubmit={handleSaveAppSettings} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <form onSubmit={handleSaveAppSettings} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Currency Symbol */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-slate-700">Currency / Amount Symbol</label>
@@ -1892,7 +2039,7 @@ export default function AdminSettingsView({
                 </div>
 
                 {/* Timezone */}
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 md:col-span-2">
                   <label className="block text-xs font-bold text-slate-700">System Timezone</label>
                   <select
                     value={formTimezone}
@@ -1909,7 +2056,7 @@ export default function AdminSettingsView({
                 </div>
 
                 {/* Manual Voucher Numbering Control */}
-                <div className="md:col-span-3 border-t border-slate-100 pt-4 mt-2">
+                <div className="col-span-1 md:col-span-2 lg:col-span-4 border-t border-slate-100 pt-4 mt-2">
                   <div className="flex items-center justify-between p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl hover:border-amber-300 transition-all">
                     <div className="space-y-1 pr-4">
                       <label htmlFor="manual-voucher-toggle" className="font-bold text-xs text-slate-800 flex items-center gap-2 cursor-pointer">
@@ -2939,6 +3086,29 @@ export default function AdminSettingsView({
                         </button>
                       </div>
 
+                      {/* Module Access Badges */}
+                      <div className="bg-white p-3 rounded-xl border border-slate-100 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Modules</span>
+                          <span className="text-[10px] font-semibold text-slate-500 font-mono">
+                            {(u.allowedModules && u.allowedModules.length > 0 ? u.allowedModules : ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS']).length} / {ALL_PARENT_MODULES.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {(u.allowedModules && u.allowedModules.length > 0 ? u.allowedModules : ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS']).map(modId => {
+                            const modObj = ALL_PARENT_MODULES.find(m => m.id === modId);
+                            return (
+                              <span
+                                key={modId}
+                                className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60"
+                              >
+                                {modObj ? modObj.label : modId}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       {/* Action Buttons */}
                       <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                         <button
@@ -2988,11 +3158,35 @@ export default function AdminSettingsView({
                     Complete User Movement & Audit Trail
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Continuous timeline monitoring of logins, register modifications, user management, and system operations.
+                    Continuous timeline monitoring of users activity
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Module Filter (Parent Modules Only) */}
+                  <select
+                    value={auditFilterModule}
+                    onChange={(e) => setAuditFilterModule(e.target.value)}
+                    className="py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="ALL">All Modules</option>
+                    {parentModuleOptions.map((modName) => (
+                      <option key={modName} value={modName}>{modName}</option>
+                    ))}
+                  </select>
+
+                  {/* User Filter */}
+                  <select
+                    value={auditFilterUser}
+                    onChange={(e) => setAuditFilterUser(e.target.value)}
+                    className="py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="ALL">All Users</option>
+                    {activeUserOptions.map((userName) => (
+                      <option key={userName} value={userName}>{userName}</option>
+                    ))}
+                  </select>
+
                   {/* Filter category */}
                   <select
                     value={auditFilterAction}
@@ -3005,6 +3199,18 @@ export default function AdminSettingsView({
                     <option value="USER_ADMIN">User Management</option>
                     <option value="SYSTEM">System Operations</option>
                   </select>
+
+                  {/* Clear Logs Button */}
+                  {onClearLogs && (
+                    <button
+                      onClick={() => setIsClearLogsModalOpen(true)}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-semibold py-2 px-3 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                      title="Clear system audit logs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Clear Logs
+                    </button>
+                  )}
 
                   {/* Export Report Button */}
                   <button
@@ -3028,6 +3234,7 @@ export default function AdminSettingsView({
                     const isAuth = log.action === 'LOGIN_SUCCESS' || log.action === 'LOGOUT';
                     const isTxn = log.action.startsWith('TXN_');
                     const isUserAction = log.action.startsWith('USER_');
+                    const parentMod = getLogParentModule(log);
 
                     return (
                       <div key={log.id} className="relative group">
@@ -3053,7 +3260,9 @@ export default function AdminSettingsView({
                               }`}>
                                 {log.role}
                               </span>
-                              <span className="text-slate-400 text-[11px] font-mono">• {log.ipAddress}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-700">
+                                {parentMod}
+                              </span>
                             </div>
 
                             <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
@@ -3571,7 +3780,7 @@ export default function AdminSettingsView({
               >
                 <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>Petty Cash Templates</span>
-                <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">9 Active</span>
+                <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">11 Active</span>
               </button>
 
               <button
@@ -4597,6 +4806,210 @@ export default function AdminSettingsView({
                   )}
                 </div>
 
+                {/* ACCORDION 10: QUERY RAISED (MANAGER -> EMPLOYEE) TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('queryRaised')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+                        <MessageSquare className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">10. Query Raised (Manager → Employee) Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Employee / Claimant when a Manager requests clarification on an expense</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-violet-500"></span>
+                      {openEmailAccordions.queryRaised ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.queryRaised && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{date}', '{query_by}', '{query_message}', '{balance}'].map((tag) => (
+                            <button
+                              key={`query-raised-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyQuery(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-violet-50 border border-slate-200 hover:border-violet-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-violet-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectQuery}
+                            onChange={(e) => setEmailSubjectQuery(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyQuery}
+                            onChange={(e) => setEmailBodyQuery(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectQuery, appSettings.currencySymbol, false)
+                          .replace(/\{query_by\}/g, 'Mohan Kumar (Manager)')
+                          .replace(/\{query_message\}/g, 'Please attach the original tax invoice with GST breakdown and clarify the client meeting purpose.');
+                        const previewBodyRaw = substituteSampleTags(emailBodyQuery, appSettings.currencySymbol, false)
+                          .replace(/\{query_by\}/g, 'Mohan Kumar (Manager)')
+                          .replace(/\{query_message\}/g, 'Please attach the original tax invoice with GST breakdown and clarify the client meeting purpose.');
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Query Raised HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Query Raised Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Query & Clarification', previewBodyRaw, '#8b5cf6', 'QUERY_RAISED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 11: QUERY RESPONSE (EMPLOYEE -> MANAGER) TEMPLATE & PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('queryResponse')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                        <MessageSquare className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">11. Query Response (Employee → Manager) Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Email sent to Manager when Employee / Claimant submits a reply or clarification</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      {openEmailAccordions.queryResponse ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.queryResponse && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{date}', '{manager_name}', '{response_by}', '{response_message}', '{balance}'].map((tag) => (
+                            <button
+                              key={`query-response-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyQueryResponse(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-purple-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectQueryResponse}
+                            onChange={(e) => setEmailSubjectQueryResponse(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyQueryResponse}
+                            onChange={(e) => setEmailBodyQueryResponse(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectQueryResponse, appSettings.currencySymbol, false)
+                          .replace(/\{manager_name\}/g, 'Mohan Kumar (Manager)')
+                          .replace(/\{response_by\}/g, 'Rahul Sharma')
+                          .replace(/\{response_message\}/g, 'Attached the updated GST invoice as requested. Meeting was with ABC Solar client team.');
+                        const previewBodyRaw = substituteSampleTags(emailBodyQueryResponse, appSettings.currencySymbol, false)
+                          .replace(/\{manager_name\}/g, 'Mohan Kumar (Manager)')
+                          .replace(/\{response_by\}/g, 'Rahul Sharma')
+                          .replace(/\{response_message\}/g, 'Attached the updated GST invoice as requested. Meeting was with ABC Solar client team.');
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Query Response HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Query Response Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Petty Cash Query Response', previewBodyRaw, '#7c3aed', 'QUERY_RESPONSE')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
                 {/* Bottom Actions Bar */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <button
@@ -5051,6 +5464,68 @@ export default function AdminSettingsView({
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
+            {/* App Version Control Card */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-amber-500" />
+                    Application Release Version
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Manage the workspace release number. Changes reflect immediately across the entire workspace and on the login screen.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                  <span className="text-xs text-slate-500 font-medium">Active Release:</span>
+                  <span className="text-xs font-bold text-slate-900 font-mono bg-amber-100/70 text-amber-900 px-2 py-0.5 rounded">
+                    Version {appSettings.appVersion || APP_VERSION}
+                  </span>
+                </div>
+              </div>
+
+              {versionSaveSuccess && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  Application version updated successfully! Reflected across login screen and workspace.
+                </div>
+              )}
+
+              <form onSubmit={handleSaveSystemAppVersion} className="flex flex-col sm:flex-row sm:items-end gap-3 max-w-xl">
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700">Release Version</label>
+                    <button
+                      type="button"
+                      onClick={() => setFormAppVersion(getNextAppVersion(formAppVersion))}
+                      className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-md border border-amber-200/70 transition-colors cursor-pointer"
+                      title="Bump to next version (+0.1: 3.1 -> 3.2 ... 3.9 -> 4.0)"
+                    >
+                      + Bump to {getNextAppVersion(formAppVersion)}
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400 font-mono">v</span>
+                    <input
+                      type="text"
+                      value={formAppVersion}
+                      onChange={(e) => setFormAppVersion(e.target.value)}
+                      placeholder="3.1"
+                      className="w-full py-2.5 px-3 pl-7 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white focus:outline-hidden rounded-xl text-xs font-mono font-bold text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2.5 px-5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap h-[38px]"
+                >
+                  <Save className="w-3.5 h-3.5 text-amber-400" />
+                  Save Version
+                </button>
+              </form>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
               
@@ -5273,141 +5748,264 @@ export default function AdminSettingsView({
       {/* MODAL: ADD / EDIT USER                                   */}
       {/* ======================================================== */}
       {isUserModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 space-y-4"
+            className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-md w-full my-auto max-h-[92vh] flex flex-col overflow-hidden"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5 bg-slate-50/50 shrink-0">
               <h3 className="font-bold text-sm text-slate-800">
                 {editingUser ? 'Edit System User' : 'Create New System User'}
               </h3>
               <button
+                type="button"
                 onClick={() => setIsUserModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer p-1 rounded-lg hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveUser} className="space-y-4">
-              {userError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
-                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                  {userError}
-                </div>
-              )}
+            <form onSubmit={handleSaveUser} className="flex flex-col overflow-hidden flex-1">
+              <div className="p-5 space-y-3.5 overflow-y-auto max-h-[calc(92vh-125px)]">
+                {userError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    {userError}
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  value={userFullName}
-                  onChange={(e) => setUserFullName(e.target.value)}
-                  placeholder="e.g. Ramesh Kumar"
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Employee ID</label>
-                <input
-                  type="text"
-                  value={userEmpId}
-                  onChange={(e) => setUserEmpId(e.target.value)}
-                  placeholder="e.g. OEPL-104"
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Username / Login Identifier</label>
-                <input
-                  type="text"
-                  value={userUsername}
-                  onChange={(e) => setUserUsername(e.target.value)}
-                  disabled={!!editingUser}
-                  placeholder="e.g. ramesh"
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono disabled:opacity-60"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
-                <input
-                  type="email"
-                  value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="e.g. ramesh@ommaxelectric.com"
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                <div className="relative">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
                   <input
-                    type={showModalPassword ? "text" : "password"}
-                    value={userPassword}
-                    onChange={(e) => setUserPassword(e.target.value)}
-                    placeholder={editingUser ? "Leave blank to keep current" : "Enter password"}
-                    className="w-full py-2.5 pl-3 pr-10 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                    type="text"
+                    value={userFullName}
+                    onChange={(e) => setUserFullName(e.target.value)}
+                    placeholder="e.g. Ramesh Kumar"
+                    className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs"
+                    required
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Employee ID</label>
+                    <input
+                      type="text"
+                      value={userEmpId}
+                      onChange={(e) => setUserEmpId(e.target.value)}
+                      placeholder="e.g. OEPL-104"
+                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Username / Login</label>
+                    <input
+                      type="text"
+                      value={userUsername}
+                      onChange={(e) => setUserUsername(e.target.value)}
+                      disabled={!!editingUser}
+                      placeholder="e.g. ramesh"
+                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono disabled:opacity-60"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={userEmail}
+                    onChange={(e) => setUserEmail(e.target.value)}
+                    placeholder="e.g. ramesh@ommaxelectric.com"
+                    className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showModalPassword ? "text" : "password"}
+                      value={userPassword}
+                      onChange={(e) => setUserPassword(e.target.value)}
+                      placeholder={editingUser ? "Leave blank to keep current" : "Enter password"}
+                      className="w-full py-2 pl-3 pr-10 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowModalPassword(!showModalPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer p-1"
+                      title={showModalPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showModalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">System Access Role</label>
+                  <select
+                    value={userRole === 'CUSTODIAN' ? 'USER' : userRole}
+                    onChange={(e) => setUserRole(e.target.value as UserRole)}
+                    className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold"
+                  >
+                    <option value="USER">User</option>
+                    <option value="MANAGER">Manager (Approver)</option>
+                    <option value="ADMIN">System Administrator</option>
+                    <option value="AUDITOR">Auditor</option>
+                  </select>
+                </div>
+
+                {/* Module Access Multi-Select Dropdown */}
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Assigned Module Access <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[10px] font-bold text-amber-600 font-mono">
+                      {userAllowedModules.length} of {ALL_PARENT_MODULES.length} Selected
+                    </span>
+                  </div>
+
+                  {/* Dropdown Trigger Button */}
                   <button
                     type="button"
-                    onClick={() => setShowModalPassword(!showModalPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer p-1"
-                    title={showModalPassword ? "Hide Password" : "Show Password"}
+                    onClick={() => setIsModuleDropdownOpen(prev => !prev)}
+                    className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs flex items-center justify-between transition-all cursor-pointer text-left"
                   >
-                    {showModalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    <div className="flex flex-wrap items-center gap-1 overflow-hidden max-w-[85%]">
+                      {userAllowedModules.length === ALL_PARENT_MODULES.length ? (
+                        <span className="font-semibold text-slate-700">All Modules Selected (Full Access)</span>
+                      ) : userAllowedModules.length === 0 ? (
+                        <span className="text-rose-500 font-medium">No modules selected</span>
+                      ) : (
+                        userAllowedModules.map((modId) => {
+                          const modObj = ALL_PARENT_MODULES.find(m => m.id === modId);
+                          return (
+                            <span
+                              key={modId}
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100/90 text-amber-900 border border-amber-300/60 leading-none inline-block"
+                            >
+                              {modObj?.label || modId}
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isModuleDropdownOpen ? 'rotate-180 text-amber-600' : ''}`} />
                   </button>
+
+                  {/* Dropdown Menu Panel */}
+                  <AnimatePresence>
+                    {isModuleDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute z-20 mt-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 space-y-1"
+                      >
+                        <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 px-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Select Modules</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setUserAllowedModules(ALL_PARENT_MODULES.map(m => m.id))}
+                              className="text-[10px] font-bold text-amber-600 hover:text-amber-800 transition-colors cursor-pointer"
+                            >
+                              Select All
+                            </button>
+                            <span className="text-slate-300 text-xs">|</span>
+                            <button
+                              type="button"
+                              onClick={() => setUserAllowedModules([])}
+                              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                            >
+                              Clear All
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="max-h-48 overflow-y-auto space-y-1 py-1 pr-0.5">
+                          {ALL_PARENT_MODULES.map((mod) => {
+                            const isChecked = userAllowedModules.includes(mod.id);
+                            return (
+                              <label
+                                key={mod.id}
+                                className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                                  isChecked
+                                    ? 'bg-amber-50/70 border-amber-300/80 text-slate-900'
+                                    : 'bg-slate-50/50 border-transparent text-slate-600 hover:bg-slate-100/60'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 pr-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setUserAllowedModules(prev => [...prev, mod.id]);
+                                      } else {
+                                        setUserAllowedModules(prev => prev.filter(m => m !== mod.id));
+                                      }
+                                    }}
+                                    className="rounded text-amber-500 focus:ring-amber-400 focus:ring-1 border-slate-300 cursor-pointer"
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold leading-none">{mod.label}</p>
+                                    <p className="text-[10px] text-slate-400 truncate mt-0.5">{mod.description}</p>
+                                  </div>
+                                </div>
+                                {isChecked && (
+                                  <Check className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {userAllowedModules.length === 0 && (
+                    <p className="text-[10px] text-rose-500 font-medium mt-1">
+                      Please select at least one module.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Reporting To (Approval Manager)</label>
+                  <select
+                    value={userReportingTo}
+                    onChange={(e) => setUserReportingTo(e.target.value)}
+                    className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold text-slate-800"
+                  >
+                    <option value="">-- Direct Admin / No Manager Assigned --</option>
+                    {users
+                      .filter(u => u.username !== userUsername)
+                      .map(u => (
+                        <option key={u.username} value={u.fullName}>
+                          {u.fullName} ({u.role})
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Petty cash claims raised by this user will be routed to this person for authorization.
+                  </p>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">System Access Role</label>
-                <select
-                  value={userRole}
-                  onChange={(e) => setUserRole(e.target.value as UserRole)}
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold"
-                >
-                  <option value="CUSTODIAN">User / Petty Cash Custodian</option>
-                  <option value="MANAGER">Manager (Approver)</option>
-                  <option value="ADMIN">System Administrator</option>
-                  <option value="AUDITOR">Auditor</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Reporting To (Approval Manager)</label>
-                <select
-                  value={userReportingTo}
-                  onChange={(e) => setUserReportingTo(e.target.value)}
-                  className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] rounded-xl text-xs cursor-pointer font-semibold text-slate-800"
-                >
-                  <option value="">-- Direct Admin / No Manager Assigned --</option>
-                  {users
-                    .filter(u => u.username !== userUsername)
-                    .map(u => (
-                      <option key={u.username} value={u.fullName}>
-                        {u.fullName} ({u.role})
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Petty cash claims raised by this user will be routed to this person for authorization.
-                </p>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="px-5 py-3.5 bg-slate-50/70 border-t border-slate-100 flex justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsUserModalOpen(false)}
-                  className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                  className="py-2 px-4 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -6328,6 +6926,54 @@ export default function AdminSettingsView({
                 className="py-2 px-5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-all"
               >
                 Confirm Data Wipe
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Clearing Audit Logs */}
+      {isClearLogsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-rose-200 max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3 text-rose-600">
+              <ShieldAlert className="w-6 h-6 shrink-0" />
+              <h3 className="font-bold text-base text-slate-900">Security Check: Clear Audit Logs</h3>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              This will permanently delete all historic system activity and audit logs to reduce database size.
+              To confirm, type <strong className="text-rose-600 font-mono select-all">CLEAR</strong> in the box below:
+            </p>
+
+            <input
+              type="text"
+              value={clearLogsConfirmInput}
+              onChange={(e) => setClearLogsConfirmInput(e.target.value)}
+              placeholder="Type CLEAR here"
+              className="w-full py-2.5 px-3 bg-slate-50 border border-slate-300 focus:border-rose-500 rounded-xl text-xs font-mono uppercase tracking-widest font-bold"
+            />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setIsClearLogsModalOpen(false);
+                  setClearLogsConfirmInput('');
+                }}
+                className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={clearLogsConfirmInput.trim().toUpperCase() !== 'CLEAR'}
+                onClick={handleClearLogsConfirm}
+                className="py-2 px-5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-all"
+              >
+                Confirm Clear Logs
               </button>
             </div>
           </motion.div>

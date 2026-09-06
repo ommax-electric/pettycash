@@ -9,7 +9,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   companyStampRotate: -12,
   companyStampOpacity: 0.85,
   companyStampWidth: 85,
-  allowManualVoucherNumbering: false
+  allowManualVoucherNumbering: false,
+  appVersion: '3.1'
 };
 
 export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
@@ -46,7 +47,9 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   emailSubjectRequestRejected: '[Petty Cash Rejected] Claim #{voucher_id} - {amount}',
   emailBodyRequestRejected: 'Hello {paid_to},\n\nYour petty cash claim #{voucher_id} for {amount} was REJECTED by {rejected_by}.\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nRemarks / Reason: {remarks}\nRejected By: {rejected_by}\n\nPlease contact your manager or admin for further details.',
   emailSubjectRequestRerouted: '[Petty Cash Re-Route] Approval Request #{voucher_id} Re-Routed to You',
-  emailBodyRequestRerouted: 'Hello {re_routed_to},\n\nMr./Ms. {re_routed_by} has re-routed an approval request for voucher #{voucher_id} to you due to the following reason:\nReason: {re_route_reason}\n\nVoucher Details:\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.'
+  emailBodyRequestRerouted: 'Hello {re_routed_to},\n\nMr./Ms. {re_routed_by} has re-routed an approval request for voucher #{voucher_id} to you due to the following reason:\nReason: {re_route_reason}\n\nVoucher Details:\nVoucher ID: #{voucher_id}\nRequested By: {paid_to}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\nRemarks: {remarks}\nAttachment: {attachment}\n\nCurrent Cash Balance: {balance}\n\nPlease review and approve this request in the Petty Cash Portal.',
+  emailSubjectQuery: '[Petty Cash Query] Clarification Required for Voucher #{voucher_id} - {amount}',
+  emailBodyQuery: 'Hello {paid_to},\n\nYour manager ({query_by}) has raised a query regarding your petty cash claim #{voucher_id}:\n\nVoucher ID: #{voucher_id}\nAmount: {amount}\nParticulars: {particulars}\nCategory: {category}\nDate: {date}\n\nQuery / Clarification Requested:\n{query_message}\n\nPlease open the Petty Cash Query Portal to reply and provide clarification or update your receipt.'
 };
 
 export const MOCK_USERS: User[] = [

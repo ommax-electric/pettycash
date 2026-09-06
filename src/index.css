@@ -1,8 +1,16 @@
-@import url('https://fonts.googleapis.com/css2?family=Foldit:wght@400;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Foldit:wght@400;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Satisfy&family=Tulpen+One&display=swap');
 @import "tailwindcss";
 
 .font-foldit {
   font-family: 'Foldit', display, cursive, sans-serif;
+}
+
+.font-satisfy {
+  font-family: 'Satisfy', cursive;
+}
+
+.font-tulpen {
+  font-family: 'Tulpen One', cursive, sans-serif;
 }
 
 @theme {

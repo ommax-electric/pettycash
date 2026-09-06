@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   QuotationMasterConfig, 
   DEFAULT_QUOTATION_MASTER_CONFIG, 
+  DEFAULT_WARRANTY_CLAUSES,
+  DEFAULT_COMPLETION_MILESTONES,
   MasterCatalogProduct,
   DefaultBoqItemConfig,
   DEFAULT_BOQ_ITEMS_CONFIG,
@@ -9,7 +11,9 @@ import {
   SolarBenefitRow,
   SolarQuotation,
   interpolateOpeningText,
-  renderFormattedText
+  renderFormattedText,
+  isNilItem,
+  stripEquipmentBrandNames
 } from '../../quotation/types';
 import { CRMOpportunity, CRMAccount, CRMContact } from '../../crm/types';
 import { User, AppSettings } from '../../types';
@@ -65,6 +69,7 @@ interface QuotationToolsViewProps {
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
   activeEditingQuotation?: SolarQuotation | null;
   onClearActiveQuotation?: () => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 export type MasterConfigTab = 
@@ -87,21 +92,49 @@ export default function QuotationToolsView({
   currentUser,
   appSettings,
   masterConfig,
-  onUpdateMasterConfig
+  onUpdateMasterConfig,
+  onDirtyChange
 }: QuotationToolsViewProps) {
   // Master Config State
   const initialConfig = useMemo(() => {
-    if (masterConfig) return masterConfig;
+    if (masterConfig) {
+      return {
+        ...DEFAULT_QUOTATION_MASTER_CONFIG,
+        ...masterConfig,
+        warrantyClauses: (masterConfig.warrantyClauses && masterConfig.warrantyClauses.length > 0)
+          ? masterConfig.warrantyClauses
+          : DEFAULT_WARRANTY_CLAUSES,
+        completionMilestones: (masterConfig.completionMilestones && masterConfig.completionMilestones.length > 0)
+          ? masterConfig.completionMilestones
+          : DEFAULT_COMPLETION_MILESTONES,
+        tariffAssumptions: (masterConfig.tariffAssumptions && masterConfig.tariffAssumptions.length > 0)
+          ? masterConfig.tariffAssumptions
+          : DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions
+      };
+    }
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_QUOTATION_MASTER_CONFIG, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_QUOTATION_MASTER_CONFIG,
+          ...parsed,
+          warrantyClauses: (parsed.warrantyClauses && parsed.warrantyClauses.length > 0)
+            ? parsed.warrantyClauses
+            : DEFAULT_WARRANTY_CLAUSES,
+          completionMilestones: (parsed.completionMilestones && parsed.completionMilestones.length > 0)
+            ? parsed.completionMilestones
+            : DEFAULT_COMPLETION_MILESTONES,
+          tariffAssumptions: (parsed.tariffAssumptions && parsed.tariffAssumptions.length > 0)
+            ? parsed.tariffAssumptions
+            : DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions
+        };
       }
     } catch {
       // Fallback
     }
     return DEFAULT_QUOTATION_MASTER_CONFIG;
-  }, []);
+  }, [masterConfig]);
 
   const [config, setConfig] = useState<QuotationMasterConfig>(() => initialConfig);
   const [lastSavedJson, setLastSavedJson] = useState<string>(() => JSON.stringify(initialConfig));
@@ -109,8 +142,21 @@ export default function QuotationToolsView({
   // Sync state if masterConfig prop changes from Firestore
   useEffect(() => {
     if (masterConfig) {
-      setConfig(masterConfig);
-      setLastSavedJson(JSON.stringify(masterConfig));
+      const resolved: QuotationMasterConfig = {
+        ...DEFAULT_QUOTATION_MASTER_CONFIG,
+        ...masterConfig,
+        warrantyClauses: (masterConfig.warrantyClauses && masterConfig.warrantyClauses.length > 0)
+          ? masterConfig.warrantyClauses
+          : DEFAULT_WARRANTY_CLAUSES,
+        completionMilestones: (masterConfig.completionMilestones && masterConfig.completionMilestones.length > 0)
+          ? masterConfig.completionMilestones
+          : DEFAULT_COMPLETION_MILESTONES,
+        tariffAssumptions: (masterConfig.tariffAssumptions && masterConfig.tariffAssumptions.length > 0)
+          ? masterConfig.tariffAssumptions
+          : DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions
+      };
+      setConfig(resolved);
+      setLastSavedJson(JSON.stringify(resolved));
     }
   }, [masterConfig]);
 
@@ -118,6 +164,11 @@ export default function QuotationToolsView({
   const hasUnsavedChanges = useMemo(() => {
     return JSON.stringify(config) !== lastSavedJson;
   }, [config, lastSavedJson]);
+
+  // Inform parent navigation if dirty state changes
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
 
   // Warn before browser window unload / reload if there are unsaved configurations
   useEffect(() => {
@@ -210,17 +261,28 @@ export default function QuotationToolsView({
   const [editingTcIdx, setEditingTcIdx] = useState<number | null>(null);
   const [editingTcVal, setEditingTcVal] = useState('');
 
+  const [newWarrantyClause, setNewWarrantyClause] = useState('');
+  const [editingWarrantyIdx, setEditingWarrantyIdx] = useState<number | null>(null);
+  const [editingWarrantyVal, setEditingWarrantyVal] = useState('');
+
+  const [editingMilestoneIdx, setEditingMilestoneIdx] = useState<number | null>(null);
+  const [editingMilestoneVal, setEditingMilestoneVal] = useState('');
+
+  const [newTariffAssumption, setNewTariffAssumption] = useState('');
+  const [editingTariffAssumptionIdx, setEditingTariffAssumptionIdx] = useState<number | null>(null);
+  const [editingTariffAssumptionVal, setEditingTariffAssumptionVal] = useState('');
+
   const [newBrandNote, setNewBrandNote] = useState('');
   const [editingBrandNoteIdx, setEditingBrandNoteIdx] = useState<number | null>(null);
   const [editingBrandNoteVal, setEditingBrandNoteVal] = useState('');
 
   // New Catalog Product State
   const [newProduct, setNewProduct] = useState<Partial<MasterCatalogProduct>>({
-    category: 'MODULE',
+    category: undefined,
     name: '',
     brand: '',
     modelSpec: '',
-    defaultUnit: 'Nos',
+    defaultUnit: undefined,
     defaultUnitPrice: 0,
     warrantyPeriod: 'Standard Warranty',
     isDefaultBOQ: true
@@ -2848,261 +2910,228 @@ export default function QuotationToolsView({
       {/* Tab 7: Warranty */}
       {activeTab === 'WARRANTY' && (
         <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-6">
-          <div className="border-b border-slate-200/80 pb-4">
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>Warranty Matrix & Dropdown Options</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Configure standard warranty durations and dropdown choices for Inverters and Balance of System (BOS).
-            </p>
+          <div className="border-b border-slate-200/80 pb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Warranty Terms & Equipment Clauses</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure standard warranty clauses for solar modules, inverters, structure, and BOS printed on Page 3.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono font-bold text-slate-500">
+              {(config.warrantyClauses || DEFAULT_WARRANTY_CLAUSES).length} Clauses
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Standard Durations */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-black uppercase text-slate-900">Standard Warranty Defaults</h4>
-              
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Solar PV Module Warranty (Years)
-                </label>
-                <input
-                  type="number"
-                  value={config.moduleWarrantyYears}
-                  onChange={(e) => setConfig({ ...config, moduleWarrantyYears: parseInt(e.target.value) || 25 })}
-                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
-                />
-                <span className="text-[10px] text-slate-400 mt-1 block">Default: 25 Years Performance Warranty</span>
-              </div>
+          <div className="space-y-3">
+            {(config.warrantyClauses || DEFAULT_WARRANTY_CLAUSES).map((clause, index) => {
+              const isEditing = editingWarrantyIdx === index;
+              return (
+                <div key={index} className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Edit Clause #{index + 1}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditingWarrantyVal(prev => prev + '**bold text**')}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                            title="Insert Bold Markdown"
+                          >
+                            B
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingWarrantyVal(prev => prev + '*italic text*')}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                            title="Insert Italic Markdown"
+                          >
+                            I
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingWarrantyVal(prev => prev.startsWith('~ ') ? prev.slice(2) : ('~ ' + prev))}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                            title="Toggle No Bullet (~ prefix)"
+                          >
+                            ~ No Bullet
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={editingWarrantyVal}
+                        onChange={(e) => setEditingWarrantyVal(e.target.value)}
+                        className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-sans"
+                      />
+                      {editingWarrantyVal && (
+                        <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                          <div className="flex items-start gap-2">
+                            {editingWarrantyVal.trim().startsWith('~') ? (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1 py-0.5 rounded shrink-0">No Bullet</span>
+                            ) : (
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-1.5"></span>
+                            )}
+                            <span className="whitespace-pre-line leading-relaxed flex-1">
+                              {renderFormattedText(editingWarrantyVal.replace(/^~\s*/, ''))}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!editingWarrantyVal.trim()) return;
+                            const current = [...(config.warrantyClauses || DEFAULT_WARRANTY_CLAUSES)];
+                            current[index] = editingWarrantyVal.trim();
+                            setConfig({ ...config, warrantyClauses: current });
+                            setEditingWarrantyIdx(null);
+                          }}
+                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingWarrantyIdx(null)}
+                          className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                          {clause.trim().startsWith('~') ? (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200/80 px-1.5 py-0.5 rounded shrink-0 mt-0.5">
+                              No Bullet
+                            </span>
+                          ) : (
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-2"></span>
+                          )}
+                          <div className="flex-1 text-xs text-slate-800 whitespace-pre-line leading-relaxed">
+                            {renderFormattedText(clause.replace(/^~\s*/, ''))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingWarrantyIdx(index);
+                              setEditingWarrantyVal(clause);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-amber-600 cursor-pointer"
+                            title="Edit clause"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              confirmDelete({
+                                title: 'Delete Warranty Clause',
+                                itemLabel: clause.slice(0, 45) + '...',
+                                category: 'Warranty Terms',
+                                description: `Are you sure you want to remove Clause #${index + 1}?`,
+                                onConfirm: () => {
+                                  const current = (config.warrantyClauses || DEFAULT_WARRANTY_CLAUSES).filter((_, i) => i !== index);
+                                  setConfig({ ...config, warrantyClauses: current });
+                                }
+                              });
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                            title="Delete clause"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Workmanship / Free O&M (Years)
-                </label>
-                <input
-                  type="number"
-                  value={config.workmanshipWarrantyYears}
-                  onChange={(e) => setConfig({ ...config, workmanshipWarrantyYears: parseInt(e.target.value) || 1 })}
-                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
-                />
-                <span className="text-[10px] text-slate-400 mt-1 block">Default: 1 Year Free Comprehensive Maintenance</span>
+          {/* Add New Warranty Clause */}
+          <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800">Add New Warranty Clause</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setNewWarrantyClause(prev => prev + '**bold text**')}
+                  className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                  title="Insert Bold Markdown"
+                >
+                  B
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewWarrantyClause(prev => prev + '*italic text*')}
+                  className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                  title="Insert Italic Markdown"
+                >
+                  I
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewWarrantyClause(prev => prev.startsWith('~ ') ? prev.slice(2) : ('~ ' + prev))}
+                  className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                  title="Toggle No Bullet (~ prefix)"
+                >
+                  ~ No Bullet
+                </button>
               </div>
             </div>
-
-            {/* Inverter & BOS Dropdowns */}
-            <div className="space-y-4">
-              {/* Inverter Warranty Dropdown */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Grid Tied Inverter Warranty Dropdown Choices</span>
-                  <span className="text-[10px] font-mono text-slate-500">{config.inverterWarrantyOptions.length} choices</span>
-                </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                  {config.inverterWarrantyOptions.map((opt, i) => {
-                    const isEditing = editingInverterWarrantyIdx === i;
-                    return (
-                      <div key={i} className="text-xs bg-white p-2 rounded-lg border border-slate-200/70 shadow-2xs">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              value={editingInverterWarrantyVal}
-                              onChange={(e) => setEditingInverterWarrantyVal(e.target.value)}
-                              className="flex-1 text-xs px-2 py-1 bg-slate-50 border border-slate-300 rounded-md focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingInverterWarrantyVal.trim()) return;
-                                const updated = [...config.inverterWarrantyOptions];
-                                updated[i] = editingInverterWarrantyVal.trim();
-                                setConfig({ ...config, inverterWarrantyOptions: updated });
-                                setEditingInverterWarrantyIdx(null);
-                              }}
-                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingInverterWarrantyIdx(null)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingInverterWarrantyIdx(i);
-                                  setEditingInverterWarrantyVal(opt);
-                                }}
-                                className="text-slate-400 hover:text-amber-600 p-0.5 cursor-pointer"
-                                title="Edit option"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  confirmDelete({
-                                    title: 'Delete Inverter Warranty Option',
-                                    itemLabel: opt,
-                                    category: 'Inverter Warranty Matrix',
-                                    description: `Are you sure you want to remove "${opt}" from warranty choices?`,
-                                    onConfirm: () => {
-                                      const updated = config.inverterWarrantyOptions.filter((_, idx) => idx !== i);
-                                      setConfig({ ...config, inverterWarrantyOptions: updated });
-                                    }
-                                  });
-                                }}
-                                className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
-                                title="Delete option"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add warranty option (e.g. 10 Years Extended)..."
-                    value={newInverterWarranty}
-                    onChange={(e) => setNewInverterWarranty(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newInverterWarranty.trim()) return;
-                      setConfig({
-                        ...config,
-                        inverterWarrantyOptions: [...config.inverterWarrantyOptions, newInverterWarranty.trim()]
-                      });
-                      setNewInverterWarranty('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
+            <textarea
+              rows={2}
+              placeholder="e.g. **Solar Modules**: 25 Year Warranty (12 years manufacturing defect warranty...)"
+              value={newWarrantyClause}
+              onChange={(e) => setNewWarrantyClause(e.target.value)}
+              className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-sans"
+            />
+            {newWarrantyClause && (
+              <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                <div className="flex items-start gap-2">
+                  {newWarrantyClause.trim().startsWith('~') ? (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1 py-0.5 rounded shrink-0">No Bullet</span>
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-1.5"></span>
+                  )}
+                  <span className="whitespace-pre-line leading-relaxed flex-1">
+                    {renderFormattedText(newWarrantyClause.replace(/^~\s*/, ''))}
+                  </span>
                 </div>
               </div>
-
-              {/* BOS Warranty Dropdown */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800">Balance of System (BOS) Warranty Dropdown Choices</span>
-                  <span className="text-[10px] font-mono text-slate-500">{config.bosWarrantyOptions.length} choices</span>
-                </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                  {config.bosWarrantyOptions.map((opt, i) => {
-                    const isEditing = editingBosWarrantyIdx === i;
-                    return (
-                      <div key={i} className="text-xs bg-white p-2 rounded-lg border border-slate-200/70 shadow-2xs">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              value={editingBosWarrantyVal}
-                              onChange={(e) => setEditingBosWarrantyVal(e.target.value)}
-                              className="flex-1 text-xs px-2 py-1 bg-slate-50 border border-slate-300 rounded-md focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editingBosWarrantyVal.trim()) return;
-                                const updated = [...config.bosWarrantyOptions];
-                                updated[i] = editingBosWarrantyVal.trim();
-                                setConfig({ ...config, bosWarrantyOptions: updated });
-                                setEditingBosWarrantyIdx(null);
-                              }}
-                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingBosWarrantyIdx(null)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[10px] font-bold cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-between">
-                            <span className="truncate pr-2">{opt}</span>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingBosWarrantyIdx(i);
-                                  setEditingBosWarrantyVal(opt);
-                                }}
-                                className="text-slate-400 hover:text-amber-600 p-0.5 cursor-pointer"
-                                title="Edit option"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  confirmDelete({
-                                    title: 'Delete BOS Warranty Option',
-                                    itemLabel: opt,
-                                    category: 'BOS Warranty Matrix',
-                                    description: `Are you sure you want to remove "${opt}" from warranty choices?`,
-                                    onConfirm: () => {
-                                      const updated = config.bosWarrantyOptions.filter((_, idx) => idx !== i);
-                                      setConfig({ ...config, bosWarrantyOptions: updated });
-                                    }
-                                  });
-                                }}
-                                className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
-                                title="Delete option"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <input
-                    type="text"
-                    placeholder="Add BOS warranty choice..."
-                    value={newBosWarranty}
-                    onChange={(e) => setNewBosWarranty(e.target.value)}
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newBosWarranty.trim()) return;
-                      setConfig({
-                        ...config,
-                        bosWarrantyOptions: [...config.bosWarrantyOptions, newBosWarranty.trim()]
-                      });
-                      setNewBosWarranty('');
-                    }}
-                    className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!newWarrantyClause.trim()) return;
+                  const current = config.warrantyClauses && config.warrantyClauses.length > 0
+                    ? config.warrantyClauses
+                    : DEFAULT_WARRANTY_CLAUSES;
+                  setConfig({
+                    ...config,
+                    warrantyClauses: [...current, newWarrantyClause.trim()]
+                  });
+                  setNewWarrantyClause('');
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Warranty Clause</span>
+              </button>
             </div>
           </div>
         </div>
@@ -3111,96 +3140,189 @@ export default function QuotationToolsView({
       {/* Tab 8: Project Completion */}
       {activeTab === 'PROJECT_COMPLETION' && (
         <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-6">
-          <div className="border-b border-slate-200/80 pb-4">
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-              <CalendarClock className="w-4 h-4 text-amber-600" />
-              <span>Project Completion & Milestone Timelines</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Standard execution duration and phase-wise delivery milestone descriptions.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Default Project Completion Timeline
-            </label>
-            <input
-              type="text"
-              value={config.defaultCompletionWeeks}
-              onChange={(e) => setConfig({ ...config, defaultCompletionWeeks: e.target.value })}
-              className="w-full max-w-md px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
-              placeholder="2 to 3 weeks"
-            />
-            <span className="text-[10px] text-slate-400 mt-1 block">e.g. 2 to 3 weeks from receipt of advance and site clearance</span>
-          </div>
-
-          <div className="space-y-2.5 pt-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-black uppercase text-slate-900">Standard Execution Milestones</h4>
-              <span className="text-[10px] font-mono font-bold text-slate-500">{config.completionMilestones.length} Phases</span>
+          <div className="border-b border-slate-200/80 pb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <CalendarClock className="w-4 h-4 text-amber-600" />
+                <span>Project Completion & Milestones</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Standard phase-wise delivery milestone descriptions printed on Page 3.
+              </p>
             </div>
+            <span className="text-[10px] font-mono font-bold text-slate-500">
+              {(config.completionMilestones || DEFAULT_COMPLETION_MILESTONES).length} Phases
+            </span>
+          </div>
 
-            <div className="space-y-2">
-              {config.completionMilestones.map((ms, idx) => (
-                <div key={idx} className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
-                  <span className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-700 text-xs font-bold flex items-center justify-center shrink-0">
-                    {idx + 1}
-                  </span>
-                  <input
-                    type="text"
-                    value={ms}
-                    onChange={(e) => {
-                      const updated = [...config.completionMilestones];
-                      updated[idx] = e.target.value;
-                      setConfig({ ...config, completionMilestones: updated });
-                    }}
-                    className="flex-1 text-xs bg-transparent border-none focus:outline-hidden focus:ring-0 text-slate-800 font-medium"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      confirmDelete({
-                        title: 'Delete Milestone Phase',
-                        itemLabel: ms,
-                        category: 'Project Milestones',
-                        description: `Are you sure you want to remove Phase #${idx + 1}?`,
-                        onConfirm: () => {
-                          const updated = config.completionMilestones.filter((_, i) => i !== idx);
-                          setConfig({ ...config, completionMilestones: updated });
-                        }
-                      });
-                    }}
-                    className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+          <div className="space-y-3">
+            {(config.completionMilestones || DEFAULT_COMPLETION_MILESTONES).map((ms, idx) => {
+              const isEditing = editingMilestoneIdx === idx;
+              return (
+                <div key={idx} className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Edit Phase #{idx + 1}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditingMilestoneVal(prev => prev + '**bold text**')}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                            title="Insert Bold Markdown"
+                          >
+                            B
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingMilestoneVal(prev => prev + '*italic text*')}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                            title="Insert Italic Markdown"
+                          >
+                            I
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={editingMilestoneVal}
+                        onChange={(e) => setEditingMilestoneVal(e.target.value)}
+                        className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-sans"
+                      />
+                      {editingMilestoneVal && (
+                        <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                          <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                          <span className="whitespace-pre-line leading-relaxed">{renderFormattedText(editingMilestoneVal)}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!editingMilestoneVal.trim()) return;
+                            const current = [...(config.completionMilestones || DEFAULT_COMPLETION_MILESTONES)];
+                            current[idx] = editingMilestoneVal.trim();
+                            setConfig({ ...config, completionMilestones: current });
+                            setEditingMilestoneIdx(null);
+                          }}
+                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingMilestoneIdx(null)}
+                          className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <span className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                            {idx + 1}
+                          </span>
+                          <div className="flex-1 text-xs text-slate-800 whitespace-pre-line leading-relaxed">
+                            {renderFormattedText(ms)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMilestoneIdx(idx);
+                              setEditingMilestoneVal(ms);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-amber-600 cursor-pointer"
+                            title="Edit milestone"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              confirmDelete({
+                                title: 'Delete Milestone Phase',
+                                itemLabel: ms.slice(0, 45) + '...',
+                                category: 'Project Milestones',
+                                description: `Are you sure you want to remove Phase #${idx + 1}?`,
+                                onConfirm: () => {
+                                  const current = (config.completionMilestones || DEFAULT_COMPLETION_MILESTONES).filter((_, i) => i !== idx);
+                                  setConfig({ ...config, completionMilestones: current });
+                                }
+                              });
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                            title="Delete milestone"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
 
-            <div className="flex gap-2 pt-1">
-              <input
-                type="text"
-                placeholder="Add execution phase milestone..."
-                value={newMilestone}
-                onChange={(e) => setNewMilestone(e.target.value)}
-                className="flex-1 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
-              />
+          {/* Add Phase Milestone */}
+          <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800">Add Execution Milestone Phase</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setNewMilestone(prev => prev + '**bold text**')}
+                  className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                  title="Insert Bold Markdown"
+                >
+                  B
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewMilestone(prev => prev + '*italic text*')}
+                  className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                  title="Insert Italic Markdown"
+                >
+                  I
+                </button>
+              </div>
+            </div>
+            <textarea
+              rows={2}
+              placeholder="e.g. **Phase 1**: Submission of engineering drawings within *3 days*..."
+              value={newMilestone}
+              onChange={(e) => setNewMilestone(e.target.value)}
+              className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-sans"
+            />
+            {newMilestone && (
+              <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                <span className="whitespace-pre-line leading-relaxed">{renderFormattedText(newMilestone)}</span>
+              </div>
+            )}
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() => {
                   if (!newMilestone.trim()) return;
+                  const current = config.completionMilestones && config.completionMilestones.length > 0
+                    ? config.completionMilestones
+                    : DEFAULT_COMPLETION_MILESTONES;
                   setConfig({
                     ...config,
-                    completionMilestones: [...config.completionMilestones, newMilestone.trim()]
+                    completionMilestones: [...current, newMilestone.trim()]
                   });
                   setNewMilestone('');
                 }}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add Phase</span>
+                <span>Add Milestone Phase</span>
               </button>
             </div>
           </div>
@@ -3216,28 +3338,12 @@ export default function QuotationToolsView({
               <span>Estimated Solar Financial Benefits & Generation Matrix</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Configure default electricity tariff rate (₹/unit) and master reference savings table printed on Page 4.
+              Configure master reference savings table and generation/financial assumptions printed on Page 4.
             </p>
           </div>
 
-          <div className="max-w-xs">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Default Electricity Tariff Considered (₹/Unit)
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">₹</span>
-              <input
-                type="number"
-                step="0.5"
-                value={config.defaultTariffPerUnit}
-                onChange={(e) => setConfig({ ...config, defaultTariffPerUnit: parseFloat(e.target.value) || 8 })}
-                className="w-full pl-7 pr-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20"
-              />
-            </div>
-            <span className="text-[10px] text-slate-400 mt-1 block">Standard TNEB / Discom commercial tariff</span>
-          </div>
-
-          <div className="space-y-3 pt-2">
+          {/* Reference Solar Benefits Table */}
+          <div className="space-y-3">
             <h4 className="text-xs font-black uppercase text-slate-900">Reference Solar Benefits Table</h4>
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-xs text-left border-collapse">
@@ -3330,6 +3436,233 @@ export default function QuotationToolsView({
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          {/* Assumptions Field with Text Fields */}
+          <div className="space-y-4 pt-3 border-t border-slate-200/80">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                  <span>Assumptions</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Financial and generation assumptions printed directly on Page 4 below the benefits table.
+                </p>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-slate-500">
+                {(config.tariffAssumptions || DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions).length} Items
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {(config.tariffAssumptions || DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions).map((assump, index) => {
+                const isEditing = editingTariffAssumptionIdx === index;
+                return (
+                  <div key={index} className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">Edit Assumption #{index + 1}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingTariffAssumptionVal(prev => prev + '**bold text**')}
+                              className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                              title="Insert Bold Markdown"
+                            >
+                              B
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingTariffAssumptionVal(prev => prev + '*italic text*')}
+                              className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                              title="Insert Italic Markdown"
+                            >
+                              I
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingTariffAssumptionVal(prev => prev.startsWith('~ ') ? prev.slice(2) : ('~ ' + prev))}
+                              className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                              title="Toggle No Bullet (~ prefix)"
+                            >
+                              ~ No Bullet
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          rows={2}
+                          value={editingTariffAssumptionVal}
+                          onChange={(e) => setEditingTariffAssumptionVal(e.target.value)}
+                          className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-sans"
+                        />
+                        {editingTariffAssumptionVal && (
+                          <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                            <div className="flex items-start gap-2">
+                              {editingTariffAssumptionVal.trim().startsWith('~') ? (
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1 py-0.5 rounded shrink-0">No Bullet</span>
+                              ) : (
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-1.5"></span>
+                              )}
+                              <span className="whitespace-pre-line leading-relaxed flex-1">
+                                {renderFormattedText(editingTariffAssumptionVal.replace(/^~\s*/, ''))}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!editingTariffAssumptionVal.trim()) return;
+                              const current = [...(config.tariffAssumptions || DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions)];
+                              current[index] = editingTariffAssumptionVal.trim();
+                              setConfig({ ...config, tariffAssumptions: current });
+                              setEditingTariffAssumptionIdx(null);
+                            }}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-bold cursor-pointer"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTariffAssumptionIdx(null)}
+                            className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                            {assump.trim().startsWith('~') ? (
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-200/80 px-1.5 py-0.5 rounded shrink-0 mt-0.5">
+                                No Bullet
+                              </span>
+                            ) : (
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-2"></span>
+                            )}
+                            <div className="flex-1 text-xs text-slate-800 whitespace-pre-line leading-relaxed">
+                              {renderFormattedText(assump.replace(/^~\s*/, ''))}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTariffAssumptionIdx(index);
+                                setEditingTariffAssumptionVal(assump);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 cursor-pointer"
+                              title="Edit assumption"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                confirmDelete({
+                                  title: 'Delete Assumption',
+                                  itemLabel: assump.slice(0, 45) + '...',
+                                  category: 'Solar Assumptions',
+                                  description: `Are you sure you want to remove Assumption #${index + 1}?`,
+                                  onConfirm: () => {
+                                    const current = (config.tariffAssumptions || DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions).filter((_, i) => i !== index);
+                                    setConfig({ ...config, tariffAssumptions: current });
+                                  }
+                                });
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                              title="Delete assumption"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add New Assumption */}
+            <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">Add New Assumption</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewTariffAssumption(prev => prev + '**bold text**')}
+                    className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-black text-slate-800 hover:bg-slate-100 cursor-pointer"
+                    title="Insert Bold Markdown"
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewTariffAssumption(prev => prev + '*italic text*')}
+                    className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs italic font-bold text-slate-800 hover:bg-slate-100 cursor-pointer"
+                    title="Insert Italic Markdown"
+                  >
+                    I
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewTariffAssumption(prev => prev.startsWith('~ ') ? prev.slice(2) : ('~ ' + prev))}
+                    className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                    title="Toggle No Bullet (~ prefix)"
+                  >
+                    ~ No Bullet
+                  </button>
+                </div>
+              </div>
+              <textarea
+                rows={2}
+                placeholder="e.g. **TANGEDCO Tariff** considered at *₹8.00 / kWh* unit"
+                value={newTariffAssumption}
+                onChange={(e) => setNewTariffAssumption(e.target.value)}
+                className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-sans"
+              />
+              {newTariffAssumption && (
+                <div className="text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200">
+                  <span className="text-[9px] font-bold text-amber-800 uppercase block mb-0.5">Live Preview:</span>
+                  <div className="flex items-start gap-2">
+                    {newTariffAssumption.trim().startsWith('~') ? (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1 py-0.5 rounded shrink-0">No Bullet</span>
+                    ) : (
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0 mt-1.5"></span>
+                    )}
+                    <span className="whitespace-pre-line leading-relaxed flex-1">
+                      {renderFormattedText(newTariffAssumption.replace(/^~\s*/, ''))}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newTariffAssumption.trim()) return;
+                    const current = config.tariffAssumptions && config.tariffAssumptions.length > 0
+                      ? config.tariffAssumptions
+                      : DEFAULT_QUOTATION_MASTER_CONFIG.tariffAssumptions;
+                    setConfig({
+                      ...config,
+                      tariffAssumptions: [...current, newTariffAssumption.trim()]
+                    });
+                    setNewTariffAssumption('');
+                  }}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Assumption</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4446,7 +4779,9 @@ export default function QuotationToolsView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
-                  {config.productsCatalog.map((prod, idx) => (
+                  {(config.productsCatalog || [])
+                    .filter(prod => !isNilItem(prod.name) && !isNilItem(prod.modelSpec))
+                    .map((prod) => (
                     <tr key={prod.id} className="hover:bg-amber-50/40">
                       <td className="p-2.5 border-r border-slate-200">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
@@ -4458,8 +4793,7 @@ export default function QuotationToolsView({
                           type="text"
                           value={prod.name}
                           onChange={(e) => {
-                            const updated = [...config.productsCatalog];
-                            updated[idx].name = e.target.value;
+                            const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, name: e.target.value } : p);
                             setConfig({ ...config, productsCatalog: updated });
                           }}
                           className="w-full bg-transparent text-xs font-bold text-slate-900"
@@ -4469,8 +4803,7 @@ export default function QuotationToolsView({
                             type="text"
                             value={prod.modelSpec}
                             onChange={(e) => {
-                              const updated = [...config.productsCatalog];
-                              updated[idx].modelSpec = e.target.value;
+                              const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, modelSpec: e.target.value } : p);
                               setConfig({ ...config, productsCatalog: updated });
                             }}
                             className="w-full bg-transparent text-[10px] text-slate-400"
@@ -4482,8 +4815,7 @@ export default function QuotationToolsView({
                           type="text"
                           value={prod.brand}
                           onChange={(e) => {
-                            const updated = [...config.productsCatalog];
-                            updated[idx].brand = e.target.value;
+                            const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, brand: e.target.value } : p);
                             setConfig({ ...config, productsCatalog: updated });
                           }}
                           className="w-full bg-transparent text-xs font-semibold text-amber-800"
@@ -4494,8 +4826,7 @@ export default function QuotationToolsView({
                           type="text"
                           value={prod.defaultUnit}
                           onChange={(e) => {
-                            const updated = [...config.productsCatalog];
-                            updated[idx].defaultUnit = e.target.value;
+                            const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, defaultUnit: e.target.value } : p);
                             setConfig({ ...config, productsCatalog: updated });
                           }}
                           className="w-16 bg-transparent text-xs font-mono text-slate-600"
@@ -4506,8 +4837,7 @@ export default function QuotationToolsView({
                           type="number"
                           value={prod.defaultUnitPrice}
                           onChange={(e) => {
-                            const updated = [...config.productsCatalog];
-                            updated[idx].defaultUnitPrice = parseFloat(e.target.value) || 0;
+                            const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, defaultUnitPrice: parseFloat(e.target.value) || 0 } : p);
                             setConfig({ ...config, productsCatalog: updated });
                           }}
                           className="w-24 text-right bg-transparent text-xs font-mono font-bold text-slate-900"
@@ -4518,8 +4848,7 @@ export default function QuotationToolsView({
                           type="text"
                           value={prod.warrantyPeriod}
                           onChange={(e) => {
-                            const updated = [...config.productsCatalog];
-                            updated[idx].warrantyPeriod = e.target.value;
+                            const updated = config.productsCatalog.map(p => p.id === prod.id ? { ...p, warrantyPeriod: e.target.value } : p);
                             setConfig({ ...config, productsCatalog: updated });
                           }}
                           className="w-full bg-transparent text-xs text-slate-600"
@@ -4535,7 +4864,7 @@ export default function QuotationToolsView({
                               category: `${prod.category} Catalog Item`,
                               description: `Are you sure you want to remove product "${prod.name}" (${prod.brand}) from the master component catalog?`,
                               onConfirm: () => {
-                                const updated = config.productsCatalog.filter((_, i) => i !== idx);
+                                const updated = config.productsCatalog.filter(p => p.id !== prod.id);
                                 setConfig({ ...config, productsCatalog: updated });
                               }
                             });
@@ -4585,10 +4914,11 @@ export default function QuotationToolsView({
                         Category <span className="text-red-500">*</span>
                       </label>
                       <select
-                        value={newProduct.category || 'MODULE'}
+                        value={newProduct.category || ''}
                         onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value as any })}
                         className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800"
                       >
+                        <option value="" disabled>Choose Category</option>
                         <option value="MODULE">PV Module</option>
                         <option value="BATTERY">Battery</option>
                         <option value="INVERTER">Inverter</option>
@@ -4613,7 +4943,7 @@ export default function QuotationToolsView({
                         </label>
                         <input
                           type="text"
-                          placeholder="e.g. 550Wp Bi-facial DCR Solar Panel"
+                          placeholder="e.g. 550Wp Bi-facial DCR Solar Panel or Nil"
                           value={newProduct.name || ''}
                           onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
                           className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-900"
@@ -4621,30 +4951,42 @@ export default function QuotationToolsView({
                         />
                       </div>
 
+                      {/* Nil Product Notice */}
+                      {isNilItem(newProduct.name) && (
+                        <div className="sm:col-span-2 p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                          <Check className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold">Nil Option Detected:</span> This item will be synced to proposal equipment dropdowns (Battery / Structure) as a Nil selection. Brand is excluded and price is ₹0. It will <strong>not</strong> go into the Pricing Table.
+                          </div>
+                        </div>
+                      )}
+
                       {/* Brand */}
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Brand
+                          Brand {isNilItem(newProduct.name) && <span className="text-amber-600 font-normal text-[11px]">(Excluded for Nil)</span>}
                         </label>
                         <input
                           type="text"
-                          placeholder="e.g. Servotec / Waaree"
-                          value={newProduct.brand || ''}
+                          placeholder={isNilItem(newProduct.name) ? 'None (Nil item)' : 'e.g. Servotec / Waaree'}
+                          value={isNilItem(newProduct.name) ? '' : (newProduct.brand || '')}
+                          disabled={isNilItem(newProduct.name)}
                           onChange={(e) => setNewProduct({ ...newProduct, brand: e.target.value })}
-                          className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800"
+                          className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                       </div>
 
                       {/* Unit */}
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Unit <span className="text-red-500">*</span>
+                          Unit {!isNilItem(newProduct.name) && <span className="text-red-500">*</span>}
                         </label>
                         <select
-                          value={newProduct.defaultUnit || 'Nos'}
+                          value={newProduct.defaultUnit || (isNilItem(newProduct.name) ? 'Nos' : '')}
                           onChange={(e) => setNewProduct({ ...newProduct, defaultUnit: e.target.value })}
                           className="w-full px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 font-mono"
                         >
+                          <option value="" disabled>Choose Units</option>
                           <option value="Nos">Nos</option>
                           <option value="kWp">kWp</option>
                           <option value="Feet">Feet</option>
@@ -4656,16 +4998,17 @@ export default function QuotationToolsView({
                       {/* Default Unit Rate */}
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Default Unit Rate (₹)
+                          Default Unit Rate (₹) {isNilItem(newProduct.name) && <span className="text-amber-600 font-normal text-[11px]">(₹0 for Nil items)</span>}
                         </label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₹</span>
                           <input
                             type="number"
-                            placeholder="e.g. 24500"
-                            value={newProduct.defaultUnitPrice || ''}
+                            placeholder={isNilItem(newProduct.name) ? '0' : 'e.g. 24500'}
+                            value={isNilItem(newProduct.name) ? 0 : (newProduct.defaultUnitPrice || '')}
+                            disabled={isNilItem(newProduct.name)}
                             onChange={(e) => setNewProduct({ ...newProduct, defaultUnitPrice: parseFloat(e.target.value) || 0 })}
-                            className="w-full pl-7 pr-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-900"
+                            className="w-full pl-7 pr-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -4683,13 +5026,62 @@ export default function QuotationToolsView({
                     </button>
                     <button
                       type="button"
-                      disabled={!newProduct.name?.trim()}
+                      disabled={isNilItem(newProduct.name) ? (!newProduct.name?.trim() || !newProduct.category) : (!newProduct.name?.trim() || !newProduct.category || !newProduct.defaultUnit)}
                       onClick={() => {
-                        if (!newProduct.name?.trim()) return;
-                        const prodCategory = newProduct.category || 'MODULE';
+                        if (!newProduct.name?.trim() || !newProduct.category) return;
+                        const prodCategory = newProduct.category;
                         const prodName = newProduct.name.trim();
+
+                        // If user is adding a Nil product under Battery, Structure, etc.
+                        if (isNilItem(prodName)) {
+                          const updatedSupplyDropdownOptions = { ...config.supplyDropdownOptions };
+                          const cleanOptionText = prodName;
+
+                          if (prodCategory === 'MODULE') {
+                            if (!updatedSupplyDropdownOptions.moduleOptions.includes(cleanOptionText)) {
+                              updatedSupplyDropdownOptions.moduleOptions = [...updatedSupplyDropdownOptions.moduleOptions, cleanOptionText];
+                            }
+                          } else if (prodCategory === 'INVERTER') {
+                            if (!updatedSupplyDropdownOptions.inverterOptions.includes(cleanOptionText)) {
+                              updatedSupplyDropdownOptions.inverterOptions = [...updatedSupplyDropdownOptions.inverterOptions, cleanOptionText];
+                            }
+                          } else if (prodCategory === 'BATTERY') {
+                            if (!updatedSupplyDropdownOptions.batteryOptions.includes(cleanOptionText)) {
+                              updatedSupplyDropdownOptions.batteryOptions = [...updatedSupplyDropdownOptions.batteryOptions, cleanOptionText];
+                            }
+                          } else if (prodCategory === 'STRUCTURE') {
+                            if (!updatedSupplyDropdownOptions.structureOptions.includes(cleanOptionText)) {
+                              updatedSupplyDropdownOptions.structureOptions = [...updatedSupplyDropdownOptions.structureOptions, cleanOptionText];
+                            }
+                          }
+
+                          // CRITICAL: Nil products must NOT go under Pricing Table in tools!
+                          const filteredCatalog = (config.productsCatalog || []).filter(
+                            p => !isNilItem(p.name) && !isNilItem(p.modelSpec)
+                          );
+
+                          setConfig({
+                            ...config,
+                            supplyDropdownOptions: updatedSupplyDropdownOptions,
+                            productsCatalog: filteredCatalog
+                          });
+                          setIsAddingProduct(false);
+                          setNewProduct({
+                            category: undefined,
+                            name: '',
+                            brand: '',
+                            modelSpec: '',
+                            defaultUnit: undefined,
+                            defaultUnitPrice: 0,
+                            warrantyPeriod: 'Standard Warranty',
+                            isDefaultBOQ: true
+                          });
+                          return;
+                        }
+
+                        if (!newProduct.defaultUnit) return;
                         const prodBrand = newProduct.brand?.trim() || '';
-                        const prodUnit = newProduct.defaultUnit || 'Nos';
+                        const prodUnit = newProduct.defaultUnit;
                         const prodPrice = Number(newProduct.defaultUnitPrice) || 0;
 
                         const productToAdd: MasterCatalogProduct = {
@@ -4735,11 +5127,11 @@ export default function QuotationToolsView({
                         });
                         setIsAddingProduct(false);
                         setNewProduct({
-                          category: 'MODULE',
+                          category: undefined,
                           name: '',
                           brand: '',
                           modelSpec: '',
-                          defaultUnit: 'Nos',
+                          defaultUnit: undefined,
                           defaultUnitPrice: 0,
                           warrantyPeriod: 'Standard Warranty',
                           isDefaultBOQ: true
@@ -4747,7 +5139,7 @@ export default function QuotationToolsView({
                       }}
                       className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
                     >
-                      Save Product to Catalog
+                      {isNilItem(newProduct.name) ? 'Sync Nil Option (Exclude from Pricing Table)' : 'Save Product to Catalog'}
                     </button>
                   </div>
                 </div>

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, User as UserIcon, Lock, AlertTriangle, Eye, EyeOff, Network } from 'lucide-react';
-import { User } from '../types';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import { User, APP_VERSION } from '../types';
 import { MOCK_USERS } from '../data';
 
 interface LoginScreenProps {
@@ -15,6 +17,29 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [dynamicVersion, setDynamicVersion] = useState<string>(APP_VERSION);
+
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(
+        doc(db, 'app_settings', 'config'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data?.appVersion) {
+              setDynamicVersion(String(data.appVersion));
+            }
+          }
+        },
+        (err) => {
+          console.warn('Version sync note:', err);
+        }
+      );
+      return () => unsub();
+    } catch {
+      // Keep APP_VERSION fallback
+    }
+  }, []);
 
   const activeUsers = usersList && usersList.length > 0 ? usersList : MOCK_USERS;
 
@@ -68,12 +93,26 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
         className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden"
       >
         {/* Header Banner */}
-        <div className="bg-slate-900 px-8 py-8 text-white relative text-center flex flex-col items-center">
-          <div className="flex items-center justify-center w-11 h-11 rounded-full bg-[#f7b944] text-[#112231] font-bold shadow-md mb-3">
-            <Network className="w-6 h-6 stroke-[2.5]" />
+        <div className="bg-slate-900 px-6 sm:px-8 py-7 sm:py-8 text-white relative flex items-center justify-between gap-4 border-b border-slate-800">
+          <div className="flex items-center shrink-0">
+            <img 
+              src="https://res.cloudinary.com/ommax/image/upload/v1788420820/connect-app/logo/CMYK-Logo-Yellow-ISO_nmojia.png"
+              alt="Ommax Electric Logo"
+              className="h-10 sm:h-11 w-auto object-contain"
+              referrerPolicy="no-referrer"
+            />
           </div>
-          <h1 className="text-3xl font-extrabold tracking-wider font-foldit bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h1>
-          <span className="text-xs font-bold text-[#f7b944] tracking-wide uppercase mt-1">Ommax Electric Private Limited</span>
+          <div className="flex flex-col items-center justify-center text-center shrink-0">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-wider font-foldit bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent leading-none text-center pl-1">
+              CONNECT
+            </h1>
+            <p 
+              className="font-tulpen text-[#f7b944] text-base sm:text-lg font-normal leading-none mt-1.5 text-center tracking-wider"
+              style={{ fontFamily: "'Tulpen One', cursive, sans-serif" }}
+            >
+              Our Unified Workspace
+            </p>
+          </div>
         </div>
 
         <div className="p-8">
@@ -153,6 +192,17 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
                 </>
               )}
             </button>
+
+            {/* Enterprise Security Reassurance & Version */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col items-center justify-center gap-1.5 text-center">
+              <div className="flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-500">
+                <Lock className="w-3 h-3 text-emerald-500 shrink-0" />
+                <span>256-Bit SSL Encrypted</span>
+                <span className="text-slate-300">•</span>
+                <span>Role-Based Access</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono tracking-wider">Version {dynamicVersion}</span>
+            </div>
           </form>
         </div>
       </motion.div>

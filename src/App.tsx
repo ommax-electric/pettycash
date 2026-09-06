@@ -27,9 +27,12 @@ import {
   UserCheck,
   TrendingUp,
   FileSpreadsheet,
-  Wrench
+  Wrench,
+  HelpCircle,
+  MessageSquareQuote,
+  AlertTriangle
 } from 'lucide-react';
-import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry } from './types';
+import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry, ExpenseQuery, QueryMessage, ParentModule, ALL_PARENT_MODULES } from './types';
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, OpportunityStage, OpportunityEditHistoryEntry, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
 import { SolarQuotation, QuotationStatus, QuotationMasterConfig, DEFAULT_QUOTATION_MASTER_CONFIG } from './quotation/types';
 import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
@@ -46,6 +49,7 @@ import LoginScreen from './components/LoginScreen';
 import DashboardView from './components/DashboardView';
 import RegisterView from './components/RegisterView';
 import ApprovalsView from './components/ApprovalsView';
+import QueriesView from './components/QueriesView';
 import SettingsView from './components/SettingsView';
 import AdminSettingsView, { AdminTab } from './components/AdminSettingsView';
 
@@ -63,8 +67,9 @@ import QuotationDashboardView from './components/quotation/QuotationDashboardVie
 import QuotationToolsView from './components/quotation/QuotationToolsView';
 import LiveQuotationCanvas from './components/quotation/LiveQuotationCanvas';
 
-export type ParentModule = 'CRM' | 'QUOTATION' | 'HRMS' | 'CASH_BOOK' | 'SETTINGS' | 'ADMIN_SETTINGS';
-export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS';
+export type { ParentModule };
+export { ALL_PARENT_MODULES };
+export type CashBookTab = 'DASHBOARD' | 'INWARD' | 'OUTWARD' | 'APPROVALS' | 'QUERIES';
 
 export interface AppModuleConfig {
   id: ParentModule;
@@ -78,14 +83,34 @@ export const APP_MODULES: AppModuleConfig[] = [
   { id: 'QUOTATION', label: 'Quotation', defaultTab: 'QUOTATION_PROPOSAL', hasSubmenu: true },
   { id: 'HRMS', label: 'HRMS', defaultTab: 'HRMS', hasSubmenu: false },
   { id: 'CASH_BOOK', label: 'Cash Book', defaultTab: 'CASHBOOK_DASHBOARD', hasSubmenu: true },
+  { id: 'SETTINGS', label: 'Settings', defaultTab: 'SETTINGS', hasSubmenu: false },
+  { id: 'ADMIN_SETTINGS', label: 'Admin Settings', defaultTab: 'ADMIN_SETTINGS', hasSubmenu: true },
 ];
 
-export const getDefaultModuleState = (userPrefModule?: string): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
-  const targetMod = (userPrefModule as ParentModule) || 'CRM';
-  const found = APP_MODULES.find(m => m.id === targetMod) || APP_MODULES[0];
+export const getDefaultModuleState = (
+  userPrefModule?: string,
+  allowedModules?: ParentModule[]
+): { defaultTab: NavigationTab; defaultParent: ParentModule | null } => {
+  const allowed = allowedModules && allowedModules.length > 0
+    ? APP_MODULES.filter(m => allowedModules.includes(m.id))
+    : APP_MODULES;
+
+  const effectiveModules = allowed.length > 0 ? allowed : APP_MODULES;
+
+  if (userPrefModule) {
+    const matched = effectiveModules.find(m => m.id === userPrefModule);
+    if (matched) {
+      return {
+        defaultTab: matched.defaultTab,
+        defaultParent: matched.id
+      };
+    }
+  }
+
+  const fallback = effectiveModules[0];
   return {
-    defaultTab: found.defaultTab,
-    defaultParent: found.id
+    defaultTab: fallback.defaultTab,
+    defaultParent: fallback.id
   };
 };
 
@@ -102,6 +127,7 @@ type NavigationTab =
   | 'CASHBOOK_INWARD'
   | 'CASHBOOK_OUTWARD'
   | 'CASHBOOK_APPROVALS'
+  | 'CASHBOOK_QUERIES'
   | 'CASHBOOK_SETTINGS'
   | 'SETTINGS'
   | 'ADMIN_SETTINGS';
@@ -146,6 +172,8 @@ const getActiveTabClass = (tabId: NavigationTab) => {
       return 'bg-rose-600 text-white shadow-md shadow-rose-950/20';
     case 'CASHBOOK_APPROVALS':
       return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
+    case 'CASHBOOK_QUERIES':
+      return 'bg-violet-600 text-white shadow-md shadow-violet-950/20';
     case 'CASHBOOK_SETTINGS':
     case 'SETTINGS':
       return 'bg-slate-700 text-white shadow-md shadow-slate-950/20';
@@ -176,6 +204,8 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<CategoryLimit[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [queries, setQueries] = useState<ExpenseQuery[]>([]);
+  const [selectedQueryId, setSelectedQueryId] = useState<string | null>(null);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
 
   // CRM States (Completely isolated collections)
@@ -187,6 +217,19 @@ export default function App() {
   // Quotation States
   const [quotations, setQuotations] = useState<SolarQuotation[]>([]);
   const [activeEditingQuotation, setActiveEditingQuotation] = useState<SolarQuotation | null>(null);
+  const [quotationToolsDirty, setQuotationToolsDirty] = useState(false);
+  const [pendingNavigationTab, setPendingNavigationTab] = useState<NavigationTab | null>(null);
+  const [showToolsUnsavedModal, setShowToolsUnsavedModal] = useState(false);
+
+  // Safe tab change function that warns if Quotation Tools has unsaved modifications
+  const handleTabChange = (targetTab: NavigationTab) => {
+    if (activeTab === 'QUOTATION_TOOLS' && targetTab !== 'QUOTATION_TOOLS' && quotationToolsDirty) {
+      setPendingNavigationTab(targetTab);
+      setShowToolsUnsavedModal(true);
+      return;
+    }
+    setActiveTab(targetTab);
+  };
   const [quotationMasterConfig, setQuotationMasterConfig] = useState<QuotationMasterConfig>(() => {
     try {
       const saved = localStorage.getItem('ommax_solar_quotation_master_config');
@@ -456,7 +499,19 @@ export default function App() {
           }
         }, (err) => console.warn('Quotation settings sync notice:', err));
 
-        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos, unsubQuoSettings];
+        // 12. Expense Queries Sync
+        const unsubQueries = onSnapshot(collection(db, 'expense_queries'), (snapshot) => {
+          if (snapshot.empty) {
+            setQueries([]);
+          } else {
+            const list: ExpenseQuery[] = [];
+            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as ExpenseQuery));
+            list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+            setQueries(list);
+          }
+        }, (err) => console.warn('Expense queries sync notice:', err));
+
+        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos, unsubQuoSettings, unsubQueries];
       } catch (err) {
         console.error('Firebase sync setup error:', err);
       }
@@ -474,73 +529,10 @@ export default function App() {
 
 
 
-  // Fetch user public IP address for accurate audit log tracking
-  const [userIpAddress, setUserIpAddress] = useState<string>(() => {
-    return localStorage.getItem('ommax_user_ip') || 'Detecting...';
-  });
-  const userIpRef = useRef<string>(userIpAddress);
-
-  useEffect(() => {
-    userIpRef.current = userIpAddress;
-  }, [userIpAddress]);
-
-  useEffect(() => {
-    let isMounted = true;
-    const fetchPublicIp = async () => {
-      // List of reliable public IP endpoints
-      const endpoints = [
-        'https://api.ipify.org?format=json',
-        'https://api64.ipify.org?format=json',
-        'https://api.db-ip.com/v2/free/self',
-        'https://ipinfo.io/json'
-      ];
-
-      for (const endpoint of endpoints) {
-        try {
-          const res = await fetch(endpoint);
-          if (res.ok) {
-            const data = await res.json();
-            const ip = data.ip || data.ipAddress;
-            if (ip && isMounted) {
-              setUserIpAddress(ip);
-              userIpRef.current = ip;
-              localStorage.setItem('ommax_user_ip', ip);
-              return;
-            }
-          }
-        } catch (e) {
-          // Try next provider
-        }
-      }
-
-      if (isMounted && userIpRef.current === 'Detecting...') {
-        // If external IP lookup is blocked by ad-blocker or network sandbox, use client fallback tag
-        setUserIpAddress('127.0.0.1');
-        userIpRef.current = '127.0.0.1';
-      }
-    };
-
-    fetchPublicIp();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const getEffectiveIp = () => {
-    if (userIpRef.current && userIpRef.current !== 'Detecting...') {
-      return userIpRef.current;
-    }
-    const cached = localStorage.getItem('ommax_user_ip');
-    if (cached) return cached;
-    return '127.0.0.1';
-  };
-
   // Helper for adding Audit Log to Firestore
-  const addLog = (action: string, details: string) => {
+  const addLog = (action: string, details: string, module?: string) => {
     if (!currentUser) return;
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-    const effectiveIp = getEffectiveIp();
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -548,7 +540,7 @@ export default function App() {
       role: currentUser.role,
       action,
       details,
-      ipAddress: effectiveIp
+      module: module || 'Cash Book'
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn('Log save error:', e));
@@ -567,7 +559,6 @@ export default function App() {
     
     // Add Login Audit log
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-    const effectiveIp = getEffectiveIp();
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -575,13 +566,13 @@ export default function App() {
       role: user.role,
       action: 'LOGIN_SUCCESS',
       details: 'Successfully authenticated into financial register node',
-      ipAddress: effectiveIp
+      module: 'Cash Book'
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
 
     const prefModule = user.preferences?.defaultModule || localStorage.getItem(`ommax_pref_${uKey}_default_module`) || undefined;
-    const initialNav = getDefaultModuleState(prefModule);
+    const initialNav = getDefaultModuleState(prefModule, user.allowedModules);
     setActiveTab(initialNav.defaultTab);
     setOpenParentModule(initialNav.defaultParent);
   };
@@ -590,7 +581,6 @@ export default function App() {
   const handleLogout = () => {
     if (currentUser) {
       const logId = `LOG-0${Date.now().toString().slice(-5)}`;
-      const effectiveIp = getEffectiveIp();
       const newLog: ActivityLog = {
         id: logId,
         timestamp: new Date().toISOString(),
@@ -598,7 +588,7 @@ export default function App() {
         role: currentUser.role,
         action: 'LOGOUT',
         details: 'Terminated session and flushed security tokens',
-        ipAddress: effectiveIp
+        module: 'Cash Book'
       };
       setLogs(prev => [newLog, ...prev]);
       setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn(e));
@@ -910,8 +900,24 @@ export default function App() {
       approvedAt: now,
       approverName: realApprover,
       approvedBy: realApprover,
+      queryStatus: targetTxn.hasQuery ? 'CLOSED' : targetTxn.queryStatus,
       workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
     };
+
+    // Auto-close any open queries for this transaction upon manager approval
+    const openQueriesForTxn = queries.filter(q => (q.transactionId === id || q.voucherNo === targetTxn.reference) && q.status === 'OPEN');
+    openQueriesForTxn.forEach(q => {
+      const updatedQuery: ExpenseQuery = {
+        ...q,
+        status: 'CLOSED',
+        closedAt: now,
+        closedBy: realApprover,
+        closeReason: 'Auto-closed upon manager approval',
+        updatedAt: now
+      };
+      setQueries(prev => prev.map(item => item.id === q.id ? updatedQuery : item));
+      setDoc(doc(db, 'expense_queries', q.id), updatedQuery).catch(e => console.warn(e));
+    });
 
     setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
     setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
@@ -1034,6 +1040,154 @@ export default function App() {
     sendEmailNotification('REQUEST_REROUTED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
   };
 
+  // Workflow Handler: Raise Clarification Query
+  const handleRaiseQuery = async (txn: Transaction, initialMessage: string) => {
+    if (!currentUser) return;
+    const realManager = resolveRealPersonName(currentUser.fullName, 'MANAGER');
+    const now = new Date().toISOString();
+    const queryId = `QRY-${Date.now().toString().slice(-6)}`;
+    const claimantName = txn.requestedBy || txn.recordedBy || txn.merchant || 'Submitter';
+
+    const newMsg: QueryMessage = {
+      id: `MSG-${Date.now()}`,
+      senderId: currentUser.id,
+      senderName: realManager,
+      senderEmail: currentUser.email,
+      senderRole: (currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER') as 'ADMIN' | 'MANAGER',
+      message: initialMessage,
+      timestamp: now
+    };
+
+    const newQuery: ExpenseQuery = {
+      id: queryId,
+      transactionId: txn.id,
+      voucherNo: txn.reference || txn.id,
+      amount: txn.amount,
+      particulars: txn.description,
+      category: txn.category,
+      requestedBy: claimantName,
+      managerName: realManager,
+      status: 'OPEN',
+      messages: [newMsg],
+      createdAt: now,
+      updatedAt: now
+    };
+
+    setQueries(prev => [newQuery, ...prev]);
+    setDoc(doc(db, 'expense_queries', queryId), newQuery).catch(e => console.warn(e));
+
+    const updatedTxn: Transaction = {
+      ...txn,
+      hasQuery: true,
+      queryStatus: 'OPEN',
+      latestQueryId: queryId
+    };
+
+    setTransactions(prev => prev.map(t => t.id === txn.id ? updatedTxn : t));
+    setDoc(doc(db, 'transactions', txn.id), updatedTxn).catch(e => console.warn(e));
+
+    addLog('UPDATE_TRANSACTION', `Raised clarification query on voucher #${txn.reference || txn.id}: "${initialMessage.slice(0, 60)}"`);
+
+    sendEmailNotification('QUERY_RAISED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users, {
+      queryBy: realManager,
+      queryMessage: initialMessage
+    });
+  };
+
+  // Workflow Handler: Send Message in Query Thread
+  const handleSendMessageOnQuery = async (queryId: string, messageText: string, attachments?: { name: string; url: string; size?: string }[]) => {
+    if (!currentUser) return;
+    const targetQuery = queries.find(q => q.id === queryId);
+    if (!targetQuery) return;
+
+    const realSender = currentUser.fullName || currentUser.username;
+    const senderRole = currentUser.role === 'ADMIN' ? 'ADMIN' : (currentUser.role === 'MANAGER' ? 'MANAGER' : 'USER');
+    const now = new Date().toISOString();
+
+    const newMsg: QueryMessage = {
+      id: `MSG-${Date.now()}`,
+      senderId: currentUser.id,
+      senderName: realSender,
+      senderEmail: currentUser.email,
+      senderRole,
+      message: messageText,
+      attachments,
+      timestamp: now
+    };
+
+    const updatedQuery: ExpenseQuery = {
+      ...targetQuery,
+      messages: [...targetQuery.messages, newMsg],
+      updatedAt: now
+    };
+
+    setQueries(prev => prev.map(q => q.id === queryId ? updatedQuery : q));
+    setDoc(doc(db, 'expense_queries', queryId), updatedQuery).catch(e => console.warn(e));
+
+    addLog('UPDATE_TRANSACTION', `${realSender} replied to query on voucher #${targetQuery.voucherNo}: "${messageText.slice(0, 50)}"`);
+
+    // Find linked transaction to dispatch email notification
+    const associatedTxn = transactions.find(t => t.id === targetQuery.transactionId || t.reference === targetQuery.voucherNo);
+    const txnForEmail: Transaction = associatedTxn || {
+      id: targetQuery.transactionId,
+      date: (targetQuery.createdAt || now).split('T')[0],
+      reference: targetQuery.voucherNo,
+      type: 'OUT',
+      amount: targetQuery.amount,
+      category: targetQuery.category,
+      description: targetQuery.particulars,
+      merchant: targetQuery.requestedBy,
+      requestedBy: targetQuery.requestedBy,
+      recordedBy: targetQuery.requestedBy,
+      approverName: targetQuery.managerName,
+      status: 'PENDING_APPROVAL',
+      cashBalance: 0
+    };
+
+    // If submitter/claimant replied, dispatch QUERY_RESPONSE email to manager
+    sendEmailNotification('QUERY_RESPONSE', txnForEmail, currentUser, transactions, appSettings, undefined, integrationSettings, users, {
+      responseBy: realSender,
+      responseMessage: messageText,
+      managerName: targetQuery.managerName
+    });
+  };
+
+  // Workflow Handler: Close Query (Manager / Admin)
+  const handleCloseQuery = async (queryId: string, reason?: string) => {
+    if (!currentUser) return;
+    const targetQuery = queries.find(q => q.id === queryId);
+    if (!targetQuery) return;
+
+    const realManager = resolveRealPersonName(currentUser.fullName, 'MANAGER');
+    const now = new Date().toISOString();
+
+    const updatedQuery: ExpenseQuery = {
+      ...targetQuery,
+      status: 'CLOSED',
+      closedAt: now,
+      closedBy: realManager,
+      closeReason: reason || 'Resolved by Manager',
+      updatedAt: now
+    };
+
+    setQueries(prev => prev.map(q => q.id === queryId ? updatedQuery : q));
+    setDoc(doc(db, 'expense_queries', queryId), updatedQuery).catch(e => console.warn(e));
+
+    if (targetQuery.transactionId) {
+      const txn = transactions.find(t => t.id === targetQuery.transactionId);
+      if (txn) {
+        const updatedTxn: Transaction = {
+          ...txn,
+          queryStatus: 'CLOSED'
+        };
+        setTransactions(prev => prev.map(t => t.id === txn.id ? updatedTxn : t));
+        setDoc(doc(db, 'transactions', txn.id), updatedTxn).catch(e => console.warn(e));
+      }
+    }
+
+    addLog('UPDATE_TRANSACTION', `Closed clarification query on voucher #${targetQuery.voucherNo}: ${reason || 'Resolved'}`);
+  };
+
   // General Status Update Handler
   const handleUpdateStatus = (id: string, status: TransactionStatus) => {
     if (status === 'APPROVED') {
@@ -1140,34 +1294,56 @@ export default function App() {
     addLog('CATEGORY_DELETE', `Deleted category "${catName}"`);
   };
 
+  // Admin Handler: Clear Audit Logs
+  const handleClearLogs = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'logs'));
+      const deletions = snap.docs.map(d => deleteDoc(doc(db, 'logs', d.id)));
+      await Promise.all(deletions);
+      setLogs([]);
+      addLog('LOGS_CLEARED', 'Cleared and reset system activity audit logs', 'Admin Settings');
+    } catch (e) {
+      console.error('Clear logs error:', e);
+      setLogs([]);
+    }
+  };
+
   // Admin Handler: System Backup, Restore, Wipe
   const handleBackupData = () => {
     const backupObj = {
       exportDate: new Date().toISOString(),
+      version: '2026.1',
       appSettings,
       users,
       categories,
       transactions,
-      logs
+      logs,
+      crmAccounts,
+      crmContacts,
+      crmOpportunities,
+      crmSettings,
+      quotations,
+      quotationMasterConfig,
+      queries
     };
     const jsonStr = JSON.stringify(backupObj, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ommax-petty-cash-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `ommax-system-backup-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    addLog('SYSTEM_BACKUP', 'Exported complete system JSON backup package');
+    addLog('SYSTEM_BACKUP', 'Exported complete system JSON backup package across all modules', 'Admin Settings');
   };
 
   const handleRestoreData = async (jsonContent: string): Promise<boolean> => {
     try {
       const parsed = JSON.parse(jsonContent);
-      if (parsed && (parsed.transactions || parsed.users || parsed.appSettings)) {
+      if (parsed && (parsed.transactions || parsed.users || parsed.appSettings || parsed.crmAccounts || parsed.quotations || parsed.queries)) {
         localStorage.setItem('petty_cash_db_seeded', 'true');
         // Ensure initialization marker exists
         await setDoc(doc(db, 'sys_meta', 'init'), { initializedAt: new Date().toISOString() });
@@ -1204,8 +1380,46 @@ export default function App() {
             await setDoc(doc(db, 'logs', l.id), l);
           }
         }
+        if (Array.isArray(parsed.crmAccounts)) {
+          setCrmAccounts(parsed.crmAccounts);
+          for (const acc of parsed.crmAccounts) {
+            await setDoc(doc(db, 'crm_accounts', acc.id), acc);
+          }
+        }
+        if (Array.isArray(parsed.crmContacts)) {
+          setCrmContacts(parsed.crmContacts);
+          for (const con of parsed.crmContacts) {
+            await setDoc(doc(db, 'crm_contacts', con.id), con);
+          }
+        }
+        if (Array.isArray(parsed.crmOpportunities)) {
+          setCrmOpportunities(parsed.crmOpportunities);
+          for (const opp of parsed.crmOpportunities) {
+            await setDoc(doc(db, 'crm_opportunities', opp.id), opp);
+          }
+        }
+        if (parsed.crmSettings) {
+          setCrmSettings(parsed.crmSettings);
+          await setDoc(doc(db, 'crm_settings', 'config'), parsed.crmSettings);
+        }
+        if (Array.isArray(parsed.quotations)) {
+          setQuotations(parsed.quotations);
+          for (const quo of parsed.quotations) {
+            await setDoc(doc(db, 'solar_quotations', quo.id), quo);
+          }
+        }
+        if (parsed.quotationMasterConfig) {
+          setQuotationMasterConfig(parsed.quotationMasterConfig);
+          await setDoc(doc(db, 'quotation_settings', 'master_config'), parsed.quotationMasterConfig);
+        }
+        if (Array.isArray(parsed.queries)) {
+          setQueries(parsed.queries);
+          for (const q of parsed.queries) {
+            await setDoc(doc(db, 'expense_queries', q.id), q);
+          }
+        }
 
-        addLog('SYSTEM_RESTORE', 'Restored system database and configurations from JSON backup');
+        addLog('SYSTEM_RESTORE', 'Restored system database and configurations across all modules from JSON backup', 'Admin Settings');
         return true;
       }
       return false;
@@ -1240,7 +1454,7 @@ export default function App() {
 
       // Force state wipe locally
       setTransactions([]);
-      addLog('SYSTEM_WIPE', 'Wiped all financial register vouchers and reset balances');
+      addLog('SYSTEM_WIPE', 'Wiped all financial register vouchers and reset balances', 'Admin Settings');
     } catch (e) {
       console.error('Wipe data error:', e);
       setTransactions([]);
@@ -1270,6 +1484,39 @@ export default function App() {
     ))
   );
 
+  const userAllowedModules = useMemo<ParentModule[]>(() => {
+    if (!currentUser) return ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS'];
+    if (currentUser.allowedModules && currentUser.allowedModules.length > 0) {
+      return currentUser.allowedModules;
+    }
+    return ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS'];
+  }, [currentUser]);
+
+  // Ensure activeTab stays within user's allowed modules
+  useEffect(() => {
+    if (!currentUser) return;
+    const allowed = currentUser.allowedModules && currentUser.allowedModules.length > 0
+      ? currentUser.allowedModules
+      : ['CRM', 'QUOTATION', 'HRMS', 'CASH_BOOK', 'SETTINGS', 'ADMIN_SETTINGS'];
+
+    const getModuleFromTab = (tab: NavigationTab): ParentModule => {
+      if (tab.startsWith('CRM_')) return 'CRM';
+      if (tab.startsWith('QUOTATION_')) return 'QUOTATION';
+      if (tab === 'HRMS') return 'HRMS';
+      if (tab.startsWith('CASHBOOK_')) return 'CASH_BOOK';
+      if (tab === 'SETTINGS') return 'SETTINGS';
+      if (tab === 'ADMIN_SETTINGS') return 'ADMIN_SETTINGS';
+      return 'CASH_BOOK';
+    };
+
+    const currentTabModule = getModuleFromTab(activeTab);
+    if (!allowed.includes(currentTabModule) || (currentTabModule === 'ADMIN_SETTINGS' && currentUser.role !== 'ADMIN')) {
+      const fallbackState = getDefaultModuleState(undefined, allowed);
+      setActiveTab(fallbackState.defaultTab);
+      setOpenParentModule(fallbackState.defaultParent);
+    }
+  }, [currentUser, activeTab]);
+
   // CRM Sub Tabs
   const crmSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
     { id: 'CRM_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
@@ -1285,6 +1532,20 @@ export default function App() {
   ], [quotations.length]);
 
   // Cash Book Sub Tabs
+  const userOpenQueriesCount = useMemo(() => {
+    if (!currentUser) return 0;
+    return queries.filter(q => {
+      if (q.status !== 'OPEN') return false;
+      if (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') return true;
+      const myName = (currentUser.fullName || '').toLowerCase();
+      const myUser = (currentUser.username || '').toLowerCase();
+      const myEmail = (currentUser.email || '').toLowerCase();
+      const myEmp = (currentUser.empId || '').toLowerCase();
+      const req = (q.requestedBy || '').toLowerCase();
+      return req === myName || req === myUser || req === myEmail || req === myEmp || (myName && req.includes(myName));
+    }).length;
+  }, [queries, currentUser]);
+
   const cashBookSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = useMemo(() => {
     const tabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
       { id: 'CASHBOOK_DASHBOARD', label: 'Dashboard', icon: LayoutDashboard }
@@ -1305,15 +1566,22 @@ export default function App() {
       });
     }
 
+    tabs.push({ 
+      id: 'CASHBOOK_QUERIES', 
+      label: 'Queries', 
+      icon: MessageSquareQuote,
+      badge: userOpenQueriesCount > 0 ? userOpenQueriesCount : undefined
+    });
+
     return tabs;
-  }, [isUserAdmin, isUserCustodian, isManagerOrAdmin, pendingApprovalsCount]);
+  }, [isUserAdmin, isUserCustodian, isManagerOrAdmin, pendingApprovalsCount, userOpenQueriesCount]);
 
   // Admin sub-menu items configuration
   const adminSubMenuItems = [
     { id: 'APP_SETTINGS' as AdminTab, label: 'App Settings', icon: Sliders },
     { id: 'USER_MGMT' as AdminTab, label: 'Users', icon: UsersIcon, badge: users.length },
     { id: 'INTEGRATIONS' as AdminTab, label: 'Integrations', icon: Share2 },
-    { id: 'TEMPLATES' as AdminTab, label: 'Templates', icon: FileText, badge: 9 },
+    { id: 'TEMPLATES' as AdminTab, label: 'Templates', icon: FileText },
     { id: 'SYSTEM_AUDIT' as AdminTab, label: 'Audit Trail', icon: History, badge: logs.length },
     { id: 'SYSTEM_OPERATIONS' as AdminTab, label: 'System Ops', icon: Database },
   ];
@@ -1651,7 +1919,7 @@ export default function App() {
       await setDoc(doc(db, 'solar_quotations', finalQuo.id), finalQuo);
       addLog(
         isSubmit ? 'SUBMIT_QUOTATION' : 'SAVE_QUOTATION',
-        `${isSubmit ? 'Submitted' : 'Saved'} Solar Quotation ${finalQuo.quotationNo} (${finalQuo.revisionCode}) for ${finalQuo.clientName} - ₹${(finalQuo.grandTotal || 0).toLocaleString('en-IN')}`
+        `${isSubmit ? 'Submitted' : 'Saved'} Solar Quotation ${finalQuo.offerNo || finalQuo.quotationNo} (${finalQuo.revisionCode}) for ${finalQuo.clientName} - ₹${(finalQuo.grandTotal || 0).toLocaleString('en-IN')}`
       );
     } catch (err) {
       console.error('Error saving quotation to Firestore:', err);
@@ -1688,7 +1956,7 @@ export default function App() {
           timestamp: now,
           changedBy: currentUser?.fullName || currentUser?.username || 'System',
           action: 'STAGE_CHANGED',
-          details: `Synced from Solar Quotation ${finalQuo.quotationNo} (${finalQuo.revisionCode}): Amount updated to ₹${quoteAmount.toLocaleString('en-IN')}, Stage updated to ${stageLabel}`
+          details: `Synced from Solar Quotation ${finalQuo.offerNo || finalQuo.quotationNo} (${finalQuo.revisionCode}): Amount updated to ₹${quoteAmount.toLocaleString('en-IN')}, Stage updated to ${stageLabel}`
         };
 
         const updatedOpp: CRMOpportunity = {
@@ -1729,7 +1997,7 @@ export default function App() {
       await setDoc(doc(db, 'solar_quotations', quotationId), updated);
       addLog(
         'UPDATE_QUOTATION_STATUS',
-        `Marked Quotation ${target.quotationNo} (${target.revisionCode}) as ${status}${reason ? ` - Reason: ${reason}` : ''}`
+        `Marked Quotation ${target.offerNo || target.quotationNo} (${target.revisionCode}) as ${status}${reason ? ` - Reason: ${reason}` : ''}`
       );
     } catch (err) {
       console.error('Error updating quotation status:', err);
@@ -1762,7 +2030,7 @@ export default function App() {
           timestamp: now,
           changedBy: currentUser?.fullName || currentUser?.username || 'System',
           action: 'STAGE_CHANGED',
-          details: `Synced from Solar Quotation ${target.quotationNo} (${target.revisionCode}): Status marked as ${status}, Stage set to ${stageLabel}${reason ? ` (Reason: ${reason})` : ''}`
+          details: `Synced from Solar Quotation ${target.offerNo || target.quotationNo} (${target.revisionCode}): Status marked as ${status}, Stage set to ${stageLabel}${reason ? ` (Reason: ${reason})` : ''}`
         };
 
         const updatedOpp: CRMOpportunity = {
@@ -1786,11 +2054,15 @@ export default function App() {
   };
 
   const handleDeleteQuotation = async (quotationId: string) => {
+    if (currentUser?.role !== 'ADMIN') {
+      console.warn('Unauthorized: Only administrators can delete quotation proposals.');
+      return;
+    }
     const target = quotations.find(q => q.id === quotationId);
     setQuotations(prev => prev.filter(q => q.id !== quotationId));
     try {
       await deleteDoc(doc(db, 'solar_quotations', quotationId));
-      addLog('DELETE_QUOTATION', `Deleted Quotation ${target?.quotationNo || quotationId}`);
+      addLog('DELETE_QUOTATION', `Deleted Quotation ${target?.offerNo || target?.quotationNo || quotationId}`);
     } catch (err) {
       console.error('Error deleting quotation:', err);
     }
@@ -1832,8 +2104,13 @@ export default function App() {
         <div className="overflow-y-auto">
           {/* Main Logo Header Banner */}
           <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-              <Network className="w-5 h-5 stroke-[2.5]" />
+            <div className="w-9 h-9 rounded-full bg-white p-0.5 shrink-0 shadow-sm border border-slate-700/60 overflow-hidden flex items-center justify-center">
+              <img
+                src="https://res.cloudinary.com/ommax/image/upload/v1766635872/Logos/ommax-electric-email-logo-bimi_e5edfn.svg"
+                alt="Ommax Electric Logo"
+                className="w-full h-full object-contain rounded-full"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div>
               <h2 className="text-base font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
@@ -1845,241 +2122,251 @@ export default function App() {
           <nav className="p-4 space-y-2">
             
             {/* MODULE 1: CRM */}
-            <div className="space-y-1">
-              <button
-                onClick={() => {
-                  setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
-                  if (!activeTab.startsWith('CRM_')) {
-                    setActiveTab('CRM_DASHBOARD');
-                  }
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
-                  activeTab.startsWith('CRM_')
-                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Briefcase className="w-4 h-4 text-[#f7b944] shrink-0" />
-                  <span className="tracking-wide">CRM</span>
-                </div>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CRM' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
-              </button>
+            {userAllowedModules.includes('CRM') && (
+              <div className="space-y-1">
+                <button
+                  onClick={() => {
+                    setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
+                    if (!activeTab.startsWith('CRM_')) {
+                      handleTabChange('CRM_DASHBOARD');
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab.startsWith('CRM_')
+                      ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Briefcase className="w-4 h-4 text-[#f7b944] shrink-0" />
+                    <span className="tracking-wide">CRM</span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CRM' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+                </button>
 
-              <AnimatePresence initial={false}>
-                {openParentModule === 'CRM' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15, ease: 'easeInOut' }}
-                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
-                  >
-                    {crmSubTabs.map((sub) => {
-                      const SubIcon = sub.icon;
-                      const isSubActive = activeTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={() => setActiveTab(sub.id)}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
-                            isSubActive
-                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
-                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{sub.label}</span>
-                          </div>
-                          {sub.badge !== undefined && sub.badge > 0 && (
-                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
-                              isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
-                            }`}>
-                              {sub.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                <AnimatePresence initial={false}>
+                  {openParentModule === 'CRM' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15, ease: 'easeInOut' }}
+                      className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                    >
+                      {crmSubTabs.map((sub) => {
+                        const SubIcon = sub.icon;
+                        const isSubActive = activeTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => handleTabChange(sub.id)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                              isSubActive
+                                ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            {sub.badge !== undefined && sub.badge > 0 && (
+                              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
+                                isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {sub.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
 
             {/* MODULE: Quotation */}
-            <div className="space-y-1">
-              <button
-                onClick={() => {
-                  setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
-                  if (!activeTab.startsWith('QUOTATION_')) {
-                    setActiveTab('QUOTATION_PROPOSAL');
-                  }
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
-                  activeTab.startsWith('QUOTATION_')
-                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <FileSpreadsheet className="w-4 h-4 text-[#f7b944] shrink-0" />
-                  <span className="tracking-wide">Quotation</span>
-                </div>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'QUOTATION' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
-              </button>
+            {userAllowedModules.includes('QUOTATION') && (
+              <div className="space-y-1">
+                <button
+                  onClick={() => {
+                    setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
+                    if (!activeTab.startsWith('QUOTATION_')) {
+                      handleTabChange('QUOTATION_PROPOSAL');
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab.startsWith('QUOTATION_')
+                      ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <FileSpreadsheet className="w-4 h-4 text-[#f7b944] shrink-0" />
+                    <span className="tracking-wide">Quotation</span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'QUOTATION' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+                </button>
 
-              <AnimatePresence initial={false}>
-                {openParentModule === 'QUOTATION' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15, ease: 'easeInOut' }}
-                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
-                  >
-                    {quotationSubTabs.map((sub) => {
-                      const SubIcon = sub.icon;
-                      const isSubActive = activeTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={() => setActiveTab(sub.id)}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
-                            isSubActive
-                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
-                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{sub.label}</span>
-                          </div>
-                          {sub.badge !== undefined && sub.badge > 0 && (
-                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
-                              isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
-                            }`}>
-                              {sub.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                <AnimatePresence initial={false}>
+                  {openParentModule === 'QUOTATION' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15, ease: 'easeInOut' }}
+                      className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                    >
+                      {quotationSubTabs.map((sub) => {
+                        const SubIcon = sub.icon;
+                        const isSubActive = activeTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => handleTabChange(sub.id)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                              isSubActive
+                                ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            {sub.badge !== undefined && sub.badge > 0 && (
+                              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
+                                isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {sub.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
 
             {/* MODULE 2: HRMS */}
-            <div className="space-y-1">
-              <button
-                onClick={() => {
-                  setActiveTab('HRMS');
-                  setOpenParentModule('HRMS');
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
-                  activeTab === 'HRMS'
-                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Users2 className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span className="tracking-wide">HRMS</span>
-                </div>
-                <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
-                  Soon
-                </span>
-              </button>
-            </div>
+            {userAllowedModules.includes('HRMS') && (
+              <div className="space-y-1">
+                <button
+                  onClick={() => {
+                    handleTabChange('HRMS');
+                    setOpenParentModule('HRMS');
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab === 'HRMS'
+                      ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Users2 className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span className="tracking-wide">HRMS</span>
+                  </div>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
+                    Soon
+                  </span>
+                </button>
+              </div>
+            )}
 
             {/* MODULE 3: Cash Book (formerly Petty Cash) */}
-            <div className="space-y-1">
-              <button
-                onClick={() => {
-                  setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
-                  if (!activeTab.startsWith('CASHBOOK_')) {
-                    setActiveTab('CASHBOOK_DASHBOARD');
-                  }
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
-                  activeTab.startsWith('CASHBOOK_')
-                    ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <IndianRupee className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="tracking-wide">Cash Book</span>
-                </div>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CASH_BOOK' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
-              </button>
+            {userAllowedModules.includes('CASH_BOOK') && (
+              <div className="space-y-1">
+                <button
+                  onClick={() => {
+                    setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
+                    if (!activeTab.startsWith('CASHBOOK_')) {
+                      handleTabChange('CASHBOOK_DASHBOARD');
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab.startsWith('CASHBOOK_')
+                      ? 'bg-slate-800/80 text-white font-extrabold shadow-xs'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <IndianRupee className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="tracking-wide">Cash Book</span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openParentModule === 'CASH_BOOK' ? 'rotate-180 text-white' : 'text-slate-500'}`} />
+                </button>
 
-              <AnimatePresence initial={false}>
-                {openParentModule === 'CASH_BOOK' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.15, ease: 'easeInOut' }}
-                    className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
-                  >
-                    {cashBookSubTabs.map((sub) => {
-                      const SubIcon = sub.icon;
-                      const isSubActive = activeTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={() => setActiveTab(sub.id)}
-                          className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
-                            isSubActive
-                              ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
-                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <SubIcon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{sub.label}</span>
-                          </div>
-                          {sub.badge !== undefined && sub.badge > 0 && (
-                            <span className="bg-amber-500 text-slate-950 font-black text-[9px] font-mono px-1.5 py-0.2 rounded-md shrink-0">
-                              {sub.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                <AnimatePresence initial={false}>
+                  {openParentModule === 'CASH_BOOK' && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15, ease: 'easeInOut' }}
+                      className="overflow-hidden space-y-0.5 pl-3 border-l border-slate-800 ml-4 py-1"
+                    >
+                      {cashBookSubTabs.map((sub) => {
+                        const SubIcon = sub.icon;
+                        const isSubActive = activeTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => handleTabChange(sub.id)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
+                              isSubActive
+                                ? 'bg-[#f7b944]/20 text-[#f7b944] font-bold border-l-2 border-[#f7b944]'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            {sub.badge !== undefined && sub.badge > 0 && (
+                              <span className="bg-amber-500 text-slate-950 font-black text-[9px] font-mono px-1.5 py-0.2 rounded-md shrink-0">
+                                {sub.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
 
             {/* MODULE 4: Settings (Top-level Parent Module) */}
-            <div className="pt-1">
-              <button
-                onClick={() => {
-                  setActiveTab('SETTINGS');
-                  setOpenParentModule('SETTINGS');
-                }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
-                  activeTab === 'SETTINGS'
-                    ? 'bg-slate-700 text-white font-extrabold shadow-md shadow-slate-950/20'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Settings className="w-4 h-4 text-slate-300 shrink-0" />
-                  <span className="tracking-wide">Settings</span>
-                </div>
-              </button>
-            </div>
+            {userAllowedModules.includes('SETTINGS') && (
+              <div className="pt-1">
+                <button
+                  onClick={() => {
+                    handleTabChange('SETTINGS');
+                    setOpenParentModule('SETTINGS');
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
+                    activeTab === 'SETTINGS'
+                      ? 'bg-slate-700 text-white font-extrabold shadow-md shadow-slate-950/20'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Settings className="w-4 h-4 text-slate-300 shrink-0" />
+                    <span className="tracking-wide">Settings</span>
+                  </div>
+                </button>
+              </div>
+            )}
 
             {/* MODULE 5: Admin Settings */}
-            {isUserAdmin && (
+            {isUserAdmin && userAllowedModules.includes('ADMIN_SETTINGS') && (
               <div className="space-y-1 pt-1">
                 <button
                   onClick={() => {
-                    setActiveTab('ADMIN_SETTINGS');
+                    handleTabChange('ADMIN_SETTINGS');
                     setOpenParentModule(prev => prev === 'ADMIN_SETTINGS' ? null : 'ADMIN_SETTINGS');
                   }}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
@@ -2112,7 +2399,7 @@ export default function App() {
                           <button
                             key={sub.id}
                             onClick={() => {
-                              setActiveTab('ADMIN_SETTINGS');
+                              handleTabChange('ADMIN_SETTINGS');
                               setAdminSubTab(sub.id);
                             }}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-left ${
@@ -2125,13 +2412,6 @@ export default function App() {
                               <SubIcon className="w-3.5 h-3.5 shrink-0" />
                               <span className="truncate">{sub.label}</span>
                             </div>
-                            {sub.badge !== undefined && (
-                              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md shrink-0 ${
-                                isSubActive ? 'bg-[#f7b944] text-slate-950' : 'bg-slate-800 text-slate-400'
-                              }`}>
-                                {sub.badge}
-                              </span>
-                            )}
                           </button>
                         );
                       })}
@@ -2170,14 +2450,19 @@ export default function App() {
 
       {/* MOBILE HEADER & DRAWER */}
       <div className="flex-1 flex flex-col md:hidden overflow-hidden">
-        <header className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between border-b border-slate-800 shrink-0">
+        <header className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-[#f7b944] text-[#112231] font-bold text-xs">
-              <Network className="w-4 h-4 stroke-[2.5]" />
+            <div className="w-8.5 h-8.5 rounded-full bg-white p-0.5 shrink-0 shadow-xs border border-slate-700/60 overflow-hidden flex items-center justify-center">
+              <img
+                src="https://res.cloudinary.com/ommax/image/upload/v1766635872/Logos/ommax-electric-email-logo-bimi_e5edfn.svg"
+                alt="Ommax Electric Logo"
+                className="w-full h-full object-contain rounded-full"
+                referrerPolicy="no-referrer"
+              />
             </div>
-            <div>
-              <h2 className="text-xs font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
-              <span className="text-[8px] text-[#f7b944] font-bold">Ommax Electric Private Limited</span>
+            <div className="flex flex-col justify-center">
+              <h2 className="text-sm font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
+              <span className="text-[8.5px] text-[#f7b944] font-bold tracking-wide leading-tight mt-1">Ommax Electric Private Limited</span>
             </div>
           </div>
           <button
@@ -2211,8 +2496,13 @@ export default function App() {
                 <div>
                   <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#f7b944] text-[#112231] shrink-0 font-bold shadow-sm">
-                        <Network className="w-4.5 h-4.5 stroke-[2.5]" />
+                      <div className="w-8 h-8 rounded-full bg-white p-0.5 shrink-0 shadow-sm border border-slate-700/60 overflow-hidden flex items-center justify-center">
+                        <img
+                          src="https://res.cloudinary.com/ommax/image/upload/v1766635872/Logos/ommax-electric-email-logo-bimi_e5edfn.svg"
+                          alt="Ommax Electric Logo"
+                          className="w-full h-full object-contain rounded-full"
+                          referrerPolicy="no-referrer"
+                        />
                       </div>
                       <div>
                         <h2 className="text-sm font-extrabold leading-none tracking-wider bg-gradient-to-r from-[#ec003f] to-[#f7b944] bg-clip-text text-transparent">CONNECT</h2>
@@ -2230,142 +2520,152 @@ export default function App() {
                   <nav className="p-4 space-y-2">
                     
                     {/* Mobile CRM */}
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => {
-                          setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
-                          if (!activeTab.startsWith('CRM_')) setActiveTab('CRM_DASHBOARD');
-                        }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Briefcase className="w-4 h-4 text-[#f7b944]" />
-                          <span>CRM</span>
-                        </div>
-                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CRM' ? 'rotate-180' : ''}`} />
-                      </button>
-                      {openParentModule === 'CRM' && (
-                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
-                          {crmSubTabs.map(sub => (
-                            <button
-                              key={sub.id}
-                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
-                              }`}
-                            >
-                              {sub.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mobile Quotation */}
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => {
-                          setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
-                          if (!activeTab.startsWith('QUOTATION_')) setActiveTab('QUOTATION_PROPOSAL');
-                        }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileSpreadsheet className="w-4 h-4 text-[#f7b944]" />
-                          <span>Quotation</span>
-                        </div>
-                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'QUOTATION' ? 'rotate-180' : ''}`} />
-                      </button>
-                      {openParentModule === 'QUOTATION' && (
-                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
-                          {quotationSubTabs.map(sub => (
-                            <button
-                              key={sub.id}
-                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
-                              }`}
-                            >
-                              {sub.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mobile HRMS */}
-                    <button
-                      onClick={() => { setActiveTab('HRMS'); setOpenParentModule('HRMS'); setIsMobileMenuOpen(false); }}
-                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Users2 className="w-4 h-4 text-indigo-400" />
-                        <span>HRMS</span>
-                      </div>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
-                        Soon
-                      </span>
-                    </button>
-
-                    {/* Mobile Cash Book */}
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => {
-                          setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
-                          if (!activeTab.startsWith('CASHBOOK_')) setActiveTab('CASHBOOK_DASHBOARD');
-                        }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
-                      >
-                        <div className="flex items-center gap-2">
-                          <IndianRupee className="w-4 h-4 text-emerald-400" />
-                          <span>Cash Book</span>
-                        </div>
-                        <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CASH_BOOK' ? 'rotate-180' : ''}`} />
-                      </button>
-                      {openParentModule === 'CASH_BOOK' && (
-                        <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
-                          {cashBookSubTabs.map(sub => (
-                            <button
-                              key={sub.id}
-                              onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                                activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
-                              }`}
-                            >
-                              {sub.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mobile Settings (Parent Module) */}
-                    <div>
-                      <button
-                        onClick={() => {
-                          setActiveTab('SETTINGS');
-                          setOpenParentModule('SETTINGS');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold ${
-                          activeTab === 'SETTINGS'
-                            ? 'bg-slate-800 text-white'
-                            : 'text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Settings className="w-4 h-4 text-slate-400" />
-                          <span>Settings</span>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* Mobile Admin */}
-                    {isUserAdmin && (
+                    {userAllowedModules.includes('CRM') && (
                       <div className="space-y-1">
                         <button
                           onClick={() => {
-                            setActiveTab('ADMIN_SETTINGS');
+                            setOpenParentModule(prev => prev === 'CRM' ? null : 'CRM');
+                            if (!activeTab.startsWith('CRM_')) handleTabChange('CRM_DASHBOARD');
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Briefcase className="w-4 h-4 text-[#f7b944]" />
+                            <span>CRM</span>
+                          </div>
+                          <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CRM' ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openParentModule === 'CRM' && (
+                          <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                            {crmSubTabs.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => { handleTabChange(sub.id); setIsMobileMenuOpen(false); }}
+                                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                  activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                                }`}
+                              >
+                                {sub.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mobile Quotation */}
+                    {userAllowedModules.includes('QUOTATION') && (
+                      <div className="space-y-1">
+                        <button
+                          onClick={() => {
+                            setOpenParentModule(prev => prev === 'QUOTATION' ? null : 'QUOTATION');
+                            if (!activeTab.startsWith('QUOTATION_')) handleTabChange('QUOTATION_PROPOSAL');
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                        >
+                          <div className="flex items-center gap-2">
+                            <FileSpreadsheet className="w-4 h-4 text-[#f7b944]" />
+                            <span>Quotation</span>
+                          </div>
+                          <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'QUOTATION' ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openParentModule === 'QUOTATION' && (
+                          <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                            {quotationSubTabs.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => { handleTabChange(sub.id); setIsMobileMenuOpen(false); }}
+                                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                  activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                                }`}
+                              >
+                                {sub.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mobile HRMS */}
+                    {userAllowedModules.includes('HRMS') && (
+                      <button
+                        onClick={() => { handleTabChange('HRMS'); setOpenParentModule('HRMS'); setIsMobileMenuOpen(false); }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Users2 className="w-4 h-4 text-indigo-400" />
+                          <span>HRMS</span>
+                        </div>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/40 text-indigo-300 font-bold">
+                          Soon
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Mobile Cash Book */}
+                    {userAllowedModules.includes('CASH_BOOK') && (
+                      <div className="space-y-1">
+                        <button
+                          onClick={() => {
+                            setOpenParentModule(prev => prev === 'CASH_BOOK' ? null : 'CASH_BOOK');
+                            if (!activeTab.startsWith('CASHBOOK_')) handleTabChange('CASHBOOK_DASHBOARD');
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
+                        >
+                          <div className="flex items-center gap-2">
+                            <IndianRupee className="w-4 h-4 text-emerald-400" />
+                            <span>Cash Book</span>
+                          </div>
+                          <ChevronDown className={`w-3.5 h-3.5 ${openParentModule === 'CASH_BOOK' ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openParentModule === 'CASH_BOOK' && (
+                          <div className="pl-3 border-l border-slate-800 ml-3 space-y-1">
+                            {cashBookSubTabs.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => { handleTabChange(sub.id); setIsMobileMenuOpen(false); }}
+                                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                                  activeTab === sub.id ? 'bg-[#f7b944]/20 text-[#f7b944]' : 'text-slate-400'
+                                }`}
+                              >
+                                {sub.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mobile Settings (Parent Module) */}
+                    {userAllowedModules.includes('SETTINGS') && (
+                      <div>
+                        <button
+                          onClick={() => {
+                            handleTabChange('SETTINGS');
+                            setOpenParentModule('SETTINGS');
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold ${
+                            activeTab === 'SETTINGS'
+                              ? 'bg-slate-800 text-white'
+                              : 'text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Settings className="w-4 h-4 text-slate-400" />
+                            <span>Settings</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Mobile Admin */}
+                    {isUserAdmin && userAllowedModules.includes('ADMIN_SETTINGS') && (
+                      <div className="space-y-1">
+                        <button
+                          onClick={() => {
+                            handleTabChange('ADMIN_SETTINGS');
                             setOpenParentModule(prev => prev === 'ADMIN_SETTINGS' ? null : 'ADMIN_SETTINGS');
                           }}
                           className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-300 hover:bg-slate-800"
@@ -2382,7 +2682,7 @@ export default function App() {
                               <button
                                 key={sub.id}
                                 onClick={() => { 
-                                  setActiveTab('ADMIN_SETTINGS'); 
+                                  handleTabChange('ADMIN_SETTINGS'); 
                                   setAdminSubTab(sub.id); 
                                   setIsMobileMenuOpen(false); 
                                 }}
@@ -2447,6 +2747,7 @@ export default function App() {
             {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-4 h-4 text-emerald-600" />}
             {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-4 h-4 text-rose-600" />}
             {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-4 h-4 text-amber-600" />}
+            {activeTab === 'CASHBOOK_QUERIES' && <MessageSquareQuote className="w-4 h-4 text-violet-600" />}
             {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && <Settings className="w-4 h-4 text-slate-600" />}
 
             {/* Admin Icon */}
@@ -2471,6 +2772,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
               {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
               {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
+              {activeTab === 'CASHBOOK_QUERIES' && 'Expense Queries & Clarifications'}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Settings & Personal Preferences'}
 
               {/* Admin Header */}
@@ -2504,6 +2806,7 @@ export default function App() {
             {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
             {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
             {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
+            {activeTab === 'CASHBOOK_QUERIES' && 'Threaded clarification requests between managers and expense claimants.'}
             {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Manage password credentials, phone dialing defaults, and workspace preferences.'}
 
             {/* Admin Descriptions */}
@@ -2586,7 +2889,7 @@ export default function App() {
               onNavigateToTools={handleNavigateToTools}
               onSaveQuotation={handleSaveQuotation}
               onUpdateQuotationStatus={handleUpdateQuotationStatus}
-              onDeleteQuotation={handleDeleteQuotation}
+              onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
             />
           )}
           {activeTab === 'QUOTATION_TOOLS' && (
@@ -2601,6 +2904,7 @@ export default function App() {
               onSaveQuotation={handleSaveQuotation}
               activeEditingQuotation={activeEditingQuotation}
               onClearActiveQuotation={() => setActiveEditingQuotation(null)}
+              onDirtyChange={setQuotationToolsDirty}
             />
           )}
           {activeTab === 'HRMS' && (
@@ -2653,7 +2957,21 @@ export default function App() {
               onPayRequest={handlePayRequest}
               onRejectRequest={handleRejectRequest}
               onReRouteRequest={handleReRouteRequest}
+              onRaiseQuery={handleRaiseQuery}
               appSettings={appSettings}
+            />
+          )}
+          {activeTab === 'CASHBOOK_QUERIES' && (
+            <QueriesView
+              queries={queries}
+              transactions={transactions}
+              currentUser={currentUser}
+              users={users}
+              appSettings={appSettings}
+              selectedQueryId={selectedQueryId}
+              onSelectQuery={setSelectedQueryId}
+              onSendMessage={handleSendMessageOnQuery}
+              onCloseQuery={handleCloseQuery}
             />
           )}
           {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && (
@@ -2722,6 +3040,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
               {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
               {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
+              {activeTab === 'CASHBOOK_QUERIES' && <MessageSquareQuote className="w-5 h-5 text-violet-600" />}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && <Settings className="w-5 h-5 text-slate-600" />}
 
               {/* Admin Icon */}
@@ -2747,6 +3066,7 @@ export default function App() {
                 {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
                 {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
                 {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
+                {activeTab === 'CASHBOOK_QUERIES' && 'Expense Queries & Clarifications'}
                 {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Settings & Personal Preferences'}
 
                 {/* Admin Header */}
@@ -2780,6 +3100,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
               {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
               {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
+              {activeTab === 'CASHBOOK_QUERIES' && 'Threaded clarification requests between managers and expense claimants.'}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Manage password credentials, phone dialing defaults, and workspace preferences.'}
 
               {/* Admin Descriptions */}
@@ -2887,7 +3208,7 @@ export default function App() {
                     onNavigateToTools={handleNavigateToTools}
                     onSaveQuotation={handleSaveQuotation}
                     onUpdateQuotationStatus={handleUpdateQuotationStatus}
-                    onDeleteQuotation={handleDeleteQuotation}
+                    onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
                   />
                 )
               )}
@@ -2903,6 +3224,7 @@ export default function App() {
                   onSaveQuotation={handleSaveQuotation}
                   activeEditingQuotation={activeEditingQuotation}
                   onClearActiveQuotation={() => setActiveEditingQuotation(null)}
+                  onDirtyChange={setQuotationToolsDirty}
                 />
               )}
 
@@ -2959,7 +3281,21 @@ export default function App() {
                   onPayRequest={handlePayRequest}
                   onRejectRequest={handleRejectRequest}
                   onReRouteRequest={handleReRouteRequest}
+                  onRaiseQuery={handleRaiseQuery}
                   appSettings={appSettings}
+                />
+              )}
+              {activeTab === 'CASHBOOK_QUERIES' && (
+                <QueriesView
+                  queries={queries}
+                  transactions={transactions}
+                  currentUser={currentUser}
+                  users={users}
+                  appSettings={appSettings}
+                  selectedQueryId={selectedQueryId}
+                  onSelectQuery={setSelectedQueryId}
+                  onSendMessage={handleSendMessageOnQuery}
+                  onCloseQuery={handleCloseQuery}
                 />
               )}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && (
@@ -2997,8 +3333,10 @@ export default function App() {
                   onBackupData={handleBackupData}
                   onRestoreData={handleRestoreData}
                   onWipeAllData={handleWipeAllData}
+                  onClearLogs={handleClearLogs}
                   activeSubTab={adminSubTab}
                   onSubTabChange={setAdminSubTab}
+                  availableModules={APP_MODULES.map(m => ({ id: m.id, label: m.label }))}
                 />
               )}
             </motion.div>
@@ -3006,6 +3344,47 @@ export default function App() {
         </div>
 
       </main>
+
+      {/* Quotation Tools Unsaved Changes Modal */}
+      {showToolsUnsavedModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center gap-3 text-amber-600 mb-3">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="font-extrabold text-base text-slate-900">Unsaved Changes in Quotation Tools</h3>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed mb-6">
+              You have unsaved changes in Quotation Tools. If you leave to another module without saving, your modifications will be lost. Are you sure you want to discard your changes and continue?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowToolsUnsavedModal(false);
+                  setPendingNavigationTab(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+              >
+                Stay on Quotation Tools
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuotationToolsDirty(false);
+                  setShowToolsUnsavedModal(false);
+                  if (pendingNavigationTab) {
+                    setActiveTab(pendingNavigationTab);
+                    setPendingNavigationTab(null);
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                Discard & Switch Module
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

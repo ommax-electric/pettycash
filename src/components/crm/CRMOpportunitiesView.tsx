@@ -100,10 +100,53 @@ export default function CRMOpportunitiesView({
   }, [crmSettings]);
 
   const leadSourcesList = useMemo(() => {
-    return crmSettings?.leadSources?.length 
+    const baseSources: string[] = crmSettings?.leadSources?.length 
       ? crmSettings.leadSources 
-      : DEFAULT_CRM_SETTINGS.leadSources;
-  }, [crmSettings]);
+      : (DEFAULT_CRM_SETTINGS.leadSources || []);
+
+    // Build a map of the most recent usage timestamp for each lead source across opportunities
+    const latestUsageMap = new Map<string, number>();
+
+    // Check localStorage for the most immediately used source as top priority
+    try {
+      const localRecentSource = localStorage.getItem('crm_recent_lead_source');
+      if (localRecentSource) {
+        latestUsageMap.set(localRecentSource, Date.now() + 1000000);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Scan opportunities for latest usage timestamp
+    opportunities.forEach(opp => {
+      if (opp.leadSource) {
+        const time = new Date(opp.updatedAt || opp.createdAt || 0).getTime() || 1;
+        const current = latestUsageMap.get(opp.leadSource) || 0;
+        if (time > current) {
+          latestUsageMap.set(opp.leadSource, time);
+        }
+      }
+    });
+
+    // Combine base sources and any unique sources present in opportunities
+    const allSources = Array.from(new Set([...baseSources, ...Array.from(latestUsageMap.keys())])).filter(Boolean);
+
+    // Sort recently used wise:
+    // Sources with recorded usage appear first (highest timestamp to lowest).
+    // Unused sources appear subsequently, sorted alphabetically A-Z.
+    return allSources.sort((a, b) => {
+      const timeA = latestUsageMap.get(a);
+      const timeB = latestUsageMap.get(b);
+
+      if (timeA !== undefined && timeB !== undefined) {
+        return timeB - timeA;
+      }
+      if (timeA !== undefined) return -1;
+      if (timeB !== undefined) return 1;
+
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+  }, [crmSettings, opportunities]);
 
   const productsAndServicesList = useMemo(() => {
     return crmSettings?.productsAndServices?.length
@@ -368,7 +411,10 @@ export default function CRMOpportunitiesView({
 
   // Dynamic Contact list for Modal based on chosen account
   const availableContactsForOpportunity = useMemo(() => {
-    if (!formData.accountId || formData.accountId === 'INDEPENDENT') {
+    if (!formData.accountId) {
+      return [];
+    }
+    if (formData.accountId === 'INDEPENDENT') {
       return contacts.filter(c => 
         !c.accountId || 
         c.accountId === 'INDEPENDENT' || 
@@ -1031,6 +1077,13 @@ export default function CRMOpportunitiesView({
           stageNotes: initialStageNote ? [initialStageNote] : [],
           editHistory: [historyEntry]
         });
+      }
+      if (formData.leadSource) {
+        try {
+          localStorage.setItem('crm_recent_lead_source', formData.leadSource);
+        } catch {
+          // ignore
+        }
       }
       setIsAddModalOpen(false);
       resetForm();
@@ -2630,7 +2683,7 @@ export default function CRMOpportunitiesView({
                 </div>
 
                 {/* Client Account & Contact Person */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className={formData.accountId ? "grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4" : "grid grid-cols-1 gap-3 sm:gap-4"}>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Client Account *</label>
                     <select
@@ -2677,29 +2730,31 @@ export default function CRMOpportunitiesView({
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Contact Person *</label>
-                    <select
-                      required
-                      value={formData.contactId}
-                      onChange={e => {
-                        const con = contacts.find(c => c.id === e.target.value);
-                        setFormData({ 
-                          ...formData, 
-                          contactId: e.target.value,
-                          contactName: con ? `${con.firstName} ${con.lastName}`.trim() : ''
-                        });
-                      }}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
-                    >
-                      <option value="">Choose Contact Person</option>
-                      {availableContactsForOpportunity.map(con => (
-                        <option key={con.id} value={con.id}>
-                          {con.firstName} {con.lastName} {con.designation ? `(${con.designation})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {Boolean(formData.accountId) && (
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Contact Person *</label>
+                      <select
+                        required
+                        value={formData.contactId}
+                        onChange={e => {
+                          const con = contacts.find(c => c.id === e.target.value);
+                          setFormData({ 
+                            ...formData, 
+                            contactId: e.target.value,
+                            contactName: con ? `${con.firstName} ${con.lastName}`.trim() : ''
+                          });
+                        }}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      >
+                        <option value="">Choose Contact Person</option>
+                        {availableContactsForOpportunity.map(con => (
+                          <option key={con.id} value={con.id}>
+                            {con.firstName} {con.lastName} {con.designation ? `(${con.designation})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Commercial Value & Target Close Date */}
@@ -2785,7 +2840,17 @@ export default function CRMOpportunitiesView({
                     <select
                       required
                       value={formData.leadSource}
-                      onChange={e => setFormData({ ...formData, leadSource: e.target.value })}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setFormData({ ...formData, leadSource: val });
+                        if (val) {
+                          try {
+                            localStorage.setItem('crm_recent_lead_source', val);
+                          } catch {
+                            // ignore
+                          }
+                        }
+                      }}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     >
                       <option value="">Choose Lead Source</option>

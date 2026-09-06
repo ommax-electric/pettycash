@@ -18,6 +18,8 @@ import {
   renderFormattedText,
   interpolateOpeningText,
   interpolateSubject,
+  stripEquipmentBrandNames,
+  isNilItem,
   deriveAcCapacityKw,
   deriveDcCapacityKwp
 } from '../../quotation/types';
@@ -111,7 +113,23 @@ export default function LiveQuotationCanvas({
   // 2. Initialize Quotation State with conformant SolarQuotation schema
   const [formData, setFormData] = useState<SolarQuotation>(() => {
     if (initialQuotation && initialQuotation.id && initialQuotation.quotationNo) {
-      return initialQuotation;
+      const allBrands = Array.from(new Set([
+        ...(initialQuotation.brandDeclarations?.map(b => b.brand) || []),
+        ...(initialQuotation.boqItems?.map(b => b.brand) || [])
+      ].filter(Boolean)));
+      return {
+        ...initialQuotation,
+        boqItems: (initialQuotation.boqItems || []).map(b => ({
+          ...b,
+          itemDescription: stripEquipmentBrandNames(b.itemDescription, [b.brand, ...allBrands])
+        })),
+        supplyIncludes: (initialQuotation.supplyIncludes || []).map(s =>
+          stripEquipmentBrandNames(s, allBrands)
+        ),
+        installationIncludes: (initialQuotation.installationIncludes || []).map(inst =>
+          stripEquipmentBrandNames(inst, allBrands)
+        )
+      };
     }
 
     const defaultCapacity = 4.95;
@@ -121,13 +139,13 @@ export default function LiveQuotationCanvas({
     const generatedOfferNo = `${masterConfig.offerPrefix}${masterConfig.offerYearCode}${String(masterConfig.offerStartingSeq || 24).padStart(4, '0')}R0`;
 
     const boq: BOQItem[] = [
-      { id: 'boq-1', slNo: 1, itemDescription: `SERVOTEC HHV [550 Wp] Mono Perc DCR Panels`, quantity: `${defaultCapacity} kWp` },
-      { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter Make: SERVOTEC', quantity: '1 Nos' },
-      { id: 'boq-3', slNo: 3, itemDescription: 'Nil', quantity: 'Nil' },
-      { id: 'boq-4', slNo: 4, itemDescription: 'Table RCC Elevated Structure', quantity: '7 Feet' },
-      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: `${defaultCapacity} kWp` },
-      { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: `${defaultCapacity} kWp` },
-      { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: `${defaultCapacity} kWp` }
+      { id: 'boq-1', slNo: 1, itemDescription: '550 Wp Mono Perc DCR Panels', quantity: `${defaultCapacity} kWp`, brand: 'Servotec' },
+      { id: 'boq-2', slNo: 2, itemDescription: '5 kVA Single Phase On-Grid Inverter', quantity: '1 Nos', brand: 'Servotec' },
+      { id: 'boq-3', slNo: 3, itemDescription: 'Nil', quantity: 'Nil', brand: '' },
+      { id: 'boq-4', slNo: 4, itemDescription: 'Table RCC Elevated Structure', quantity: '7 Feet', brand: 'JSW' },
+      { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: `${defaultCapacity} kWp`, brand: 'Polycab' },
+      { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: `${defaultCapacity} kWp`, brand: 'Polycab' },
+      { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: `${defaultCapacity} kWp`, brand: '' }
     ];
 
     return {
@@ -232,16 +250,32 @@ export default function LiveQuotationCanvas({
 
   // Quick update helpers for BOQ item quantities and descriptions
   const updateBoqQuantity = (slNo: number, newQty: string) => {
+    const isNil = isNilItem(newQty);
     setFormData(prev => ({
       ...prev,
-      boqItems: prev.boqItems.map(item => item.slNo === slNo ? { ...item, quantity: newQty } : item)
+      boqItems: prev.boqItems.map(item => item.slNo === slNo ? {
+        ...item,
+        quantity: newQty,
+        unitPrice: isNil ? 0 : item.unitPrice,
+        totalPrice: isNil ? 0 : item.totalPrice,
+        brand: isNil ? '' : item.brand
+      } : item)
     }));
   };
 
-  const updateBoqDescription = (slNo: number, newDesc: string) => {
+  const updateBoqDescription = (slNo: number, newDesc: string, newBrand?: string) => {
+    const isNil = isNilItem(newDesc);
+    const cleanDesc = newBrand ? stripEquipmentBrandNames(newDesc, newBrand) : stripEquipmentBrandNames(newDesc);
     setFormData(prev => ({
       ...prev,
-      boqItems: prev.boqItems.map(item => item.slNo === slNo ? { ...item, itemDescription: newDesc } : item)
+      boqItems: prev.boqItems.map(item => item.slNo === slNo ? {
+        ...item,
+        itemDescription: cleanDesc,
+        quantity: isNil ? 'Nil' : item.quantity,
+        unitPrice: isNil ? 0 : item.unitPrice,
+        totalPrice: isNil ? 0 : item.totalPrice,
+        brand: isNil ? '' : (newBrand !== undefined ? newBrand : item.brand)
+      } : item)
     }));
   };
 
@@ -318,7 +352,7 @@ export default function LiveQuotationCanvas({
         return { ...item, quantity: `${dcKwp} kWp` };
       }
       if (item.slNo === 2 && item.itemDescription.includes('kVA')) {
-        return { ...item, itemDescription: `Solar Inverter – ${Math.ceil(validCap)} kVA Single Phase On-Grid Inverter Make: SERVOTEC` };
+        return { ...item, itemDescription: `${Math.ceil(validCap)} kVA Single Phase On-Grid Inverter` };
       }
       return item;
     });
@@ -399,6 +433,29 @@ export default function LiveQuotationCanvas({
     { id: 'DISCLAIMER', label: 'Signatory & Stamp', pageNum: 5, icon: AlertTriangle }
   ];
 
+  const handleInternalSave = (isSubmit: boolean = false) => {
+    const allBrands = Array.from(new Set([
+      ...(formData.brandDeclarations?.map(b => b.brand) || []),
+      ...(formData.boqItems?.map(b => b.brand) || [])
+    ].filter(Boolean)));
+
+    const sanitizedData: SolarQuotation = {
+      ...formData,
+      boqItems: (formData.boqItems || []).map(item => ({
+        ...item,
+        itemDescription: stripEquipmentBrandNames(item.itemDescription, [item.brand, ...allBrands])
+      })),
+      supplyIncludes: (formData.supplyIncludes || []).map(item =>
+        stripEquipmentBrandNames(item, allBrands)
+      ),
+      installationIncludes: (formData.installationIncludes || []).map(item =>
+        stripEquipmentBrandNames(item, allBrands)
+      )
+    };
+
+    onSave(sanitizedData, isSubmit);
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. TOP HEADER & WORKSPACE TOOLBAR */}
@@ -443,7 +500,7 @@ export default function LiveQuotationCanvas({
 
           <button
             type="button"
-            onClick={() => onSave(formData, false)}
+            onClick={() => handleInternalSave(false)}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
           >
             <Save className="w-4 h-4 text-[#f7b944]" />
@@ -452,7 +509,7 @@ export default function LiveQuotationCanvas({
 
           <button
             type="button"
-            onClick={() => onSave(formData, true)}
+            onClick={() => handleInternalSave(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#f7b944] hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-md"
           >
             <CheckCircle className="w-4 h-4" />
@@ -795,28 +852,29 @@ export default function LiveQuotationCanvas({
                 {/* Brand Quick Selector */}
                 <div className="flex flex-wrap gap-1">
                   {[
-                    { label: 'Servotec', full: 'SERVOTEC HHV [550 Wp] Mono Perc DCR Panels', brandName: 'Servotec' },
-                    { label: 'Waaree', full: 'Waaree 540-550 Wp Bi-facial Dual Glass TopCon DCR Solar Panels', brandName: 'Waaree' },
-                    { label: 'Adani', full: 'Adani Solar 545 Wp Mono PERC High Efficiency DCR Modules', brandName: 'Adani Solar' },
-                    { label: 'Vikram', full: 'Vikram Solar 550 Wp Half-Cut Mono PERC DCR Panels', brandName: 'Vikram Solar' },
-                    { label: 'Tata Power', full: 'Tata Power Solar 540 Wp Mono Crystalline DCR Panels', brandName: 'Tata Power Solar' }
+                    { label: 'Servotec', full: '550 Wp Mono Perc DCR Panels', brandName: 'Servotec' },
+                    { label: 'Waaree', full: '540-550 Wp Bi-facial Dual Glass TopCon DCR Solar Panels', brandName: 'Waaree' },
+                    { label: 'Adani', full: '545 Wp Mono PERC High Efficiency DCR Modules', brandName: 'Adani Solar' },
+                    { label: 'Vikram', full: '550 Wp Half-Cut Mono PERC DCR Panels', brandName: 'Vikram Solar' },
+                    { label: 'Tata Power', full: '540 Wp Mono Crystalline DCR Panels', brandName: 'Tata Power Solar' }
                   ].map((p, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => {
-                        updateBoqDescription(1, p.full);
+                        updateBoqDescription(1, p.full, p.brandName);
                         setFormData(prev => ({
                           ...prev,
                           brandDeclarations: prev.brandDeclarations.map(b => 
                             b.slNo === 1 || b.description.toLowerCase().includes('module')
-                              ? { ...b, brand: p.brandName, description: `Solar PV Modules (${p.brandName})` }
+                              ? { ...b, brand: p.brandName, description: 'Solar PV Modules' }
                               : b
                           )
                         }));
                       }}
                       className={`text-[9.5px] px-2 py-0.5 rounded font-bold transition-all cursor-pointer ${
-                        (moduleItem?.itemDescription || '').toLowerCase().includes(p.brandName.toLowerCase())
+                        (moduleItem?.brand || '').toLowerCase().includes(p.brandName.toLowerCase()) ||
+                        (formData.brandDeclarations.find(b => b.slNo === 1)?.brand || '').toLowerCase().includes(p.brandName.toLowerCase())
                           ? 'bg-slate-900 text-[#f7b944]'
                           : 'bg-white text-slate-700 border border-slate-200'
                       }`}
@@ -879,28 +937,29 @@ export default function LiveQuotationCanvas({
                 {/* Brand Quick Selector */}
                 <div className="flex flex-wrap gap-1">
                   {[
-                    { label: 'Servotec', full: 'On-Grid Solar Inverter Make: SERVOTEC', brandName: 'Servotec' },
-                    { label: 'Growatt', full: 'Growatt On-Grid Smart Inverter with Dual MPPT & WiFi Monitoring', brandName: 'Growatt' },
-                    { label: 'Solis', full: 'Solis High-Efficiency Dual MPPT Grid-Tie Solar Inverter', brandName: 'Solis' },
-                    { label: 'Sungrow', full: 'Sungrow Commercial Three Phase Inverter with AFCI Protection', brandName: 'Sungrow' },
-                    { label: 'Deye', full: 'Deye Hybrid Energy Storage Inverter with Smart Load Control', brandName: 'Deye' }
+                    { label: 'Servotec', full: 'Single / Three Phase On-Grid Solar Inverter', brandName: 'Servotec' },
+                    { label: 'Growatt', full: 'On-Grid Smart Inverter with Dual MPPT & WiFi Monitoring', brandName: 'Growatt' },
+                    { label: 'Solis', full: 'High-Efficiency Dual MPPT Grid-Tie Solar Inverter', brandName: 'Solis' },
+                    { label: 'Sungrow', full: 'Commercial Three Phase Inverter with AFCI Protection', brandName: 'Sungrow' },
+                    { label: 'Deye', full: 'Hybrid Energy Storage Inverter with Smart Load Control', brandName: 'Deye' }
                   ].map((inv, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => {
-                        updateBoqDescription(2, inv.full);
+                        updateBoqDescription(2, inv.full, inv.brandName);
                         setFormData(prev => ({
                           ...prev,
                           brandDeclarations: prev.brandDeclarations.map(b => 
                             b.slNo === 2 || b.description.toLowerCase().includes('inverter')
-                              ? { ...b, brand: inv.brandName, description: `Solar Grid Inverter (${inv.brandName})` }
+                              ? { ...b, brand: inv.brandName, description: 'Solar Grid Inverter' }
                               : b
                           )
                         }));
                       }}
                       className={`text-[9.5px] px-2 py-0.5 rounded font-bold transition-all cursor-pointer ${
-                        (inverterItem?.itemDescription || '').toLowerCase().includes(inv.brandName.toLowerCase())
+                        (inverterItem?.brand || '').toLowerCase().includes(inv.brandName.toLowerCase()) ||
+                        (formData.brandDeclarations.find(b => b.slNo === 2)?.brand || '').toLowerCase().includes(inv.brandName.toLowerCase())
                           ? 'bg-slate-900 text-[#f7b944]'
                           : 'bg-white text-slate-700 border border-slate-200'
                       }`}
@@ -1875,82 +1934,97 @@ export default function LiveQuotationCanvas({
                   <span>Scope of Work & Technical Bill of Materials</span>
                 </h4>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Module */}
-                  <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-amber-900">Solar PV Module</span>
-                      <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-200/80 px-1.5 py-0.2 rounded">
-                        Qty: {moduleItem?.quantity || `${formData.capacityKwp} kWp`}
-                      </span>
-                    </div>
-                    <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {moduleItem?.itemDescription || 'Solar PV Modules – 550 Wp Mono Perc DCR'}
-                    </span>
-                  </div>
+                {(() => {
+                  const allDeclaredBrands = Array.from(new Set([
+                    ...(formData.brandDeclarations?.map(b => b.brand) || []),
+                    ...(formData.boqItems?.map(b => b.brand) || [])
+                  ].filter(Boolean)));
 
-                  {/* Inverter */}
-                  <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-amber-900">Solar Inverter</span>
-                      <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-200/80 px-1.5 py-0.2 rounded">
-                        Qty: {inverterItem?.quantity || '1 Set'}
-                      </span>
-                    </div>
-                    <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {inverterItem?.itemDescription || 'Solar Inverter – On-Grid Inverter'}
-                    </span>
-                  </div>
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Module */}
+                        <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-amber-900">Solar PV Module</span>
+                            <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-200/80 px-1.5 py-0.2 rounded">
+                              Qty: {moduleItem?.quantity || `${formData.capacityKwp} kWp`}
+                            </span>
+                          </div>
+                          <span className="text-xs font-extrabold text-slate-900 mt-1 block">
+                            {stripEquipmentBrandNames(moduleItem?.itemDescription, allDeclaredBrands) || '550 Wp Mono Perc DCR Panels'}
+                          </span>
+                        </div>
 
-                  {/* Battery */}
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-slate-600">Battery</span>
-                      <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
-                        Qty: {batteryItem?.quantity || 'Nil'}
-                      </span>
-                    </div>
-                    <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {batteryItem?.itemDescription && batteryItem.itemDescription !== 'Nil' ? batteryItem.itemDescription : 'Battery'}
-                    </span>
-                  </div>
+                        {/* Inverter */}
+                        <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-amber-900">Solar Inverter</span>
+                            <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-200/80 px-1.5 py-0.2 rounded">
+                              Qty: {inverterItem?.quantity || '1 Set'}
+                            </span>
+                          </div>
+                          <span className="text-xs font-extrabold text-slate-900 mt-1 block">
+                            {stripEquipmentBrandNames(inverterItem?.itemDescription, allDeclaredBrands) || 'On-Grid Inverter'}
+                          </span>
+                        </div>
 
-                  {/* Structure */}
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-slate-600">Mounting Structure</span>
-                      <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
-                        Qty: {structureItem?.quantity || '7 Feet'}
-                      </span>
-                    </div>
-                    <span className="text-xs font-extrabold text-slate-900 mt-1 block">
-                      {structureItem?.itemDescription || 'Mounting Structure – Table RCC Structure'}
-                    </span>
-                  </div>
-                </div>
+                        {/* Battery - only shown if not Nil */}
+                        {batteryItem && !isNilItem(batteryItem.quantity) && !isNilItem(batteryItem.itemDescription) && (
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase text-slate-600">Battery</span>
+                              <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
+                                Qty: {batteryItem.quantity}
+                              </span>
+                            </div>
+                            <span className="text-xs font-extrabold text-slate-900 mt-1 block">
+                              {stripEquipmentBrandNames(batteryItem.itemDescription && !isNilItem(batteryItem.itemDescription) ? batteryItem.itemDescription : 'Battery', [batteryItem.brand, ...allDeclaredBrands])}
+                            </span>
+                          </div>
+                        )}
 
-                {/* Detailed Checklists */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-200/80 mt-3 text-[11px]">
-                  <div>
-                    <span className="font-bold text-slate-800 block mb-1">Supply Includes ({formData.supplyIncludes.length}):</span>
-                    <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
-                      {formData.supplyIncludes.slice(0, 4).map((s, i) => (
-                        <li key={i} className="truncate">{renderFormattedText(s)}</li>
-                      ))}
-                      {formData.supplyIncludes.length > 4 && (
-                        <li className="text-[10px] text-amber-700 font-semibold">+ {formData.supplyIncludes.length - 4} more items</li>
-                      )}
-                    </ul>
-                  </div>
-                  <div>
-                    <span className="font-bold text-slate-800 block mb-1">Installation Includes ({formData.installationIncludes.length}):</span>
-                    <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
-                      {formData.installationIncludes.slice(0, 4).map((inst, i) => (
-                        <li key={i} className="truncate">{renderFormattedText(inst)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
+                        {/* Structure - only shown if not Nil */}
+                        {structureItem && !isNilItem(structureItem.quantity) && !isNilItem(structureItem.itemDescription) && (
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase text-slate-600">Mounting Structure</span>
+                              <span className="text-[10px] font-mono font-black text-slate-800 bg-slate-200 px-1.5 py-0.2 rounded">
+                                Qty: {structureItem.quantity || '7 Feet'}
+                              </span>
+                            </div>
+                            <span className="text-xs font-extrabold text-slate-900 mt-1 block">
+                              {stripEquipmentBrandNames(structureItem.itemDescription, [structureItem.brand, ...allDeclaredBrands]) || 'Mounting Structure – Table RCC Structure'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Detailed Checklists */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-200/80 mt-3 text-[11px]">
+                        <div>
+                          <span className="font-bold text-slate-800 block mb-1">Supply Includes ({formData.supplyIncludes.length}):</span>
+                          <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
+                            {formData.supplyIncludes.slice(0, 4).map((s, i) => (
+                              <li key={i} className="truncate">{renderFormattedText(stripEquipmentBrandNames(s, allDeclaredBrands))}</li>
+                            ))}
+                            {formData.supplyIncludes.length > 4 && (
+                              <li className="text-[10px] text-amber-700 font-semibold">+ {formData.supplyIncludes.length - 4} more items</li>
+                            )}
+                          </ul>
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-800 block mb-1">Installation Includes ({formData.installationIncludes.length}):</span>
+                          <ul className="space-y-0.5 text-slate-600 pl-3 list-disc">
+                            {formData.installationIncludes.slice(0, 4).map((inst, i) => (
+                              <li key={i} className="truncate">{renderFormattedText(stripEquipmentBrandNames(inst, allDeclaredBrands))}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Annexure A Commercial Costing Table */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, IndianRupee, Ban, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
-import { openAttachmentInNewTab, sortTransactionsByIdDesc } from '../utils';
+import { openAttachmentInNewTab, sortTransactionsByIdDesc, isTxnSubmitter } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, deleteFileFromCloudinary } from '../services/fileAttachmentService';
 import { uploadToFirebaseStorage } from '../services/firebaseStorageService';
@@ -821,8 +821,18 @@ export default function RegisterView({
     setIsModalOpen(true);
   };
 
+  const canUserEditTxn = (txn: Transaction): boolean => {
+    if (txn.status === 'DELETED') return false;
+    if (currentUser.role === 'ADMIN') return true;
+    // Users can edit their own expense claim while it is in PENDING status (before manager approval)
+    if (txn.status === 'PENDING') {
+      return isTxnSubmitter(txn, currentUser);
+    }
+    return false;
+  };
+
   const handleEditClick = (txn: Transaction) => {
-    if (currentUser.role !== 'ADMIN') return;
+    if (!canUserEditTxn(txn)) return;
     setEditingTransaction(txn);
     setFormDate(txn.date);
     setFormType(txn.type);
@@ -3990,23 +4000,27 @@ export default function RegisterView({
                               <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                                 Voided
                               </span>
-                            ) : currentUser.role === 'ADMIN' && (
+                            ) : (
                               <>
-                                <button
-                                  onClick={() => handleEditClick(txn)}
-                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all cursor-pointer"
-                                  title="Edit Entry"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
+                                {canUserEditTxn(txn) && (
+                                  <button
+                                    onClick={() => handleEditClick(txn)}
+                                    className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all cursor-pointer"
+                                    title="Edit Entry"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 
-                                <button
-                                  onClick={() => handleOpenDeleteModal(txn)}
-                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
-                                  title="Delete Entry"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {currentUser.role === 'ADMIN' && (
+                                  <button
+                                    onClick={() => handleOpenDeleteModal(txn)}
+                                    className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
+                                    title="Delete Entry"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -4083,23 +4097,27 @@ export default function RegisterView({
                           <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-lg">
                             Voided
                           </span>
-                        ) : currentUser.role === 'ADMIN' && (
+                        ) : (
                           <>
-                            <button
-                              onClick={() => handleEditClick(txn)}
-                              className="inline-flex items-center gap-1 py-1 px-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              Edit
-                            </button>
+                            {canUserEditTxn(txn) && (
+                              <button
+                                onClick={() => handleEditClick(txn)}
+                                className="inline-flex items-center gap-1 py-1 px-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                Edit
+                              </button>
+                            )}
                             
-                            <button
-                              onClick={() => handleOpenDeleteModal(txn)}
-                              className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Delete
-                            </button>
+                            {currentUser.role === 'ADMIN' && (
+                              <button
+                                onClick={() => handleOpenDeleteModal(txn)}
+                                className="inline-flex items-center gap-1 py-1 px-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-7"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Delete
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -4939,23 +4957,27 @@ export default function RegisterView({
                             <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md" title={`Deleted by ${txn.deletedBy || 'Admin'}: ${txn.deleteReason || ''}`}>
                               Voided
                             </span>
-                          ) : currentUser.role === 'ADMIN' && (
+                          ) : (
                             <>
-                              <button
-                                onClick={() => handleEditClick(txn)}
-                                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all cursor-pointer"
-                                title="Edit Entry"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
+                              {canUserEditTxn(txn) && (
+                                <button
+                                  onClick={() => handleEditClick(txn)}
+                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all cursor-pointer"
+                                  title="Edit Entry"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               
-                              <button
-                                onClick={() => handleOpenDeleteModal(txn)}
-                                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
-                                title="Delete Entry"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {currentUser.role === 'ADMIN' && (
+                                <button
+                                  onClick={() => handleOpenDeleteModal(txn)}
+                                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-all cursor-pointer"
+                                  title="Delete Entry"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -5064,23 +5086,27 @@ export default function RegisterView({
                       <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1.5 rounded-lg">
                         Voided
                       </span>
-                    ) : currentUser.role === 'ADMIN' && (
+                    ) : (
                       <>
-                        <button
-                          onClick={() => handleEditClick(txn)}
-                          className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          Edit
-                        </button>
+                        {canUserEditTxn(txn) && (
+                          <button
+                            onClick={() => handleEditClick(txn)}
+                            className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+                        )}
                         
-                        <button
-                          onClick={() => handleOpenDeleteModal(txn)}
-                          className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Delete
-                        </button>
+                        {currentUser.role === 'ADMIN' && (
+                          <button
+                            onClick={() => handleOpenDeleteModal(txn)}
+                            className="inline-flex items-center gap-1.5 py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[11px] font-bold transition-all cursor-pointer h-8"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        )}
                       </>
                     )}
                   </div>

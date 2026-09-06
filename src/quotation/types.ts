@@ -102,6 +102,20 @@ export interface SolarQuotation {
   systemType: SolarSystemType;
   gridEvacuationVoltage: string; // e.g. "415V / 230V"
   
+  // Equipment Selections & Questionnaire State
+  solarModule?: string;
+  inverter?: string;
+  battery?: string;
+  batteryQty?: number;
+  structureElevation?: string;
+  structureFeet?: number;
+  starModule?: boolean;
+  starInverter?: boolean;
+  starBattery?: boolean;
+  starStructure?: boolean;
+  pricingMode?: 'MANUAL' | 'AUTOMATIC';
+  manualTotal?: number;
+  
   // Scope of Work
   supplyIncludes: string[];
   installationIncludes: string[];
@@ -134,6 +148,8 @@ export interface SolarQuotation {
   micrNumber: string;
   bankAddress: string;
   termsAndConditions: string[];
+  warrantyClauses?: string[];
+  completionMilestones?: string[];
   moduleWarrantyYears: number; // 25
   inverterWarrantyYears: number; // 5
   balanceOfSystemWarrantyYears: number; // 1
@@ -214,6 +230,21 @@ export const DEFAULT_TERMS_AND_CONDITIONS = [
   'DCDB, Inverter, and ACDB shall be installed near the customer LT panel. Solar Generation Meter shall be near the LT panel.',
   'Any additional scope beyond this offer will be charged extra on actuals.',
   'Price Validity: 4 weeks from the date of quotation.'
+];
+
+export const DEFAULT_WARRANTY_CLAUSES: string[] = [
+  '**Solar Modules**: **25 Year Warranty** (12 years manufacturing defect warranty - 0–12 years: 90% performance warranty - 12–25 years: 81% performance warranty).',
+  '**Grid Tied Inverter**: **5 Years** warranty from date of supply.',
+  '**Balance of System**: **1 Year** warranty from date of supply.',
+  '*Consumables such as fuses, surge protection devices, AC adaptors, contactor coils, switches, etc., are excluded from warranty.*'
+];
+
+export const DEFAULT_COMPLETION_MILESTONES: string[] = [
+  '**Order Confirmation & Site Engineering Survey**: 2 to 3 Days',
+  '**Equipment Procurement & Material Dispatch to Site**: 5 to 7 Days',
+  '**Structural & Mechanical Module Installation**: 3 to 4 Days',
+  '**Electrical Cabling, Inverter Mounting & Earthing**: 2 to 3 Days',
+  '**Testing, Pre-Commissioning & DISCOM Net-Meter Inspection**: 5 to 7 Days'
 ];
 
 export const DEFAULT_BRAND_DECLARATIONS: BrandDeclarationItem[] = [
@@ -315,10 +346,10 @@ export const INITIAL_SOLAR_QUOTATIONS: SolarQuotation[] = [
     supplyIncludes: DEFAULT_SUPPLY_INCLUDES,
     installationIncludes: DEFAULT_INSTALLATION_INCLUDES,
     boqItems: [
-      { id: 'boq-1', slNo: 1, itemDescription: 'SERVOTEC HHV [550 Wp] Mono Perc DCR', quantity: '4.95 kWp' },
+      { id: 'boq-1', slNo: 1, itemDescription: '550 Wp Mono Perc DCR Panels', quantity: '4.95 kWp' },
       { id: 'boq-2', slNo: 2, itemDescription: 'Battery', quantity: 'Nill' },
       { id: 'boq-3', slNo: 3, itemDescription: 'Table RCC Mounting Structure Elevation for 5 kW', quantity: '7 Feet' },
-      { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter – Make: SERVOTEC', quantity: '1 Nos' },
+      { id: 'boq-4', slNo: 4, itemDescription: '5 kVA Single Phase On-Grid Hybrid Inverter', quantity: '1 Nos' },
       { id: 'boq-5', slNo: 5, itemDescription: 'DC Cables, Array Junction Boxes & Accessories', quantity: '4.95 kWp' },
       { id: 'boq-6', slNo: 6, itemDescription: 'AC Side Supply (Cables, ACDB, Earthing & Accessories)', quantity: '4.95 kWp' },
       { id: 'boq-7', slNo: 7, itemDescription: 'Installation and Commissioning', quantity: '4.95 kWp' }
@@ -345,6 +376,8 @@ export const INITIAL_SOLAR_QUOTATIONS: SolarQuotation[] = [
     micrNumber: '600240154',
     bankAddress: 'HDFC BANK LIMITED, Chrompet, Chennai, Tamil Nadu. Pin Code: 600044',
     termsAndConditions: DEFAULT_TERMS_AND_CONDITIONS,
+    warrantyClauses: [...DEFAULT_WARRANTY_CLAUSES],
+    completionMilestones: [...DEFAULT_COMPLETION_MILESTONES],
     moduleWarrantyYears: 25,
     inverterWarrantyYears: 5,
     balanceOfSystemWarrantyYears: 1,
@@ -493,6 +526,7 @@ export interface QuotationMasterConfig {
   termsAndConditions: string[];
 
   // 7. Warranty
+  warrantyClauses?: string[];
   moduleWarrantyYears: number;
   inverterWarrantyOptions: string[];
   defaultInverterWarranty: string;
@@ -704,24 +738,24 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
 
   supplyDropdownOptions: {
     moduleOptions: [
-      'SERVOTEC HHV [550 Wp] Mono Perc DCR – Made in India',
-      'Waaree 540-550 Wp Bi-facial Dual Glass TopCon DCR',
-      'Adani Solar 545 Wp Mono PERC High Efficiency DCR',
-      'Vikram Solar 550 Wp Half-Cut DCR Modules',
-      'Tata Power Solar 540 Wp Mono Crystalline DCR'
+      '550 Wp Mono Perc DCR Panels – Made in India',
+      '540-550 Wp Bi-facial Dual Glass TopCon DCR Modules',
+      '545 Wp Mono PERC High Efficiency DCR Modules',
+      '550 Wp Half-Cut Mono PERC DCR Panels',
+      '540 Wp Mono Crystalline DCR Panels'
     ],
     inverterOptions: [
-      'SERVOTEC Single / Three Phase On-Grid MPPT Inverter',
-      'Growatt On-Grid Smart Inverter with WiFi & Mobile App Monitoring',
-      'Solis High-Efficiency Dual MPPT Grid Tied Inverter',
-      'Sungrow Commercial Three Phase Inverter',
-      'Deye / GoodWe Hybrid Inverter with Battery Port'
+      'Single / Three Phase On-Grid MPPT Inverter',
+      'On-Grid Smart Inverter with WiFi & Mobile App Monitoring',
+      'High-Efficiency Dual MPPT Grid Tied Inverter',
+      'Commercial Three Phase Inverter with AFCI Protection',
+      'Hybrid Inverter with Battery Port'
     ],
     batteryOptions: [
       'Nil (On-Grid Direct Net-Metering)',
-      'Servotec 48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
-      'Exide Tubular Solar C10 Heavy-Duty Battery Bank',
-      'Luminous 150Ah / 200Ah Solar Tall Tubular Battery Bank'
+      '48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
+      'Tubular Solar C10 Heavy-Duty Battery Bank',
+      '150Ah / 200Ah Solar Tall Tubular Battery Bank'
     ],
     structureOptions: [
       'Nil (No Mounting Structure / Customer Scope)',
@@ -731,30 +765,30 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
       'Ground Mounted Galvanized Steel Structure with Concrete Ballast'
     ],
     protectionOptions: [
-      'ACDB & DCDB with C&S MCB, Finder Type-2 Surge Arrestor & IP65 Box',
-      'Dual MPPT DCDB with Hensel Enclosure + ACDB with Phoenix Contact SPD',
+      'ACDB & DCDB with MCB, Type-2 Surge Arrestor & IP65 Box',
+      'Dual MPPT DCDB Enclosure + ACDB with Type-2 SPD & MCBs',
       'Custom IP66 Distribution Panel with Voltage/Current Digital Meter'
     ],
     cablingOptions: [
-      'Polycab 6 Sq.mm Solar DC Cable, 4-Core Armoured AC Cable & Complete Earthing Kit',
-      'Havells Solar Photovoltaic Cable + Cu Earthing Electrodes',
-      'Finolex UV Stabilized DC Cable + Heavy GI Earthing Rods & Compound'
+      '6 Sq.mm Solar DC Cable, 4-Core Armoured AC Cable & Complete Earthing Kit',
+      'Solar Photovoltaic Cable + Cu Earthing Electrodes',
+      'UV Stabilized DC Cable + Heavy GI Earthing Rods & Compound'
     ]
   },
   starredSupplyOptions: [
-    'SERVOTEC HHV [550 Wp] Mono Perc DCR – Made in India',
-    'Waaree 540-550 Wp Bi-facial Dual Glass TopCon DCR',
-    'Adani Solar 545 Wp Mono PERC High Efficiency DCR',
-    'Vikram Solar 550 Wp Half-Cut DCR Modules',
-    'Tata Power Solar 540 Wp Mono Crystalline DCR',
-    'SERVOTEC Single / Three Phase On-Grid MPPT Inverter',
-    'Growatt On-Grid Smart Inverter with WiFi & Mobile App Monitoring',
-    'Solis High-Efficiency Dual MPPT Grid Tied Inverter',
-    'Sungrow Commercial Three Phase Inverter',
-    'Deye / GoodWe Hybrid Inverter with Battery Port',
-    'Servotec 48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
-    'Exide Tubular Solar C10 Heavy-Duty Battery Bank',
-    'Luminous 150Ah / 200Ah Solar Tall Tubular Battery Bank',
+    '550 Wp Mono Perc DCR Panels – Made in India',
+    '540-550 Wp Bi-facial Dual Glass TopCon DCR Modules',
+    '545 Wp Mono PERC High Efficiency DCR Modules',
+    '550 Wp Half-Cut Mono PERC DCR Panels',
+    '540 Wp Mono Crystalline DCR Panels',
+    'Single / Three Phase On-Grid MPPT Inverter',
+    'On-Grid Smart Inverter with WiFi & Mobile App Monitoring',
+    'High-Efficiency Dual MPPT Grid Tied Inverter',
+    'Commercial Three Phase Inverter with AFCI Protection',
+    'Hybrid Inverter with Battery Port',
+    '48V 100Ah Lithium Ferro Phosphate (LFP) Battery',
+    'Tubular Solar C10 Heavy-Duty Battery Bank',
+    '150Ah / 200Ah Solar Tall Tubular Battery Bank',
     'Table RCC Mounting Structure Elevation 7 to 10 Feet (Walkable Roof)',
     'Flush Mount Aluminium Rails for Metal Sheet Industrial Roof',
     'Super High-Rise Elevated Heavy Duty HDG Structure (12+ Feet)',
@@ -794,15 +828,10 @@ export const DEFAULT_QUOTATION_MASTER_CONFIG: QuotationMasterConfig = {
   ],
   defaultBosWarranty: '1 Year Workmanship & Balance of System Warranty',
   workmanshipWarrantyYears: 1,
+  warrantyClauses: [...DEFAULT_WARRANTY_CLAUSES],
 
   defaultCompletionWeeks: '2 to 3 weeks',
-  completionMilestones: [
-    'Order Confirmation & Site Engineering Survey: 2 to 3 Days',
-    'Equipment Procurement & Material Dispatch to Site: 5 to 7 Days',
-    'Structural & Mechanical Module Installation: 3 to 4 Days',
-    'Electrical Cabling, Inverter Mounting & Earthing: 2 to 3 Days',
-    'Testing, Pre-Commissioning & DISCOM Net-Meter Inspection: 5 to 7 Days'
-  ],
+  completionMilestones: [...DEFAULT_COMPLETION_MILESTONES],
 
   defaultTariffPerUnit: 8.00,
   benefitsTable: DEFAULT_SAVINGS_BENEFITS,
@@ -871,10 +900,15 @@ export function renderFormattedText(text: string | undefined | null): React.Reac
     );
   }
 
-  if (!text.includes('*')) return text;
+  if (!text.includes('*') && !text.includes('_')) return text;
 
   const parts: React.ReactNode[] = [];
-  const regex = /(\*\*|\*)([^*]+)\1/g;
+  // Matches:
+  // 1: ***bold italic***
+  // 2: **bold**
+  // 3: *italic*
+  // 4: _italic_
+  const regex = /(\*\*\*([^*]+)\*\*\*|\*\*([^*]+)\*\*|\*([^*]+)\*|_([^_]+)_)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -882,13 +916,43 @@ export function renderFormattedText(text: string | undefined | null): React.Reac
     if (match.index > lastIndex) {
       parts.push(text.substring(lastIndex, match.index));
     }
-    parts.push(
-      React.createElement(
-        'strong',
-        { key: match.index, className: 'font-bold text-slate-950' },
-        match[2]
-      )
-    );
+    if (match[2]) {
+      // ***bold italic***
+      parts.push(
+        React.createElement(
+          'strong',
+          { key: `bi-${match.index}`, className: 'font-bold text-slate-950' },
+          React.createElement('em', { className: 'italic' }, match[2])
+        )
+      );
+    } else if (match[3]) {
+      // **bold**
+      parts.push(
+        React.createElement(
+          'strong',
+          { key: `b-${match.index}`, className: 'font-bold text-slate-950' },
+          match[3]
+        )
+      );
+    } else if (match[4]) {
+      // *italic*
+      parts.push(
+        React.createElement(
+          'em',
+          { key: `i-${match.index}`, className: 'italic text-slate-800' },
+          match[4]
+        )
+      );
+    } else if (match[5]) {
+      // _italic_
+      parts.push(
+        React.createElement(
+          'em',
+          { key: `u-${match.index}`, className: 'italic text-slate-800' },
+          match[5]
+        )
+      );
+    }
     lastIndex = regex.lastIndex;
   }
 
@@ -936,6 +1000,127 @@ export function cleanBatteryDescription(rawText?: string, isBatteryActive?: bool
     return 'Battery';
   }
   return text;
+}
+
+/**
+ * Detects whether a string or quantity represents a "Nil" / excluded item
+ */
+export function isNilItem(text?: string | null): boolean {
+  if (!text) return false;
+  const t = text.trim().toLowerCase();
+  return (
+    t === 'nil' ||
+    t === 'nill' ||
+    t.startsWith('nil ') ||
+    t.startsWith('nil(') ||
+    t.startsWith('nil -') ||
+    t.startsWith('nil:') ||
+    t.startsWith('nill ') ||
+    t.startsWith('nill(') ||
+    t === '0' ||
+    t === '0 nos' ||
+    t === '0 feet' ||
+    t === '0 ft' ||
+    t === 'none' ||
+    t === 'n/a' ||
+    t === 'not applicable' ||
+    t.includes('(no battery') ||
+    t.includes('(no mounting structure') ||
+    t.includes('(on-grid direct net-metering)')
+  );
+}
+
+/**
+ * Strips manufacturer/brand names from equipment descriptions (Scope of Work & Annexure BOQ)
+ * so that technical descriptions remain brand-agnostic unless in the Brand Declaration matrix.
+ */
+export function stripEquipmentBrandNames(rawText?: string, explicitBrand?: string | string[]): string {
+  if (!rawText) return '';
+  let text = rawText.trim();
+
+  // Technical acronyms and specifications that must NEVER be stripped as brands
+  const PROTECTED_TERMS = new Set([
+    'acdb', 'dcdb', 'bos', 'spd', 'mcb', 'mccb', 'ip65', 'ip67', 'ip68', 'uv', 'lfp', 'dcr',
+    'rcc', 'hdg', 'eb', 'lt', 'ht', 'discom', 'cable', 'cables', 'earthing', 'inverter', 'panel',
+    'panels', 'structure', 'battery', 'batteries', 'transformer', 'meter', 'wiring', 'mounting',
+    'mono', 'perc', 'topcon', 'bifacial', 'poly', 'kw', 'kwp', 'kva', 'v', 'volt', 'amp', 'ah',
+    'single', 'three', 'phase', 'grid', 'tied', 'on-grid', 'hybrid', 'elevated', 'protection',
+    'complete', 'supply', 'installation', 'commissioning', 'accessories', 'kit', 'junction',
+    'box', 'boxes', 'array', 'side', 'net-metering', 'metering', 'table', 'flush', 'shed'
+  ]);
+
+  // 1. If explicit brand(s) are supplied (e.g. from BOQItem or Product Catalog), strip them safely
+  if (explicitBrand) {
+    const brands = Array.isArray(explicitBrand) ? explicitBrand : [explicitBrand];
+    for (const b of brands) {
+      if (!b || typeof b !== 'string') continue;
+      const parts = b.split(/[\/,+&|;]/).map(p => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const brandClean = p.replace(/^(?:mcb|spd|make|brand|mfr)\s*[:–-]\s*/i, '').trim();
+        if (!brandClean || brandClean.length < 2) continue;
+
+        // Never strip if the candidate brand is a protected electrical/solar technical term
+        if (PROTECTED_TERMS.has(brandClean.toLowerCase())) continue;
+        // Never strip if candidate brand is identical to the whole text or has more than 3 words (not a brand)
+        if (brandClean.toLowerCase() === text.toLowerCase()) continue;
+        if (brandClean.split(/\s+/).length > 3) continue;
+
+        const esc = brandClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        text = text.replace(new RegExp(`(?:make|brand|manufacturer|mfr)?\\s*[:–-]?\\s*\\(?\\[?\\b${esc}\\b\\]?\\)?(?:\\s*hhv)?`, 'gi'), '');
+      }
+    }
+  }
+
+  // 2. Strip explicit make/brand labels: "Make: Servotec", "Brand - Waaree", "(Make: ...)", "[Make: ...]"
+  text = text.replace(/\(?(?:make|brand|manufacturer|mfr)\s*[:–-]?\s*[a-zA-Z0-9&.\s\/\-]+\)?/gi, '');
+
+  // 3. Known manufacturer and brand dictionary across Solar Modules, Inverters, Batteries, Structures, Cables & Switchgear
+  const BRAND_PATTERNS = [
+    // Solar Module Manufacturers & related marks
+    'servotec', 'servotech', 'hhv', 'waaree', 'waree', 'adani(?:\\s*solar)?', 'vikram(?:\\s*solar)?',
+    'tata(?:\\s*power)?(?:\\s*solar)?', 'rayzon(?:\\s*solar)?', 'goldi(?:\\s*solar)?', 'renewsys',
+    'canadian(?:\\s*solar)?', 'trina(?:\\s*solar)?', 'jinko(?:\\s*solar)?', 'ja(?:\\s*solar)?',
+    'longi(?:\\s*solar)?', 'loom(?:\\s*solar)?', 'premier(?:\\s*energies)?', 'saatvik',
+    'gautam(?:\\s*solar)?', 'insolation(?:\\s*energy)?', 'axitec',
+    // Inverter Brands
+    'growatt', 'solis', 'sungrow', 'deye', 'goodwe', 'sofar(?:\\s*solar)?', 'solaredge',
+    'enphase', 'fronius', 'sma', 'delta', 'kstar', 'microtek', 'luminous', 'utl',
+    'statcon', 'sukam', 'su-kam', 'livguard',
+    // Batteries
+    'amaron', 'amara\\s*raja', 'exide', 'eastman', 'okaya',
+    // Structures & Metals
+    'jsw(?:\\s*steel)?(?:\\s*hdg)?', 'jindal', 'tata\\s*structura', 'essar', 'sail',
+    // Cables, Switchgear & Electricals
+    'polycab', 'havells', 'finolex', 'kei', 'rr\\s*kabel', 'apar', 'anchor', 'l&t',
+    'larsen\\s*&\\s*toubro', 'schneider(?:\\s*electric)?', 'siemens', 'abb', 'c&s',
+    'hensel', 'finder', 'phoenix(?:\\s*contact)?', 'ninbo', 'elmex', 'wago'
+  ];
+
+  const brandRegex = new RegExp(`\\b(?:${BRAND_PATTERNS.join('|')})\\b`, 'gi');
+
+  // Strip brands at beginning with optional hyphens/colons/slashes
+  text = text.replace(new RegExp(`^(?:make\\s*[:–-]?\\s*)?(?:${BRAND_PATTERNS.join('|')})\\s*(?:hhv)?\\s*[-–:/|]*\\s*`, 'gi'), '');
+  
+  // Strip brands at the end with optional hyphens/colons/slashes
+  text = text.replace(new RegExp(`\\s*[-–:/|]*\\s*(?:make\\s*[:–-]?\\s*)?(?:${BRAND_PATTERNS.join('|')})\\s*$`, 'gi'), '');
+
+  // Strip brand in brackets or parentheses e.g. (Waaree), [Servotec], (Solis)
+  text = text.replace(new RegExp(`[\\[\\(]\\s*(?:${BRAND_PATTERNS.join('|')})\\s*[\\]\\)]`, 'gi'), '');
+
+  // Strip remaining standalone occurrences of known brands
+  text = text.replace(brandRegex, '');
+
+  // 4. Clean up remaining orphaned formatting, slashes, brackets, hyphens
+  text = text.replace(/\[\s*(\d+[\w\s.-]+)\s*\]/g, '$1');
+  text = text.replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+  text = text.replace(/^[\s/–\-:,;|.]+/g, '');
+  text = text.replace(/[\s/–\-:,;|.]+$/g, '');
+  text = text.replace(/\s{2,}/g, ' ').trim();
+
+  // If over-stripped to empty, preserve original description
+  if (!text) return rawText.trim();
+
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
@@ -1166,7 +1351,7 @@ export function buildDefaultBOQItems(params: BuildBOQParams): BOQItem[] {
   const hasBattery = Boolean(
     (params.isBatteryActive ?? (params.batteryQty !== undefined ? params.batteryQty > 0 : false)) &&
     params.battery &&
-    !params.battery.toLowerCase().includes('nil') &&
+    !isNilItem(params.battery) &&
     (params.batteryQty === undefined || params.batteryQty > 0)
   );
   const batteryDesc = hasBattery ? cleanBatteryDescription(params.battery, true) : 'Battery';
@@ -1174,7 +1359,7 @@ export function buildDefaultBOQItems(params: BuildBOQParams): BOQItem[] {
 
   const hasStructure = Boolean(
     params.structureElevation &&
-    !params.structureElevation.toLowerCase().includes('nil') &&
+    !isNilItem(params.structureElevation) &&
     (params.structureFeet === undefined || params.structureFeet > 0)
   );
   const structureFeetStr = getStructureFeet(params.structureElevation, params.structureFeet);
@@ -1183,44 +1368,62 @@ export function buildDefaultBOQItems(params: BuildBOQParams): BOQItem[] {
   const inverterUnit = params.inverterUnit || 'Nos';
   const inverterQtyStr = params.inverterQty ? `${params.inverterQty} ${inverterUnit}` : `1 ${inverterUnit}`;
 
-  const baseItems: BOQItem[] = [
+  const rawBaseItems: BOQItem[] = [
     {
       id: 'boq-1',
       slNo: 1,
-      itemDescription: moduleDesc,
+      itemDescription: stripEquipmentBrandNames(moduleDesc),
       quantity: `${cap} kWp`,
       unitPrice: Math.round((basicCost * 0.45) / cap),
       totalPrice: Math.round(basicCost * 0.45),
-      brand: params.solarModule?.split(' ')[0] || 'Tier-1'
+      brand: 'Tier-1'
     },
     {
       id: 'boq-2',
       slNo: 2,
-      itemDescription: inverterDesc,
+      itemDescription: stripEquipmentBrandNames(inverterDesc),
       quantity: inverterQtyStr,
       unitPrice: Math.round(basicCost * 0.22),
       totalPrice: Math.round(basicCost * 0.22),
-      brand: params.inverter?.split(' ')[0] || 'Servotec'
+      brand: 'Servotec'
     },
-    {
+    hasBattery ? {
       id: 'boq-3',
       slNo: 3,
-      itemDescription: batteryDesc,
+      itemDescription: stripEquipmentBrandNames(batteryDesc),
       quantity: batteryQty,
-      unitPrice: hasBattery ? 95000 : 0,
-      totalPrice: hasBattery ? (params.batteryQty || 1) * 95000 : 0,
-      brand: hasBattery ? 'LFP Battery' : 'N/A'
+      unitPrice: 95000,
+      totalPrice: (params.batteryQty || 1) * 95000,
+      brand: 'LFP Battery'
+    } : {
+      id: 'boq-3',
+      slNo: 3,
+      itemDescription: 'Battery',
+      quantity: 'Nil',
+      unitPrice: 0,
+      totalPrice: 0,
+      brand: ''
     },
-    {
+    hasStructure ? {
       id: 'boq-4',
       slNo: 4,
-      itemDescription: structureDesc,
+      itemDescription: stripEquipmentBrandNames(structureDesc),
       quantity: structureFeetStr,
       unitPrice: Math.round((basicCost * 0.12) / cap),
       totalPrice: Math.round(basicCost * 0.12),
       brand: 'HDG Galvanized'
+    } : {
+      id: 'boq-4',
+      slNo: 4,
+      itemDescription: 'Mounting Structure',
+      quantity: 'Nil',
+      unitPrice: 0,
+      totalPrice: 0,
+      brand: ''
     }
   ];
+
+  const baseItems: BOQItem[] = rawBaseItems;
 
   // Dynamic default items e, f, g + any additional custom items from Pricing Defaults
   const defaultItemsConfig = (params.defaultBoqItems && params.defaultBoqItems.length > 0)
@@ -1250,17 +1453,29 @@ export function buildDefaultBOQItems(params: BuildBOQParams): BOQItem[] {
         ? Math.round(unitRate * cap)
         : unitRate;
 
+      const isNil = isNilItem(qtyStr) || isNilItem(desc);
+
       return {
         id: item.id || `boq-${index + 5}`,
         slNo: index + 5,
-        itemDescription: desc,
+        itemDescription: stripEquipmentBrandNames(desc, item.brand),
         quantity: qtyStr,
-        unitPrice: unitRate,
-        totalPrice: calculatedPrice,
-        brand: item.brand || ''
+        unitPrice: isNil ? 0 : unitRate,
+        totalPrice: isNil ? 0 : calculatedPrice,
+        brand: isNil ? '' : (item.brand || '')
       };
     });
 
-  return [...baseItems, ...extraItems];
+  const combinedItems = [...baseItems, ...extraItems];
+  return combinedItems.map((item, idx) => {
+    const isNil = isNilItem(item.quantity) || isNilItem(item.itemDescription);
+    return {
+      ...item,
+      slNo: idx + 1,
+      unitPrice: isNil ? 0 : (item.unitPrice || 0),
+      totalPrice: isNil ? 0 : (item.totalPrice || 0),
+      brand: isNil ? '' : (item.brand || '')
+    };
+  });
 }
 
