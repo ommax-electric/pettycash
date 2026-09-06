@@ -9,17 +9,22 @@ import { MOCK_USERS } from '../data';
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
   usersList?: User[];
+  appVersion?: string;
 }
 
-export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenProps) {
+export default function LoginScreen({ onLoginSuccess, usersList, appVersion }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [dynamicVersion, setDynamicVersion] = useState<string>(APP_VERSION);
+  const [dynamicVersion, setDynamicVersion] = useState<string>(appVersion || APP_VERSION);
 
   useEffect(() => {
+    if (appVersion) {
+      setDynamicVersion(appVersion);
+      return;
+    }
     try {
       const unsub = onSnapshot(
         doc(db, 'app_settings', 'config'),
@@ -39,7 +44,7 @@ export default function LoginScreen({ onLoginSuccess, usersList }: LoginScreenPr
     } catch {
       // Keep APP_VERSION fallback
     }
-  }, []);
+  }, [appVersion]);
 
   const activeUsers = usersList && usersList.length > 0 ? usersList : MOCK_USERS;
 

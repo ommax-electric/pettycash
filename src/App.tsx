@@ -37,7 +37,7 @@ import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, Opportunit
 import { SolarQuotation, QuotationStatus, QuotationMasterConfig, DEFAULT_QUOTATION_MASTER_CONFIG } from './quotation/types';
 import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
-import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc } from './firebase';
+import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc, query, orderBy, limit } from './firebase';
 import { sendEmailNotification, sendCRMEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl, deleteFileFromCloudinary } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
@@ -246,11 +246,48 @@ export default function App() {
     document.title = 'CONNECT | Ommax Electric Private Limited';
   }, []);
 
-  // Synchronize with Firebase Firestore
+  // Module-level activation states (lazy loads collections on demand to save read/write quotas)
+  const [activeModules, setActiveModules] = useState<{
+    cashBook: boolean;
+    crm: boolean;
+    quotation: boolean;
+    audit: boolean;
+  }>({
+    cashBook: false,
+    crm: false,
+    quotation: false,
+    audit: false,
+  });
+
+  // Track and activate modules dynamically based on user session and navigation
+  useEffect(() => {
+    if (!currentUser) return;
+
+    setActiveModules(prev => {
+      const inCashBook = !activeTab || activeTab.startsWith('CASHBOOK_') || openParentModule === 'CASH_BOOK' || activeTab === 'SETTINGS' || activeTab === 'ADMIN_SETTINGS';
+      const inCrm = activeTab?.startsWith('CRM_') || openParentModule === 'CRM';
+      const inQuotation = activeTab?.startsWith('QUOTATION_') || openParentModule === 'QUOTATION';
+      const inAudit = activeTab === 'ADMIN_SETTINGS' && adminSubTab === 'SYSTEM_AUDIT';
+
+      let changed = false;
+      const next = { ...prev };
+      if (inCashBook && !next.cashBook) { next.cashBook = true; changed = true; }
+      if (inCrm && !next.crm) { next.crm = true; changed = true; }
+      if (inQuotation) {
+        if (!next.quotation) { next.quotation = true; changed = true; }
+        if (!next.crm) { next.crm = true; changed = true; } // Quotations can link to CRM opportunities
+      }
+      if (inAudit && !next.audit) { next.audit = true; changed = true; }
+
+      return changed ? next : prev;
+    });
+  }, [currentUser, activeTab, openParentModule, adminSubTab]);
+
+  // 1. Core System Sync (App Settings & Users) - Runs on startup & handles one-time initialization
   useEffect(() => {
     let unsubs: (() => void)[] = [];
 
-    const initializeAndSync = async () => {
+    const initializeCore = async () => {
       try {
         const isSeededLocally = localStorage.getItem('petty_cash_db_seeded');
         const initDocRef = doc(db, 'sys_meta', 'init');
@@ -299,103 +336,15 @@ export default function App() {
             localStorage.setItem('petty_cash_db_seeded', 'true');
           }
         }
-
-        // Ensure integrations document exists in Firestore
-        const integrationsDocRef = doc(db, 'app_settings', 'integrations');
-        const integrationsSnap = await getDoc(integrationsDocRef);
-        if (!integrationsSnap.exists()) {
-          await setDoc(integrationsDocRef, DEFAULT_INTEGRATION_SETTINGS);
-        }
-
-        // Ensure CRM settings exist
-        const crmSettingsDocRef = doc(db, 'crm_settings', 'config');
-        const crmSettingsSnap = await getDoc(crmSettingsDocRef);
-        if (!crmSettingsSnap.exists()) {
-          await setDoc(crmSettingsDocRef, DEFAULT_CRM_SETTINGS);
-        }
       } catch (err) {
         console.warn('Initial seeding check:', err);
         localStorage.setItem('petty_cash_db_seeded', 'true');
       }
 
       try {
-        // 1. Transactions Sync
-        const unsubTxns = onSnapshot(collection(db, 'transactions'), (snapshot) => {
-          setIsFirebaseConnected(true);
-          if (snapshot.empty) {
-            setTransactions([]);
-          } else {
-            const list: Transaction[] = [];
-            const seenIds = new Set<string>();
-
-            snapshot.forEach((d) => {
-              const data = d.data() as Transaction;
-              const primaryId = data.id || d.id;
-
-              // Clean up orphan ghost candidate docs created by former candidate setDoc calls
-              if (d.id !== primaryId && primaryId.startsWith('TXN-')) {
-                deleteDoc(doc(db, 'transactions', d.id)).catch(() => {});
-                return;
-              }
-
-              if (seenIds.has(primaryId)) {
-                if (d.id !== primaryId) {
-                  deleteDoc(doc(db, 'transactions', d.id)).catch(() => {});
-                }
-                return;
-              }
-
-              seenIds.add(primaryId);
-              list.push({
-                ...data,
-                id: primaryId
-              });
-            });
-            setTransactions(sortTransactionsByIdDesc(list));
-          }
-        }, (err) => console.warn('Firestore transactions sync notice:', err));
-
-        // 2. Categories Sync
-        const unsubCats = onSnapshot(collection(db, 'categories'), (snapshot) => {
-          if (snapshot.empty) {
-            setCategories([]);
-          } else {
-            const list: CategoryLimit[] = [];
-            snapshot.forEach((d) => list.push(d.data() as CategoryLimit));
-            setCategories(list);
-          }
-        }, (err) => console.warn('Firestore categories sync notice:', err));
-
-        // 3. Users Sync
-        const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-          if (snapshot.empty) {
-            setUsers([]);
-          } else {
-            const list: User[] = [];
-            snapshot.forEach((d) => list.push(d.data() as User));
-            setUsers(list);
-            setCurrentUser(prev => {
-              if (!prev) return null;
-              const updated = list.find(u => (u.username && u.username.toLowerCase() === prev.username.toLowerCase()) || (u.id && u.id === prev.id));
-              return updated || prev;
-            });
-          }
-        }, (err) => console.warn('Firestore users sync notice:', err));
-
-        // 4. Logs Sync
-        const unsubLogs = onSnapshot(collection(db, 'logs'), (snapshot) => {
-          if (snapshot.empty) {
-            setLogs([]);
-          } else {
-            const list: ActivityLog[] = [];
-            snapshot.forEach((d) => list.push(d.data() as ActivityLog));
-            list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-            setLogs(list);
-          }
-        }, (err) => console.warn('Firestore logs sync notice:', err));
-
-        // 5. Settings Sync
+        // App Settings Sync
         const unsubSettings = onSnapshot(collection(db, 'app_settings'), (snapshot) => {
+          setIsFirebaseConnected(true);
           if (snapshot.empty) {
             setAppSettings(DEFAULT_APP_SETTINGS);
             setIntegrationSettings(DEFAULT_INTEGRATION_SETTINGS);
@@ -424,105 +373,225 @@ export default function App() {
           }
         }, (err) => console.warn('Firestore settings sync notice:', err));
 
-        // 6. CRM Accounts Sync
-        const unsubCrmAccs = onSnapshot(collection(db, 'crm_accounts'), (snapshot) => {
+        // Users Sync
+        const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
           if (snapshot.empty) {
-            setCrmAccounts([]);
+            setUsers([]);
           } else {
-            const list: CRMAccount[] = [];
-            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMAccount));
-            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            setCrmAccounts(list);
-          }
-        }, (err) => console.warn('CRM accounts sync notice:', err));
-
-        // 7. CRM Contacts Sync
-        const unsubCrmCons = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
-          if (snapshot.empty) {
-            setCrmContacts([]);
-          } else {
-            const list: CRMContact[] = [];
-            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMContact));
-            setCrmContacts(list);
-          }
-        }, (err) => console.warn('CRM contacts sync notice:', err));
-
-        // 8. CRM Opportunities Sync
-        const unsubCrmOpps = onSnapshot(collection(db, 'crm_opportunities'), (snapshot) => {
-          if (snapshot.empty) {
-            setCrmOpportunities([]);
-          } else {
-            const list: CRMOpportunity[] = [];
-            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMOpportunity));
-            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            setCrmOpportunities(list);
-          }
-        }, (err) => console.warn('CRM opportunities sync notice:', err));
-
-        // 9. CRM Settings Sync
-        const unsubCrmSettings = onSnapshot(collection(db, 'crm_settings'), (snapshot) => {
-          if (!snapshot.empty) {
-            snapshot.forEach(d => {
-              if (d.id === 'config') {
-                setCrmSettings({ ...DEFAULT_CRM_SETTINGS, ...d.data() } as CRMSettings);
-              }
+            const list: User[] = [];
+            snapshot.forEach((d) => list.push(d.data() as User));
+            setUsers(list);
+            setCurrentUser(prev => {
+              if (!prev) return null;
+              const updated = list.find(u => (u.username && u.username.toLowerCase() === prev.username.toLowerCase()) || (u.id && u.id === prev.id));
+              return updated || prev;
             });
           }
-        }, (err) => console.warn('CRM settings sync notice:', err));
+        }, (err) => console.warn('Firestore users sync notice:', err));
 
-        // 10. Solar Quotations Sync
-        const unsubQuos = onSnapshot(collection(db, 'solar_quotations'), (snapshot) => {
-          if (snapshot.empty) {
-            setQuotations([]);
-          } else {
-            const list: SolarQuotation[] = [];
-            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as SolarQuotation));
-            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            setQuotations(list);
-          }
-        }, (err) => console.warn('Solar quotations sync notice:', err));
-
-        // 11. Quotation Settings Sync
-        const unsubQuoSettings = onSnapshot(collection(db, 'quotation_settings'), (snapshot) => {
-          if (!snapshot.empty) {
-            snapshot.forEach(d => {
-              if (d.id === 'master_config') {
-                const fetched = d.data() as QuotationMasterConfig;
-                const merged: QuotationMasterConfig = {
-                  ...DEFAULT_QUOTATION_MASTER_CONFIG,
-                  ...fetched
-                };
-                setQuotationMasterConfig(merged);
-                localStorage.setItem('ommax_solar_quotation_master_config', JSON.stringify(merged));
-              }
-            });
-          }
-        }, (err) => console.warn('Quotation settings sync notice:', err));
-
-        // 12. Expense Queries Sync
-        const unsubQueries = onSnapshot(collection(db, 'expense_queries'), (snapshot) => {
-          if (snapshot.empty) {
-            setQueries([]);
-          } else {
-            const list: ExpenseQuery[] = [];
-            snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as ExpenseQuery));
-            list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
-            setQueries(list);
-          }
-        }, (err) => console.warn('Expense queries sync notice:', err));
-
-        unsubs = [unsubTxns, unsubCats, unsubUsers, unsubLogs, unsubSettings, unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings, unsubQuos, unsubQuoSettings, unsubQueries];
+        unsubs = [unsubSettings, unsubUsers];
       } catch (err) {
-        console.error('Firebase sync setup error:', err);
+        console.error('Firebase core sync setup error:', err);
       }
     };
 
-    initializeAndSync();
+    initializeCore();
 
     return () => {
       unsubs.forEach(unsub => unsub && unsub());
     };
   }, []);
+
+  // 2. Cash Book Module Sync (Transactions, Categories, Expense Queries) - Active only when user accesses Cash Book
+  useEffect(() => {
+    if (!activeModules.cashBook) return;
+
+    let unsubs: (() => void)[] = [];
+
+    try {
+      const unsubTxns = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+        if (snapshot.empty) {
+          setTransactions([]);
+        } else {
+          const list: Transaction[] = [];
+          const seenIds = new Set<string>();
+
+          snapshot.forEach((d) => {
+            const data = d.data() as Transaction;
+            const primaryId = data.id || d.id;
+
+            if (seenIds.has(primaryId)) {
+              return;
+            }
+
+            seenIds.add(primaryId);
+            list.push({
+              ...data,
+              id: primaryId
+            });
+          });
+          setTransactions(sortTransactionsByIdDesc(list));
+        }
+      }, (err) => console.warn('Firestore transactions sync notice:', err));
+
+      const unsubCats = onSnapshot(collection(db, 'categories'), (snapshot) => {
+        if (snapshot.empty) {
+          setCategories([]);
+        } else {
+          const list: CategoryLimit[] = [];
+          snapshot.forEach((d) => list.push(d.data() as CategoryLimit));
+          setCategories(list);
+        }
+      }, (err) => console.warn('Firestore categories sync notice:', err));
+
+      const unsubQueries = onSnapshot(collection(db, 'expense_queries'), (snapshot) => {
+        if (snapshot.empty) {
+          setQueries([]);
+        } else {
+          const list: ExpenseQuery[] = [];
+          snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as ExpenseQuery));
+          list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+          setQueries(list);
+        }
+      }, (err) => console.warn('Expense queries sync notice:', err));
+
+      unsubs = [unsubTxns, unsubCats, unsubQueries];
+    } catch (err) {
+      console.error('Cash Book sync setup error:', err);
+    }
+
+    return () => {
+      unsubs.forEach(unsub => unsub && unsub());
+    };
+  }, [activeModules.cashBook]);
+
+  // 3. CRM Module Sync (Accounts, Contacts, Opportunities, CRM Settings) - Active only when user opens CRM
+  useEffect(() => {
+    if (!activeModules.crm) return;
+
+    let unsubs: (() => void)[] = [];
+
+    try {
+      const unsubCrmAccs = onSnapshot(collection(db, 'crm_accounts'), (snapshot) => {
+        if (snapshot.empty) {
+          setCrmAccounts([]);
+        } else {
+          const list: CRMAccount[] = [];
+          snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMAccount));
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          setCrmAccounts(list);
+        }
+      }, (err) => console.warn('CRM accounts sync notice:', err));
+
+      const unsubCrmCons = onSnapshot(collection(db, 'crm_contacts'), (snapshot) => {
+        if (snapshot.empty) {
+          setCrmContacts([]);
+        } else {
+          const list: CRMContact[] = [];
+          snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMContact));
+          setCrmContacts(list);
+        }
+      }, (err) => console.warn('CRM contacts sync notice:', err));
+
+      const unsubCrmOpps = onSnapshot(collection(db, 'crm_opportunities'), (snapshot) => {
+        if (snapshot.empty) {
+          setCrmOpportunities([]);
+        } else {
+          const list: CRMOpportunity[] = [];
+          snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as CRMOpportunity));
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          setCrmOpportunities(list);
+        }
+      }, (err) => console.warn('CRM opportunities sync notice:', err));
+
+      const unsubCrmSettings = onSnapshot(collection(db, 'crm_settings'), (snapshot) => {
+        if (!snapshot.empty) {
+          snapshot.forEach(d => {
+            if (d.id === 'config') {
+              setCrmSettings({ ...DEFAULT_CRM_SETTINGS, ...d.data() } as CRMSettings);
+            }
+          });
+        }
+      }, (err) => console.warn('CRM settings sync notice:', err));
+
+      unsubs = [unsubCrmAccs, unsubCrmCons, unsubCrmOpps, unsubCrmSettings];
+    } catch (err) {
+      console.error('CRM sync setup error:', err);
+    }
+
+    return () => {
+      unsubs.forEach(unsub => unsub && unsub());
+    };
+  }, [activeModules.crm]);
+
+  // 4. Solar Quotation Module Sync (Quotations, Master Config) - Active only when user opens Quotations
+  useEffect(() => {
+    if (!activeModules.quotation) return;
+
+    let unsubs: (() => void)[] = [];
+
+    try {
+      const unsubQuos = onSnapshot(collection(db, 'solar_quotations'), (snapshot) => {
+        if (snapshot.empty) {
+          setQuotations([]);
+        } else {
+          const list: SolarQuotation[] = [];
+          snapshot.forEach(d => list.push({ ...d.data(), id: d.id } as SolarQuotation));
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          setQuotations(list);
+        }
+      }, (err) => console.warn('Solar quotations sync notice:', err));
+
+      const unsubQuoSettings = onSnapshot(collection(db, 'quotation_settings'), (snapshot) => {
+        if (!snapshot.empty) {
+          snapshot.forEach(d => {
+            if (d.id === 'master_config') {
+              const fetched = d.data() as QuotationMasterConfig;
+              const merged: QuotationMasterConfig = {
+                ...DEFAULT_QUOTATION_MASTER_CONFIG,
+                ...fetched
+              };
+              setQuotationMasterConfig(merged);
+              localStorage.setItem('ommax_solar_quotation_master_config', JSON.stringify(merged));
+            }
+          });
+        }
+      }, (err) => console.warn('Quotation settings sync notice:', err));
+
+      unsubs = [unsubQuos, unsubQuoSettings];
+    } catch (err) {
+      console.error('Solar quotation sync setup error:', err);
+    }
+
+    return () => {
+      unsubs.forEach(unsub => unsub && unsub());
+    };
+  }, [activeModules.quotation]);
+
+  // 5. System Audit Trail Sync - Active only when Admin opens Audit Trail tab
+  useEffect(() => {
+    if (!activeModules.audit) return;
+
+    let unsubLogs: (() => void) | null = null;
+    try {
+      unsubLogs = onSnapshot(query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(150)), (snapshot) => {
+        if (snapshot.empty) {
+          setLogs([]);
+        } else {
+          const list: ActivityLog[] = [];
+          snapshot.forEach((d) => list.push(d.data() as ActivityLog));
+          list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setLogs(list);
+        }
+      }, (err) => console.warn('Firestore logs sync notice:', err));
+    } catch (err) {
+      console.error('Audit logs sync setup error:', err);
+    }
+
+    return () => {
+      if (unsubLogs) unsubLogs();
+    };
+  }, [activeModules.audit]);
 
 
 
@@ -802,15 +871,6 @@ export default function App() {
       if (targetTxn.reference && targetTxn.reference !== targetTxn.id) {
         deleteDoc(doc(db, 'transactions', targetTxn.reference)).catch(() => {});
       }
-      const numRef = targetTxn.reference ? targetTxn.reference.replace(/\D/g, '') : '';
-      if (numRef) {
-        const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
-        candidates.forEach(cand => {
-          if (cand !== targetTxn.id) {
-            deleteDoc(doc(db, 'transactions', cand)).catch(() => {});
-          }
-        });
-      }
       addLog('TXN_DELETE', `Permanently deleted voucher ${targetTxn.reference || targetTxn.id} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)})`);
       return;
     }
@@ -835,18 +895,9 @@ export default function App() {
 
     setDoc(doc(db, 'transactions', targetTxn.id), updatedTxn).catch(e => console.warn(e));
 
-    // Also clean up any orphan ghost candidate docs if they were ever created in Firestore
+    // Clean up orphan ghost doc if reference differed from id
     if (targetTxn.reference && targetTxn.reference !== targetTxn.id) {
       deleteDoc(doc(db, 'transactions', targetTxn.reference)).catch(() => {});
-    }
-    const numRef = targetTxn.reference ? targetTxn.reference.replace(/\D/g, '') : '';
-    if (numRef) {
-      const candidates = [numRef, `OW-${numRef}`, `OW-${numRef.padStart(3, '0')}`, `IW-${numRef}`, `IW-${numRef.padStart(3, '0')}`];
-      candidates.forEach(cand => {
-        if (cand !== targetTxn.id) {
-          deleteDoc(doc(db, 'transactions', cand)).catch(() => {});
-        }
-      });
     }
 
     addLog('TXN_DELETE', `Deleted/Voided voucher ${targetTxn.reference || targetTxn.id} (${appSettings.currencySymbol}${targetTxn.amount.toFixed(2)}). Reason: ${deletionReasonStr}`);
@@ -2093,7 +2144,7 @@ export default function App() {
 
   // Guard: Redirect to secure login
   if (!currentUser) {
-    return <LoginScreen onLoginSuccess={handleLogin} usersList={users} />;
+    return <LoginScreen onLoginSuccess={handleLogin} usersList={users} appVersion={appSettings.appVersion} />;
   }
 
   return (

@@ -1,6 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   getDoc,
@@ -11,6 +14,7 @@ import {
   onSnapshot, 
   query, 
   orderBy, 
+  limit,
   setDoc as setDocOriginal,
   serverTimestamp 
 } from 'firebase/firestore';
@@ -22,9 +26,24 @@ const app = initializeApp(firebaseConfig);
 const configAny = firebaseConfig as any;
 const databaseId = configAny.firestoreDatabaseId || 'ai-studio-pettycashregiste-730a9cfd-1d99-477c-981b-b9e4babaaa3a';
 
-export const db = databaseId && databaseId !== '(default)'
-  ? getFirestore(app, databaseId)
-  : getFirestore(app);
+let firestoreInstance;
+try {
+  const cacheConfig = {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  };
+  firestoreInstance = databaseId && databaseId !== '(default)'
+    ? initializeFirestore(app, cacheConfig, databaseId)
+    : initializeFirestore(app, cacheConfig);
+} catch (e) {
+  console.warn('Firestore persistent cache initialization fallback to getFirestore:', e);
+  firestoreInstance = databaseId && databaseId !== '(default)'
+    ? getFirestore(app, databaseId)
+    : getFirestore(app);
+}
+
+export const db = firestoreInstance;
 
 export const storage = configAny.storageBucket
   ? getStorage(app, configAny.storageBucket)
@@ -94,6 +113,7 @@ export {
   onSnapshot, 
   query, 
   orderBy, 
+  limit,
   serverTimestamp 
 };
 
