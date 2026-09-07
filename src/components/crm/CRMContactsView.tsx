@@ -2239,8 +2239,8 @@ export default function CRMContactsView({
                       required
                       placeholder="e.g. Rajesh Kumar"
                       value={formData.name}
-                      onChange={e => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors uppercase"
                     />
                   </div>
                 </div>
@@ -2506,8 +2506,8 @@ export default function CRMContactsView({
                         type="text"
                         placeholder="Specific Office, Branch, Site, Floor No, Street Address"
                         value={formData.address}
-                        onChange={e => setFormData({ ...formData, address: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        onChange={e => setFormData({ ...formData, address: e.target.value.toUpperCase() })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                       />
                     </div>
 
@@ -2519,8 +2519,8 @@ export default function CRMContactsView({
                           type="text"
                           placeholder="City / Location"
                           value={formData.city}
-                          onChange={e => setFormData({ ...formData, city: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, city: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2529,8 +2529,8 @@ export default function CRMContactsView({
                           type="text"
                           placeholder="State"
                           value={formData.state}
-                          onChange={e => setFormData({ ...formData, state: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, state: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2539,8 +2539,8 @@ export default function CRMContactsView({
                           type="text"
                           placeholder="Pin code"
                           value={formData.pincode}
-                          onChange={e => setFormData({ ...formData, pincode: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, pincode: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2549,8 +2549,8 @@ export default function CRMContactsView({
                           type="text"
                           placeholder="India"
                           value={formData.country}
-                          onChange={e => setFormData({ ...formData, country: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, country: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                     </div>
@@ -2578,8 +2578,8 @@ export default function CRMContactsView({
                         required
                         placeholder="Plot / Door No, Street, Landmark, Industrial Area"
                         value={formData.address}
-                        onChange={e => setFormData({ ...formData, address: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        onChange={e => setFormData({ ...formData, address: e.target.value.toUpperCase() })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                       />
                     </div>
 
@@ -2592,8 +2592,8 @@ export default function CRMContactsView({
                           required
                           placeholder="Ariyalur"
                           value={formData.city}
-                          onChange={e => setFormData({ ...formData, city: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, city: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2603,8 +2603,8 @@ export default function CRMContactsView({
                           required
                           placeholder="Tamil Nadu"
                           value={formData.state}
-                          onChange={e => setFormData({ ...formData, state: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, state: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2614,8 +2614,8 @@ export default function CRMContactsView({
                           required
                           placeholder="621704"
                           value={formData.pincode}
-                          onChange={e => setFormData({ ...formData, pincode: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, pincode: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -2625,8 +2625,8 @@ export default function CRMContactsView({
                           required
                           placeholder="India"
                           value={formData.country}
-                          onChange={e => setFormData({ ...formData, country: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setFormData({ ...formData, country: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                     </div>

@@ -79,6 +79,8 @@ interface QuotationDashboardViewProps {
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
   onUpdateQuotationStatus: (quotationId: string, status: QuotationStatus, reason?: string) => void;
   onDeleteQuotation?: (quotationId: string) => void;
+  initialNewQuotationOpportunityId?: string | null;
+  onClearInitialOpportunity?: () => void;
 }
 
 const ALL_STATUSES: { id: QuotationStatus; label: string }[] = [
@@ -1002,7 +1004,9 @@ export default function QuotationDashboardView({
   onNavigateToTools,
   onSaveQuotation,
   onUpdateQuotationStatus,
-  onDeleteQuotation
+  onDeleteQuotation,
+  initialNewQuotationOpportunityId,
+  onClearInitialOpportunity
 }: QuotationDashboardViewProps) {
   const isAdmin = currentUser?.role === 'ADMIN';
 
@@ -1469,6 +1473,15 @@ export default function QuotationDashboardView({
 
     setIsQuestionnaireOpen(true);
   };
+
+  // Auto-open new quotation wizard when navigated from CRM Opportunity module
+  useEffect(() => {
+    if (initialNewQuotationOpportunityId) {
+      handleOpenNewQuestionnaire();
+      handleSelectOpportunity(initialNewQuotationOpportunityId);
+      onClearInitialOpportunity?.();
+    }
+  }, [initialNewQuotationOpportunityId]);
 
   const handleOpenEditQuestionnaire = (quo: SolarQuotation) => {
     setEditingQuotationId(quo.id);

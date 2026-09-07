@@ -16,6 +16,7 @@ import {
   UserCheck,
   Filter,
   FileSpreadsheet,
+  FilePlus,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -58,6 +59,7 @@ import {
   DEFAULT_CRM_SETTINGS 
 } from '../../crm/types';
 import { User, AppSettings } from '../../types';
+import { SolarQuotation } from '../../quotation/types';
 import { MOCK_USERS } from '../../data';
 import CountryPhoneInput from './CountryPhoneInput';
 
@@ -69,6 +71,8 @@ interface CRMOpportunitiesViewProps {
   currentUser: User;
   users?: User[];
   appSettings?: AppSettings;
+  quotations?: SolarQuotation[];
+  onCreateQuotation?: (opportunity: CRMOpportunity) => void;
   onAddOpportunity: (opp: Omit<CRMOpportunity, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateOpportunity: (opp: CRMOpportunity) => Promise<void>;
   onDeleteOpportunity: (id: string) => Promise<void>;
@@ -84,6 +88,8 @@ export default function CRMOpportunitiesView({
   currentUser,
   users = [],
   appSettings,
+  quotations = [],
+  onCreateQuotation,
   onAddOpportunity,
   onUpdateOpportunity,
   onDeleteOpportunity,
@@ -2327,31 +2333,63 @@ export default function CRMOpportunitiesView({
 
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setViewingOpp(opp)}
-                          className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
-                          title="Quick View Opportunity & Stage Notes"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenEdit(opp)}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
-                          title="Edit Opportunity"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        {canDelete && (
-                          <button
-                            onClick={() => setDeletingOppId(opp.id)}
-                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Delete Opportunity"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
+                      {(() => {
+                        const existingQuotation = quotations?.find(
+                          q => (q.opportunityId && q.opportunityId === opp.id) || (q.opportunityTitle && q.opportunityTitle === opp.title)
+                        );
+                        const isDrafted = Boolean(existingQuotation);
+
+                        return (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!isDrafted && onCreateQuotation) {
+                                  onCreateQuotation(opp);
+                                }
+                              }}
+                              disabled={isDrafted}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isDrafted 
+                                  ? 'text-slate-300 cursor-not-allowed' 
+                                  : 'hover:bg-amber-50 text-slate-400 hover:text-amber-600 cursor-pointer'
+                              }`}
+                              title={
+                                isDrafted 
+                                  ? (existingQuotation?.offerNo 
+                                      ? `Quotation already drafted (${existingQuotation.offerNo})` 
+                                      : 'Quotation already drafted for this opportunity') 
+                                  : 'Create New Quotation'
+                              }
+                            >
+                              <FilePlus className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setViewingOpp(opp)}
+                              className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
+                              title="Quick View Opportunity & Stage Notes"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleOpenEdit(opp)}
+                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
+                              title="Edit Opportunity"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            {canDelete && (
+                              <button
+                                onClick={() => setDeletingOppId(opp.id)}
+                                className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                title="Delete Opportunity"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -2450,31 +2488,63 @@ export default function CRMOpportunitiesView({
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => setViewingOpp(opp)}
-                      className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg cursor-pointer"
-                      title="Quick View Opportunity & Stage Notes"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleOpenEdit(opp)}
-                      className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 cursor-pointer"
-                      title="Edit Opportunity"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    {canDelete && (
-                      <button
-                        onClick={() => setDeletingOppId(opp.id)}
-                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer"
-                        title="Delete Opportunity"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
+                  {(() => {
+                    const existingQuotation = quotations?.find(
+                      q => (q.opportunityId && q.opportunityId === opp.id) || (q.opportunityTitle && q.opportunityTitle === opp.title)
+                    );
+                    const isDrafted = Boolean(existingQuotation);
+
+                    return (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isDrafted && onCreateQuotation) {
+                              onCreateQuotation(opp);
+                            }
+                          }}
+                          disabled={isDrafted}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isDrafted 
+                              ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
+                              : 'bg-amber-50 hover:bg-amber-100 text-amber-700 cursor-pointer'
+                          }`}
+                          title={
+                            isDrafted 
+                              ? (existingQuotation?.offerNo 
+                                  ? `Quotation already drafted (${existingQuotation.offerNo})` 
+                                  : 'Quotation already drafted for this opportunity') 
+                              : 'Create New Quotation'
+                          }
+                        >
+                          <FilePlus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setViewingOpp(opp)}
+                          className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg cursor-pointer"
+                          title="Quick View Opportunity & Stage Notes"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(opp)}
+                          className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 cursor-pointer"
+                          title="Edit Opportunity"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        {canDelete && (
+                          <button
+                            onClick={() => setDeletingOppId(opp.id)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer"
+                            title="Delete Opportunity"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Contact & Client Account Info (Contact Person is prominent) */}
@@ -4003,10 +4073,10 @@ export default function CRMOpportunitiesView({
                       placeholder="e.g. Rajesh Sharma"
                       value={wizardContactFormData.name}
                       onChange={e => {
-                        setWizardContactFormData({ ...wizardContactFormData, name: e.target.value });
+                        setWizardContactFormData({ ...wizardContactFormData, name: e.target.value.toUpperCase() });
                         setWizardContactDismissDuplicateWarning(false);
                       }}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors uppercase"
                     />
                   </div>
                 </div>
@@ -4241,8 +4311,8 @@ export default function CRMOpportunitiesView({
                         type="text"
                         placeholder="Specific Office, Branch, Site, Floor No, Street Address"
                         value={wizardContactFormData.address}
-                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value.toUpperCase() })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                       />
                     </div>
 
@@ -4253,8 +4323,8 @@ export default function CRMOpportunitiesView({
                           type="text"
                           placeholder="City"
                           value={wizardContactFormData.city}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4263,8 +4333,8 @@ export default function CRMOpportunitiesView({
                           type="text"
                           placeholder="State"
                           value={wizardContactFormData.state}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4273,8 +4343,8 @@ export default function CRMOpportunitiesView({
                           type="text"
                           placeholder="Pin code"
                           value={wizardContactFormData.pincode}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4283,8 +4353,8 @@ export default function CRMOpportunitiesView({
                           type="text"
                           placeholder="India"
                           value={wizardContactFormData.country}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                     </div>
@@ -4311,8 +4381,8 @@ export default function CRMOpportunitiesView({
                         required
                         placeholder="Plot / Door No, Street, Landmark, Industrial Area"
                         value={wizardContactFormData.address}
-                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                        onChange={e => setWizardContactFormData({ ...wizardContactFormData, address: e.target.value.toUpperCase() })}
+                        className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                       />
                     </div>
 
@@ -4324,8 +4394,8 @@ export default function CRMOpportunitiesView({
                           required
                           placeholder="Ariyalur"
                           value={wizardContactFormData.city}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, city: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4335,8 +4405,8 @@ export default function CRMOpportunitiesView({
                           required
                           placeholder="Tamil Nadu"
                           value={wizardContactFormData.state}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, state: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4346,8 +4416,8 @@ export default function CRMOpportunitiesView({
                           required
                           placeholder="621704"
                           value={wizardContactFormData.pincode}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                       <div>
@@ -4357,8 +4427,8 @@ export default function CRMOpportunitiesView({
                           required
                           placeholder="India"
                           value={wizardContactFormData.country}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, country: e.target.value.toUpperCase() })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
                         />
                       </div>
                     </div>

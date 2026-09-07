@@ -217,6 +217,7 @@ export default function App() {
   // Quotation States
   const [quotations, setQuotations] = useState<SolarQuotation[]>([]);
   const [activeEditingQuotation, setActiveEditingQuotation] = useState<SolarQuotation | null>(null);
+  const [newQuotationOpportunityId, setNewQuotationOpportunityId] = useState<string | null>(null);
   const [quotationToolsDirty, setQuotationToolsDirty] = useState(false);
   const [pendingNavigationTab, setPendingNavigationTab] = useState<NavigationTab | null>(null);
   const [showToolsUnsavedModal, setShowToolsUnsavedModal] = useState(false);
@@ -2033,6 +2034,13 @@ export default function App() {
     setActiveTab('QUOTATION_PROPOSAL');
   };
 
+  const handleCreateQuotationForOpportunity = (opp: CRMOpportunity) => {
+    setActiveEditingQuotation(null);
+    setNewQuotationOpportunityId(opp.id);
+    setActiveTab('QUOTATION_PROPOSAL');
+    setOpenParentModule('QUOTATION');
+  };
+
   const handleUpdateQuotationStatus = async (quotationId: string, status: QuotationStatus, reason?: string) => {
     const target = quotations.find(q => q.id === quotationId);
     if (!target) return;
@@ -2920,6 +2928,8 @@ export default function App() {
               currentUser={currentUser}
               users={users}
               appSettings={appSettings}
+              quotations={quotations}
+              onCreateQuotation={handleCreateQuotationForOpportunity}
               onAddOpportunity={handleAddCRMOpportunity}
               onUpdateOpportunity={handleUpdateCRMOpportunity}
               onDeleteOpportunity={handleDeleteCRMOpportunity}
@@ -2941,6 +2951,8 @@ export default function App() {
               onSaveQuotation={handleSaveQuotation}
               onUpdateQuotationStatus={handleUpdateQuotationStatus}
               onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
+              initialNewQuotationOpportunityId={newQuotationOpportunityId}
+              onClearInitialOpportunity={() => setNewQuotationOpportunityId(null)}
             />
           )}
           {activeTab === 'QUOTATION_TOOLS' && (
@@ -3225,6 +3237,8 @@ export default function App() {
                   currentUser={currentUser}
                   users={users}
                   appSettings={appSettings}
+                  quotations={quotations}
+                  onCreateQuotation={handleCreateQuotationForOpportunity}
                   onAddOpportunity={handleAddCRMOpportunity}
                   onUpdateOpportunity={handleUpdateCRMOpportunity}
                   onDeleteOpportunity={handleDeleteCRMOpportunity}
@@ -3260,6 +3274,8 @@ export default function App() {
                     onSaveQuotation={handleSaveQuotation}
                     onUpdateQuotationStatus={handleUpdateQuotationStatus}
                     onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
+                    initialNewQuotationOpportunityId={newQuotationOpportunityId}
+                    onClearInitialOpportunity={() => setNewQuotationOpportunityId(null)}
                   />
                 )
               )}

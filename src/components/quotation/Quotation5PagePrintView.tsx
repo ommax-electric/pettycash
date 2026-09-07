@@ -13,7 +13,7 @@ import {
   deriveAcCapacityKw,
   deriveDcCapacityKwp
 } from '../../quotation/types';
-import { Printer, Download, X, ZoomIn, ZoomOut, CheckCircle2, ShieldCheck, Phone, Mail, Globe, MapPin, QrCode, Edit3, Save, Send, ArrowLeft } from 'lucide-react';
+import { Printer, Download, X, ZoomIn, ZoomOut, CheckCircle2, ShieldCheck, Phone, Mail, Globe, MapPin, QrCode, Edit3, Save, Send, ArrowLeft, Maximize2 } from 'lucide-react';
 import { formatDateToDMY } from '../../types';
 
 interface Quotation5PagePrintViewProps {
@@ -254,9 +254,56 @@ export default function Quotation5PagePrintView({
   onSaveDraft,
   onSubmitQuotation
 }: Quotation5PagePrintViewProps) {
-  const [zoomLevel, setZoomLevel] = React.useState<number>(100);
+  const getFitWidthZoom = React.useCallback(() => {
+    if (typeof window !== 'undefined') {
+      // 794px is base A4 width at 96 DPI (210mm)
+      const padding = window.innerWidth < 640 ? 16 : 48;
+      const availableWidth = Math.max(280, window.innerWidth - padding);
+      return Math.min(100, Math.max(30, Math.floor((availableWidth / 794) * 100)));
+    }
+    return 100;
+  }, []);
+
+  const [zoomLevel, setZoomLevel] = React.useState<number>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 840) {
+      const padding = window.innerWidth < 640 ? 16 : 48;
+      const availableWidth = Math.max(280, window.innerWidth - padding);
+      return Math.min(100, Math.max(30, Math.floor((availableWidth / 794) * 100)));
+    }
+    return 100;
+  });
+
   const [showSubmitModal, setShowSubmitModal] = React.useState<boolean>(false);
   const pagesContainerRef = React.useRef<HTMLDivElement>(null);
+  const [unscaledHeight, setUnscaledHeight] = React.useState<number>(0);
+
+  // Track natural container height to prevent blank scroll space when scaled down
+  React.useEffect(() => {
+    const measure = () => {
+      if (pagesContainerRef.current) {
+        setUnscaledHeight(pagesContainerRef.current.offsetHeight);
+      }
+    };
+    measure();
+    const timer = setTimeout(measure, 350);
+    return () => clearTimeout(timer);
+  }, [quotation]);
+
+  // Adjust zoom on orientation / window resize on mobile
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 840) {
+        setZoomLevel(prev => {
+          if (prev < 90) {
+            return getFitWidthZoom();
+          }
+          return prev;
+        });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [getFitWidthZoom]);
 
   const pdfFileName = React.useMemo(() => getQuotationPdfFilename(quotation), [quotation]);
 
@@ -444,7 +491,7 @@ export default function Quotation5PagePrintView({
   const formattedValidityDate = formatDateToDMY(quotation.priceValidityDate);
 
   return (
-    <div className="quotation-5page-root fixed inset-0 z-50 flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden animate-fadeIn print:static print:inset-auto print:z-auto print:overflow-visible print:bg-white print:backdrop-blur-none print:h-auto print:w-auto">
+    <div className="quotation-5page-root fixed inset-0 z-[80] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden animate-fadeIn print:static print:inset-auto print:z-auto print:overflow-visible print:bg-white print:backdrop-blur-none print:h-auto print:w-auto">
       {/* Global Print Style for pristine 5-page PDF export */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
@@ -510,111 +557,163 @@ export default function Quotation5PagePrintView({
       `}} />
 
       {/* Top Floating Control Bar (Hidden on Print) */}
-      <div className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between border-b border-slate-800 shrink-0 print:hidden shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#f7b944] text-slate-950 font-black flex items-center justify-center shadow-sm">
-            5P
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-black text-white tracking-wide">
-                {quotation.offerNo} <span className="text-[#f7b944]">({quotation.revisionCode})</span>
-              </h2>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-                Official Letterhead A4
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400">
+      <div className="bg-slate-900 text-white px-3 sm:px-6 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-800 shrink-0 print:hidden shadow-lg z-20">
+        {/* Header Main Info Row */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-xs sm:text-sm font-black text-white tracking-wide truncate">
+              {quotation.offerNo} <span className="text-[#f7b944]">({quotation.revisionCode})</span>
+            </h2>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
               {quotation.projectName} • {deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp Solar PV Power Plant
             </p>
           </div>
+
+          {/* Quick Primary Actions on Mobile Header Top Row */}
+          <div className="flex items-center gap-1.5 sm:hidden shrink-0">
+            <button
+              onClick={handleNativePrint}
+              title={`Print or Save as PDF (${pdfFileName})`}
+              className="flex items-center gap-1 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-black px-2.5 py-1.5 rounded-lg text-xs transition-all shadow-md cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>PDF</span>
+            </button>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Close Preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Back to Edit Button */}
-          {onEdit && (
-            <button
-              onClick={() => onEdit(quotation)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all border border-slate-700 cursor-pointer"
-              title="Edit parameters in the questionnaire wizard"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Edit</span>
-            </button>
-          )}
+        {/* Action Controls Row */}
+        <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 sm:pb-0 scrollbar-none">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Back to Edit Button */}
+            {onEdit && (
+              <button
+                onClick={() => onEdit(quotation)}
+                className="flex items-center gap-1 sm:gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-xs transition-all border border-slate-700 shrink-0 cursor-pointer"
+                title="Edit parameters in the questionnaire wizard"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Back to Edit</span>
+                <span className="sm:hidden">Edit</span>
+              </button>
+            )}
 
-          {/* Save Draft Button */}
-          {onSaveDraft && quotation.status !== 'SENT' && (
-            <button
-              onClick={() => onSaveDraft(quotation)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3 py-2 rounded-xl text-xs transition-all border border-slate-700 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5 text-blue-400" />
-              <span>Save Draft</span>
-            </button>
-          )}
+            {/* Save Draft Button */}
+            {onSaveDraft && quotation.status !== 'SENT' && (
+              <button
+                onClick={() => onSaveDraft(quotation)}
+                className="flex items-center gap-1 sm:gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-xs transition-all border border-slate-700 shrink-0 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5 text-blue-400" />
+                <span className="hidden sm:inline">Save Draft</span>
+                <span className="sm:hidden">Save</span>
+              </button>
+            )}
 
-          {/* Submit Proposal Button */}
-          {onSubmitQuotation && (
-            <button
-              onClick={handleConfirmSubmit}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition-all shadow-md cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Submit</span>
-            </button>
-          )}
-
-          {/* Zoom Controls */}
-          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700">
-            <button
-              onClick={() => setZoomLevel(prev => Math.max(prev - 10, 50))}
-              className="p-1.5 hover:bg-slate-700 rounded-md text-slate-300 hover:text-white transition-colors"
-              title="Zoom Out"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-mono px-2 text-slate-300 min-w-[50px] text-center font-bold">
-              {zoomLevel}%
-            </span>
-            <button
-              onClick={() => setZoomLevel(prev => Math.min(prev + 10, 150))}
-              className="p-1.5 hover:bg-slate-700 rounded-md text-slate-300 hover:text-white transition-colors"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
+            {/* Submit Proposal Button */}
+            {onSubmitQuotation && (
+              <button
+                onClick={handleConfirmSubmit}
+                className="flex items-center gap-1 sm:gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-xs transition-all shadow-md shrink-0 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Submit</span>
+              </button>
+            )}
           </div>
 
-          <button
-            onClick={handleNativePrint}
-            title={`Print or Save as PDF (${pdfFileName})`}
-            className="flex items-center gap-2 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs transition-all shadow-md cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            Print / Save as PDF
-          </button>
-
-          {onClose && (
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Fit Width / 100% Toggle */}
             <button
-              onClick={onClose}
-              className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors ml-1 cursor-pointer"
-              title="Close Preview"
+              onClick={() => {
+                const fit = getFitWidthZoom();
+                if (Math.abs(zoomLevel - fit) < 5) {
+                  setZoomLevel(100);
+                } else {
+                  setZoomLevel(fit);
+                }
+              }}
+              className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-amber-300 font-mono font-bold px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-xs border border-slate-700 shrink-0 cursor-pointer"
+              title="Toggle between Fit Width and 100%"
             >
-              <X className="w-5 h-5" />
+              <Maximize2 className="w-3 h-3" />
+              <span>{Math.abs(zoomLevel - getFitWidthZoom()) < 5 ? '100%' : 'Fit'}</span>
             </button>
-          )}
+
+            {/* Zoom Controls */}
+            <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 shrink-0">
+              <button
+                onClick={() => setZoomLevel(prev => Math.max(prev - 10, 30))}
+                className="p-1 sm:p-1.5 hover:bg-slate-700 rounded-md text-slate-300 hover:text-white transition-colors"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+              <span className="text-[11px] sm:text-xs font-mono px-1 sm:px-2 text-slate-300 min-w-[38px] sm:min-w-[50px] text-center font-bold">
+                {zoomLevel}%
+              </span>
+              <button
+                onClick={() => setZoomLevel(prev => Math.min(prev + 10, 150))}
+                className="p-1 sm:p-1.5 hover:bg-slate-700 rounded-md text-slate-300 hover:text-white transition-colors"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+            </div>
+
+            {/* Print / Save as PDF Button (Desktop View) */}
+            <button
+              onClick={handleNativePrint}
+              title={`Print or Save as PDF (${pdfFileName})`}
+              className="hidden sm:flex items-center gap-2 bg-[#f7b944] hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs transition-all shadow-md shrink-0 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print / Save as PDF</span>
+            </button>
+
+            {/* Close Button (Desktop View) */}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="hidden sm:block p-2 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors ml-1 shrink-0 cursor-pointer"
+                title="Close Preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Paginated Scrollable Canvas */}
-      <div className="quotation-5page-canvas flex-1 overflow-y-auto p-6 md:p-10 flex justify-center bg-slate-950/80 print:p-0 print:m-0 print:overflow-visible print:bg-white print:block">
+      <div className="quotation-5page-canvas flex-1 overflow-auto p-2 sm:p-6 md:p-10 flex justify-center bg-slate-950/80 print:p-0 print:m-0 print:overflow-visible print:bg-white print:block">
         <div 
-          ref={pagesContainerRef}
-          id="quotation-5page-container"
-          className="flex flex-col items-center gap-10 transition-transform origin-top pb-16 print:p-0 print:m-0 print:gap-0 print:block print:w-full"
-          style={{ transform: zoomLevel !== 100 ? `scale(${zoomLevel / 100})` : undefined }}
+          className="transition-all duration-150 print:w-full print:m-0 print:block"
+          style={{
+            width: zoomLevel !== 100 ? `${Math.round(794 * (zoomLevel / 100))}px` : undefined,
+            maxWidth: '100%'
+          }}
         >
+          <div 
+            ref={pagesContainerRef}
+            id="quotation-5page-container"
+            className="flex flex-col items-center gap-6 sm:gap-10 transition-transform origin-top-left pb-16 print:p-0 print:m-0 print:gap-0 print:block print:w-full"
+            style={{ 
+              width: '794px',
+              transform: zoomLevel !== 100 ? `scale(${zoomLevel / 100})` : undefined,
+              transformOrigin: 'top left',
+              marginBottom: zoomLevel !== 100 && unscaledHeight ? `-${Math.round(unscaledHeight * (1 - (zoomLevel / 100)))}px` : undefined
+            }}
+          >
 
           {/* ========================================================================= */}
           {/* PAGE 1: EXECUTIVE PROPOSAL & SCOPE OF WORK                                */}
@@ -1299,11 +1398,12 @@ export default function Quotation5PagePrintView({
           </div>
 
         </div>
+        </div>
       </div>
 
       {/* In-App Submit Confirmation Modal */}
       {showSubmitModal && (
-        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200">
             <div className="flex items-center gap-3 text-emerald-600 mb-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center font-bold">
