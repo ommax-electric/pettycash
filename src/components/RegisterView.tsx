@@ -646,14 +646,21 @@ export default function RegisterView({
 
       const processed = await compressAndProcessFile(file);
       
-      const cloudName = (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim();
+      const isCloudinaryActive = Boolean(
+        (integrationSettings?.cloudinaryEnabled ?? (localStorage.getItem('cloudinary_enabled') === 'true')) &&
+        (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name'))?.trim()
+      );
+      const cloudName = isCloudinaryActive
+        ? (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim()
+        : '';
       const apiKey = (integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '').trim();
       const apiSecret = (integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || '').trim();
       const uploadPreset = (integrationSettings?.cloudinaryUploadPreset || localStorage.getItem('cloudinary_upload_preset') || '').trim();
 
       let uploadedCloudinaryUrl: string | null = null;
       let uploadedPublicId: string | null = null;
-      if (cloudName) {
+      let uploadErrorMessage: string | null = null;
+      if (isCloudinaryActive && cloudName) {
         setReceiptFile({
           name: processed.name,
           size: processed.size,
@@ -688,6 +695,8 @@ export default function RegisterView({
               apiSecret
             }).catch(e => console.warn('Cloudinary previous file cleanup error:', e));
           }
+        } else {
+          uploadErrorMessage = cRes.error || 'Network error connecting to Cloudinary. Will retry on submit.';
         }
       }
 
@@ -698,9 +707,7 @@ export default function RegisterView({
         cloudinaryUrl: uploadedCloudinaryUrl || null,
         cloudinaryPublicId: uploadedPublicId,
         isUploading: false,
-        uploadError: (cloudName && !uploadedCloudinaryUrl)
-          ? 'Cloudinary upload could not be completed. Check credentials in Admin Settings.'
-          : null
+        uploadError: uploadErrorMessage
       });
 
       return true;
@@ -982,9 +989,15 @@ export default function RegisterView({
       } else if (receiptFile.dataUrl?.startsWith('http')) {
         finalReceiptUrl = receiptFile.dataUrl;
       } else if (receiptFile.dataUrl && receiptFile.dataUrl.startsWith('data:')) {
-        // If Cloudinary is configured, upload Base64 attachment to Cloudinary before saving to Firestore
-        const cloudName = integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name');
-        if (cloudName) {
+        // If Cloudinary is explicitly enabled and configured, upload Base64 attachment to Cloudinary before saving
+        const isCloudinaryActive = Boolean(
+          (integrationSettings?.cloudinaryEnabled ?? (localStorage.getItem('cloudinary_enabled') === 'true')) &&
+          (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name'))?.trim()
+        );
+        const cloudName = isCloudinaryActive
+          ? (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim()
+          : '';
+        if (isCloudinaryActive && cloudName) {
           const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
           const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
           const cleanName = receiptFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -1001,7 +1014,8 @@ export default function RegisterView({
             finalReceiptUrl = cRes.url;
             setReceiptFile(prev => prev ? { ...prev, dataUrl: cRes.url, cloudinaryUrl: cRes.url, uploadError: null } : null);
           } else {
-            setFormError(`Cloudinary Upload Failed: ${cRes.error || 'Check Cloud Name, API Key, or Upload Preset in Admin Settings.'}`);
+            // Strict Single-Storage: Cloudinary is the designated media repository. Never save raw Base64 files to Firestore.
+            setFormError(`Cloudinary Upload Failed: ${cRes.error || 'Network error or invalid credentials. Please verify your connection and Admin Settings.'}`);
             return;
           }
         } else {
@@ -5696,8 +5710,8 @@ export default function RegisterView({
 
                             {receiptFile.uploadError && (
                               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium border border-amber-200">
-                                <AlertCircle className="w-3 h-3 text-amber-600" />
-                                {receiptFile.uploadError} (Will retry on submit)
+                                <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
+                                <span>{receiptFile.uploadError}</span>
                               </div>
                             )}
 

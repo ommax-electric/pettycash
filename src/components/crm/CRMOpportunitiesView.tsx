@@ -841,22 +841,19 @@ export default function CRMOpportunitiesView({
       })();
 
       const contactDisplayName = wizardContactFormData.name.trim();
-      const oppTitle = isIndep
-        ? `${contactDisplayName} - Direct Deal`
-        : `${accName} - Project Supply`;
 
       setFormData({
-        title: oppTitle,
+        title: '',
         accountId: accId,
         accountName: accName,
         contactId: createdCon.id,
         contactName: contactDisplayName,
         amount: '' as unknown as number,
-        stage: (pipelineStagesList[0]?.id as OpportunityStage) || 'PROPOSAL',
-        probability: pipelineStagesList[0]?.probability || 10,
+        stage: '' as OpportunityStage,
+        probability: 0,
         expectedCloseDate: defaultTargetCloseDate,
-        leadSource: leadSourcesList[0] || 'Direct Referral',
-        portfolio: productsAndServicesList[0] || 'Safety Products',
+        leadSource: '',
+        portfolio: '',
         assignedTo: wizardContactFormData.assignedTo || (currentUser.fullName || currentUser.username),
         notes: ''
       });
@@ -2349,10 +2346,10 @@ export default function CRMOpportunitiesView({
                                 }
                               }}
                               disabled={isDrafted}
-                              className={`p-1.5 rounded-lg transition-colors ${
+                              className={`p-1.5 rounded-lg transition-all ${
                                 isDrafted 
-                                  ? 'text-slate-300 cursor-not-allowed' 
-                                  : 'hover:bg-amber-50 text-slate-400 hover:text-amber-600 cursor-pointer'
+                                  ? 'bg-slate-100/60 text-slate-300 border border-slate-200/50 opacity-40 cursor-not-allowed' 
+                                  : 'bg-amber-50 hover:bg-amber-100 text-amber-600 hover:text-amber-700 border border-amber-200/90 shadow-xs cursor-pointer'
                               }`}
                               title={
                                 isDrafted 
@@ -2394,7 +2391,6 @@ export default function CRMOpportunitiesView({
                   </tr>
                 );
               })}
-
               {paginatedOpportunities.length === 0 && (
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-slate-400">
@@ -2428,65 +2424,16 @@ export default function CRMOpportunitiesView({
             return (
               <div key={opp.id} className="p-4 space-y-3 hover:bg-slate-50/70 transition-colors">
                 
-                {/* Header: Title, ID & Pipeline Stage Dropdown */}
+                {/* Header Row: Title on Left, Action Icons on Right */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setAuditHistoryOpp(opp)}
-                        className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100 cursor-pointer flex items-center gap-1"
-                        title="Click ID to view Audit & Field History"
-                      >
-                        <span>{opp.id}</span>
-                        <History className="w-2.5 h-2.5 opacity-60" />
-                      </button>
-                      {canChangeStage ? (
-                        <div className="relative inline-block">
-                          <select
-                            value={opp.stage}
-                            onChange={(e) => handleQuickStageChange(opp, e.target.value as OpportunityStage)}
-                            className="appearance-none font-extrabold font-mono text-[10px] pl-2 pr-5 py-0.5 rounded-md border cursor-pointer focus:outline-none"
-                            style={{
-                              backgroundColor: `${stage.color}15`,
-                              color: stage.color,
-                              borderColor: `${stage.color}40`,
-                            }}
-                          >
-                            {pipelineStagesList.map(s => (
-                              <option key={s.id} value={s.id} className="bg-white text-slate-900 font-sans font-medium text-xs">
-                                {s.label}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown 
-                            className="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
-                            style={{ color: stage.color }} 
-                          />
-                        </div>
-                      ) : (
-                        <span 
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold font-mono"
-                          style={{ 
-                            backgroundColor: `${stage.color}15`,
-                            color: stage.color,
-                            border: `1px solid ${stage.color}35`
-                          }}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
-                          {stage.label}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setAuditHistoryOpp(opp)}
-                      className="font-extrabold text-xs text-slate-900 mt-1 leading-snug text-left hover:text-amber-700 hover:underline cursor-pointer block w-full"
-                      title="Click Title to view Audit & Field History"
-                    >
-                      {opp.title}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAuditHistoryOpp(opp)}
+                    className="font-extrabold text-xs text-slate-900 leading-snug text-left hover:text-amber-700 hover:underline cursor-pointer min-w-0 flex-1 pt-0.5"
+                    title="Click Title to view Audit & Field History"
+                  >
+                    {opp.title}
+                  </button>
 
                   {(() => {
                     const existingQuotation = quotations?.find(
@@ -2504,10 +2451,10 @@ export default function CRMOpportunitiesView({
                             }
                           }}
                           disabled={isDrafted}
-                          className={`p-1.5 rounded-lg transition-colors ${
+                          className={`p-1.5 rounded-lg transition-all ${
                             isDrafted 
-                              ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
-                              : 'bg-amber-50 hover:bg-amber-100 text-amber-700 cursor-pointer'
+                              ? 'bg-slate-100/60 text-slate-300 border border-slate-200/50 opacity-40 cursor-not-allowed' 
+                              : 'bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200/90 shadow-xs cursor-pointer'
                           }`}
                           title={
                             isDrafted 
@@ -2545,6 +2492,55 @@ export default function CRMOpportunitiesView({
                       </div>
                     );
                   })()}
+                </div>
+
+                {/* Sub-Header Row: Opportunity ID & Pipeline Stage Dropdown (Dedicated Row - Never Overlaps) */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setAuditHistoryOpp(opp)}
+                    className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100 cursor-pointer flex items-center gap-1 shrink-0"
+                    title="Click ID to view Audit & Field History"
+                  >
+                    <span>{opp.id}</span>
+                    <History className="w-2.5 h-2.5 opacity-60" />
+                  </button>
+                  {canChangeStage ? (
+                    <div className="relative inline-block max-w-full">
+                      <select
+                        value={opp.stage}
+                        onChange={(e) => handleQuickStageChange(opp, e.target.value as OpportunityStage)}
+                        className="appearance-none font-extrabold font-mono text-[10px] pl-2 pr-5 py-0.5 rounded-md border cursor-pointer focus:outline-none"
+                        style={{
+                          backgroundColor: `${stage.color}15`,
+                          color: stage.color,
+                          borderColor: `${stage.color}40`,
+                        }}
+                      >
+                        {pipelineStagesList.map(s => (
+                          <option key={s.id} value={s.id} className="bg-white text-slate-900 font-sans font-medium text-xs">
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown 
+                        className="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
+                        style={{ color: stage.color }} 
+                      />
+                    </div>
+                  ) : (
+                    <span 
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold font-mono"
+                      style={{ 
+                        backgroundColor: `${stage.color}15`,
+                        color: stage.color,
+                        border: `1px solid ${stage.color}35`
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />
+                      {stage.label}
+                    </span>
+                  )}
                 </div>
 
                 {/* Contact & Client Account Info (Contact Person is prominent) */}

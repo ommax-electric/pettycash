@@ -217,7 +217,7 @@ export default function App() {
   // Quotation States
   const [quotations, setQuotations] = useState<SolarQuotation[]>([]);
   const [activeEditingQuotation, setActiveEditingQuotation] = useState<SolarQuotation | null>(null);
-  const [newQuotationOpportunityId, setNewQuotationOpportunityId] = useState<string | null>(null);
+  const [newQuotationOpportunity, setNewQuotationOpportunity] = useState<CRMOpportunity | null>(null);
   const [quotationToolsDirty, setQuotationToolsDirty] = useState(false);
   const [pendingNavigationTab, setPendingNavigationTab] = useState<NavigationTab | null>(null);
   const [showToolsUnsavedModal, setShowToolsUnsavedModal] = useState(false);
@@ -2036,7 +2036,7 @@ export default function App() {
 
   const handleCreateQuotationForOpportunity = (opp: CRMOpportunity) => {
     setActiveEditingQuotation(null);
-    setNewQuotationOpportunityId(opp.id);
+    setNewQuotationOpportunity(opp);
     setActiveTab('QUOTATION_PROPOSAL');
     setOpenParentModule('QUOTATION');
   };
@@ -2951,8 +2951,8 @@ export default function App() {
               onSaveQuotation={handleSaveQuotation}
               onUpdateQuotationStatus={handleUpdateQuotationStatus}
               onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
-              initialNewQuotationOpportunityId={newQuotationOpportunityId}
-              onClearInitialOpportunity={() => setNewQuotationOpportunityId(null)}
+              initialOpportunity={newQuotationOpportunity}
+              onClearInitialOpportunity={() => setNewQuotationOpportunity(null)}
             />
           )}
           {activeTab === 'QUOTATION_TOOLS' && (
@@ -3274,8 +3274,8 @@ export default function App() {
                     onSaveQuotation={handleSaveQuotation}
                     onUpdateQuotationStatus={handleUpdateQuotationStatus}
                     onDeleteQuotation={currentUser?.role === 'ADMIN' ? handleDeleteQuotation : undefined}
-                    initialNewQuotationOpportunityId={newQuotationOpportunityId}
-                    onClearInitialOpportunity={() => setNewQuotationOpportunityId(null)}
+                    initialOpportunity={newQuotationOpportunity}
+                    onClearInitialOpportunity={() => setNewQuotationOpportunity(null)}
                   />
                 )
               )}

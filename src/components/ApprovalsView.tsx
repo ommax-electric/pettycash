@@ -146,7 +146,36 @@ export default function ApprovalsView({
     isAssignedManagerForTxn(t, currentUser, users)
   );
   const pendingPaymentTxns = transactions.filter(t => t.type === 'OUT' && t.status === 'APPROVED');
-  const historyTxns = transactions.filter(t => t.type === 'OUT' && (t.status === 'PAID' || t.status === 'REJECTED'));
+  
+  // Helper to determine if a date or timestamp string falls within the current calendar month
+  const isDateInCurrentMonth = (dateStr?: string | null): boolean => {
+    if (!dateStr) return false;
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+
+    const raw = dateStr.split('T')[0].trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const [y, m] = raw.split('-').map(Number);
+      return y === curYear && m === curMonth;
+    }
+    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(raw)) {
+      const parts = raw.split(/[-/]/).map(Number);
+      return parts[2] === curYear && parts[1] === curMonth;
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return d.getFullYear() === curYear && (d.getMonth() + 1) === curMonth;
+    }
+    return false;
+  };
+
+  // Completed / History queue restricted strictly to current month to optimize display & resource overhead
+  const historyTxns = transactions.filter(t => 
+    t.type === 'OUT' && 
+    (t.status === 'PAID' || t.status === 'REJECTED') &&
+    (isDateInCurrentMonth(t.paidAt) || isDateInCurrentMonth(t.rejectedAt) || isDateInCurrentMonth(t.date))
+  );
 
   // Get current active tab list
   const getTabTransactions = () => {
@@ -281,7 +310,7 @@ export default function ApprovalsView({
             }`}
           >
             <FileText className="w-3.5 h-3.5 shrink-0" />
-            <span>Completed / History</span>
+            <span>Completed / History (This Month)</span>
             <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
               activeTab === 'HISTORY'
                 ? 'bg-amber-500 text-white'
@@ -298,9 +327,13 @@ export default function ApprovalsView({
             <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3">
               <CheckCircle2 className="w-7 h-7 text-slate-400" />
             </div>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">No requests in this queue</h3>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+              {activeTab === 'HISTORY' ? 'No completed requests this month' : 'No requests in this queue'}
+            </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              There are currently no petty cash items waiting for action in this category.
+              {activeTab === 'HISTORY'
+                ? 'There are currently no paid or rejected petty cash claims recorded for the current month.'
+                : 'There are currently no petty cash items waiting for action in this category.'}
             </p>
           </div>
         ) : (
@@ -331,6 +364,11 @@ export default function ApprovalsView({
                       <tr key={txn.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="py-3 px-2.5 sm:px-3 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           #{txn.reference || txn.id}
+                          {txn.projectRefNo && txn.projectRefNo.trim() && (
+                            <span className="block font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-400 mt-0.5" title={`Project Ref. No: ${txn.projectRefNo}`}>
+                              Ref: {txn.projectRefNo.trim()}
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
                           {formatDateToDMY(txn.date)}
@@ -477,10 +515,15 @@ export default function ApprovalsView({
                   >
                     {/* CARD HEADER */}
                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                           #{txn.reference || txn.id}
                         </span>
+                        {txn.projectRefNo && txn.projectRefNo.trim() && (
+                          <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/40 px-1.5 py-0.5 rounded">
+                            Ref: {txn.projectRefNo.trim()}
+                          </span>
+                        )}
                         <span className="text-[11px] text-slate-500 font-medium">
                           {formatDateToDMY(txn.date)}
                         </span>
@@ -711,6 +754,22 @@ export default function ApprovalsView({
                   <div>
                     <span className="text-xs text-slate-400 block">Category</span>
                     <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedTxn.category}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Payment Mode</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      {selectedTxn.paymentType || 'CASH'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Project Ref. No.</span>
+                    {selectedTxn.projectRefNo && selectedTxn.projectRefNo.trim() ? (
+                      <span className="font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 px-2 py-0.5 rounded text-xs inline-block">
+                        {selectedTxn.projectRefNo.trim()}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">None</span>
+                    )}
                   </div>
                 </div>
 

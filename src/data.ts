@@ -19,7 +19,7 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   cloudinaryUploadPreset: 'petty_cash_receipts',
   cloudinaryApiKey: '',
   cloudinaryFolderName: 'PettyCashRegister',
-  cloudinaryStorageMode: 'HYBRID_FIRESTORE',
+  cloudinaryStorageMode: 'DIRECT_CLOUDINARY',
   emailEnabled: true,
   msTenantId: 'a63883ba-4173-48a2-a29d-247ca0c8e59a',
   msClientId: 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6',

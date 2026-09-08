@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   SolarQuotation, 
   QuotationStatus, 
@@ -79,7 +79,7 @@ interface QuotationDashboardViewProps {
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
   onUpdateQuotationStatus: (quotationId: string, status: QuotationStatus, reason?: string) => void;
   onDeleteQuotation?: (quotationId: string) => void;
-  initialNewQuotationOpportunityId?: string | null;
+  initialOpportunity?: CRMOpportunity | null;
   onClearInitialOpportunity?: () => void;
 }
 
@@ -1005,7 +1005,7 @@ export default function QuotationDashboardView({
   onSaveQuotation,
   onUpdateQuotationStatus,
   onDeleteQuotation,
-  initialNewQuotationOpportunityId,
+  initialOpportunity,
   onClearInitialOpportunity
 }: QuotationDashboardViewProps) {
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -1362,16 +1362,23 @@ export default function QuotationDashboardView({
   // =========================================================================
 
   // Helper to resolve full contact address from CRM module
-  const handleSelectOpportunity = (oppId: string) => {
+  const handleSelectOpportunity = (oppId: string, directOpp?: CRMOpportunity) => {
     setFormOpportunityId(oppId);
     if (!oppId) {
       return;
     }
-    const opp = opportunities.find(o => o.id === oppId);
+    const opp = directOpp || opportunities.find(o => o.id === oppId);
     if (!opp) return;
 
-    const contact = contacts.find(c => c.id === opp.contactId);
-    const account = accounts.find(a => a.id === opp.accountId);
+    const contact = contacts.find(c => 
+      (opp.contactId && c.id === opp.contactId) || 
+      (opp.contactName && (c.name?.trim().toLowerCase() === opp.contactName.trim().toLowerCase() || 
+        [c.firstName, c.lastName].filter(Boolean).join(' ').trim().toLowerCase() === opp.contactName.trim().toLowerCase()))
+    );
+    const account = accounts.find(a => 
+      (opp.accountId && a.id === opp.accountId) || 
+      (opp.accountName && a.name?.trim().toLowerCase() === opp.accountName.trim().toLowerCase())
+    );
 
     let clientName = 'Valued Customer';
     if (contact) {
@@ -1383,7 +1390,7 @@ export default function QuotationDashboardView({
         clientName = rawName || account?.name || opp.title || 'Valued Customer';
       }
     } else {
-      clientName = account?.name || opp.title || 'Valued Customer';
+      clientName = account?.name || opp.contactName || opp.title || 'Valued Customer';
     }
     const phone = contact?.phone || contact?.mobile || contact?.altMobile || account?.phone || '';
     const email = contact?.email || account?.email || '';
@@ -1474,14 +1481,19 @@ export default function QuotationDashboardView({
     setIsQuestionnaireOpen(true);
   };
 
-  // Auto-open new quotation wizard when navigated from CRM Opportunity module
+  const handledOppRef = useRef<string | null>(null);
+
+  // Auto-open new quotation wizard and bind client when navigated from CRM Opportunity module
   useEffect(() => {
-    if (initialNewQuotationOpportunityId) {
+    if (initialOpportunity && handledOppRef.current !== initialOpportunity.id) {
+      handledOppRef.current = initialOpportunity.id;
       handleOpenNewQuestionnaire();
-      handleSelectOpportunity(initialNewQuotationOpportunityId);
-      onClearInitialOpportunity?.();
+      handleSelectOpportunity(initialOpportunity.id, initialOpportunity);
     }
-  }, [initialNewQuotationOpportunityId]);
+    if (!initialOpportunity) {
+      handledOppRef.current = null;
+    }
+  }, [initialOpportunity]);
 
   const handleOpenEditQuestionnaire = (quo: SolarQuotation) => {
     setEditingQuotationId(quo.id);
@@ -1915,6 +1927,7 @@ export default function QuotationDashboardView({
 
     // Close questionnaire modal and open live preview marked as unsaved
     setIsQuestionnaireOpen(false);
+    onClearInitialOpportunity?.();
 
     // Immediately open 5-page live preview
     setPreviewQuotation(completeQuotation);
@@ -1986,6 +1999,7 @@ export default function QuotationDashboardView({
       onSaveQuotation(draftQuo);
     }
 
+    onClearInitialOpportunity?.();
     setIsQuestionnaireOpen(false);
     setEditingQuotationId(null);
     setPendingRevisionQuotation(null);
@@ -2044,6 +2058,7 @@ export default function QuotationDashboardView({
     if (isDirty) {
       setShowDiscardModal({ isOpen: true, type: 'QUESTIONNAIRE' });
     } else {
+      onClearInitialOpportunity?.();
       setIsQuestionnaireOpen(false);
       setEditingQuotationId(null);
       setPendingRevisionQuotation(null);
@@ -2060,6 +2075,7 @@ export default function QuotationDashboardView({
   };
 
   const handleConfirmDiscard = () => {
+    onClearInitialOpportunity?.();
     setShowDiscardModal({ isOpen: false, type: 'QUESTIONNAIRE' });
     setIsQuestionnaireOpen(false);
     setPreviewQuotation(null);
@@ -2090,12 +2106,16 @@ export default function QuotationDashboardView({
 
   // Available opportunities for new quotation creation (filters out opportunities that already have a quotation)
   const availableOpportunities = useMemo(() => {
-    return opportunities.filter(opp => {
+    const list = opportunities.filter(opp => {
       if (formOpportunityId && opp.id === formOpportunityId) return true;
       const alreadyHasQuotation = quotations.some(q => q.opportunityId === opp.id);
       return !alreadyHasQuotation;
     });
-  }, [opportunities, quotations, formOpportunityId]);
+    if (initialOpportunity && !list.some(o => o.id === initialOpportunity.id)) {
+      list.unshift(initialOpportunity);
+    }
+    return list;
+  }, [opportunities, quotations, formOpportunityId, initialOpportunity]);
 
   // Live pricing breakdown computation for the questionnaire modal preview
   const livePricingPreview = useMemo(() => {
