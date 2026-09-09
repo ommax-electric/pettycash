@@ -41,7 +41,7 @@ import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, de
 import { sendEmailNotification, sendCRMEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl, deleteFileFromCloudinary } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
-import { sortTransactionsByIdDesc, isAssignedManagerForTxn } from './utils';
+import { sortTransactionsByIdDesc, isAssignedManagerForTxn, isTxnSubmitter } from './utils';
 
 
 // Subcomponents
@@ -709,7 +709,7 @@ export default function App() {
 
   // Handler: Update transaction (for edits)
   const handleUpdateTransaction = (updatedTxn: Transaction) => {
-    if (!currentUser || currentUser.role !== 'ADMIN') return;
+    if (!currentUser) return;
 
     let finalTxn = updatedTxn;
     const target = transactions.find(t => 
@@ -717,6 +717,10 @@ export default function App() {
       (updatedTxn.reference && t.reference === updatedTxn.reference)
     );
     if (!target) return;
+
+    // Admin can edit any transaction; submitter can edit their own transaction while PENDING (before manager approval)
+    const canEdit = currentUser.role === 'ADMIN' || (target.status === 'PENDING' && isTxnSubmitter(target, currentUser));
+    if (!canEdit) return;
 
     // Ensure we maintain the primary document ID
     const primaryId = target.id;
@@ -824,6 +828,19 @@ export default function App() {
     const updatedTxnsList = transactions.map(t => t.id === updatedTxn.id ? finalTxn : t);
     setTransactions(updatedTxnsList);
     
+    // Clean up replaced or removed old attachment from Cloudinary
+    if (
+      target.receiptUrl &&
+      target.receiptUrl.includes('cloudinary.com') &&
+      target.receiptUrl !== finalTxn.receiptUrl
+    ) {
+      deleteFileFromCloudinary(target.receiptUrl, {
+        cloudName: integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '',
+        apiKey: integrationSettings?.cloudinaryApiKey || localStorage.getItem('cloudinary_api_key') || '',
+        apiSecret: integrationSettings?.cloudinaryApiSecret || localStorage.getItem('cloudinary_api_secret') || ''
+      }).catch(e => console.warn('Cloudinary cleanup error on update:', e));
+    }
+
     // Save strictly to primary Firestore document ID (never create duplicate candidate docs)
     setDoc(doc(db, 'transactions', updatedTxn.id), finalTxn).catch(e => console.warn(e));
 

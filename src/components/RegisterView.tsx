@@ -673,7 +673,23 @@ export default function RegisterView({
         // Generate structured folder path: Petty Cash/YYYY/MM and voucher prefix
         const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
         const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
-        const cleanName = processed.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+
+        // Revision handling: When replacing an existing attachment or editing a voucher, use R1 revision suffix
+        const isRevision = Boolean(editingTransaction || prevCloudinaryUrl);
+        let cleanName = processed.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        if (isRevision) {
+          const lastDot = cleanName.lastIndexOf('.');
+          const base = lastDot !== -1 ? cleanName.substring(0, lastDot) : cleanName;
+          const ext = lastDot !== -1 ? cleanName.substring(lastDot) : '';
+          const rMatch = base.match(/_R(\d+)$/i);
+          if (rMatch) {
+            const nextRev = parseInt(rMatch[1], 10) + 1;
+            cleanName = `${base.replace(/_R\d+$/i, '')}_R${nextRev}${ext}`;
+          } else {
+            cleanName = `${base}_R1${ext}`;
+          }
+          processed.name = cleanName;
+        }
         const filePublicId = cleanName;
 
         const cRes = await uploadFileToCloudinary(processed.dataUrl, filePublicId, folderPath, {
@@ -998,9 +1014,22 @@ export default function RegisterView({
           ? (integrationSettings?.cloudinaryCloudName || localStorage.getItem('cloudinary_cloud_name') || '').trim()
           : '';
         if (isCloudinaryActive && cloudName) {
+          const isRevision = Boolean(editingTransaction);
           const [yyyy, mm] = (formDate || new Date().toISOString().split('T')[0]).split('-');
           const folderPath = `Petty Cash/${yyyy || '2026'}/${mm || '08'}`;
-          const cleanName = receiptFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          let cleanName = receiptFile.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          if (isRevision) {
+            const lastDot = cleanName.lastIndexOf('.');
+            const base = lastDot !== -1 ? cleanName.substring(0, lastDot) : cleanName;
+            const ext = lastDot !== -1 ? cleanName.substring(lastDot) : '';
+            const rMatch = base.match(/_R(\d+)$/i);
+            if (rMatch) {
+              const nextRev = parseInt(rMatch[1], 10) + 1;
+              cleanName = `${base.replace(/_R\d+$/i, '')}_R${nextRev}${ext}`;
+            } else if (!base.toUpperCase().endsWith('_R1')) {
+              cleanName = `${base}_R1${ext}`;
+            }
+          }
           const filePublicId = cleanName;
 
           const cRes = await uploadFileToCloudinary(receiptFile.dataUrl, filePublicId, folderPath, {
@@ -1012,7 +1041,7 @@ export default function RegisterView({
 
           if (cRes.success && cRes.url) {
             finalReceiptUrl = cRes.url;
-            setReceiptFile(prev => prev ? { ...prev, dataUrl: cRes.url, cloudinaryUrl: cRes.url, uploadError: null } : null);
+            setReceiptFile(prev => prev ? { ...prev, name: cleanName, dataUrl: cRes.url, cloudinaryUrl: cRes.url, uploadError: null } : null);
           } else {
             // Strict Single-Storage: Cloudinary is the designated media repository. Never save raw Base64 files to Firestore.
             setFormError(`Cloudinary Upload Failed: ${cRes.error || 'Network error or invalid credentials. Please verify your connection and Admin Settings.'}`);

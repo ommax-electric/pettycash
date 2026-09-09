@@ -364,11 +364,6 @@ export default function ApprovalsView({
                       <tr key={txn.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="py-3 px-2.5 sm:px-3 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           #{txn.reference || txn.id}
-                          {txn.projectRefNo && txn.projectRefNo.trim() && (
-                            <span className="block font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-400 mt-0.5" title={`Project Ref. No: ${txn.projectRefNo}`}>
-                              Ref: {txn.projectRefNo.trim()}
-                            </span>
-                          )}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
                           {formatDateToDMY(txn.date)}
@@ -519,11 +514,6 @@ export default function ApprovalsView({
                         <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                           #{txn.reference || txn.id}
                         </span>
-                        {txn.projectRefNo && txn.projectRefNo.trim() && (
-                          <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/40 px-1.5 py-0.5 rounded">
-                            Ref: {txn.projectRefNo.trim()}
-                          </span>
-                        )}
                         <span className="text-[11px] text-slate-500 font-medium">
                           {formatDateToDMY(txn.date)}
                         </span>
