@@ -1383,6 +1383,7 @@ export default function App() {
       exportDate: new Date().toISOString(),
       version: '2026.1',
       appSettings,
+      integrationSettings,
       users,
       categories,
       transactions,
@@ -1424,6 +1425,10 @@ export default function App() {
         if (parsed.appSettings) {
           setAppSettings(parsed.appSettings);
           await setDoc(doc(db, 'app_settings', 'config'), parsed.appSettings);
+        }
+        if (parsed.integrationSettings) {
+          setIntegrationSettings(parsed.integrationSettings);
+          await setDoc(doc(db, 'app_settings', 'integrations'), parsed.integrationSettings);
         }
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);

@@ -5537,7 +5537,7 @@ export default function AdminSettingsView({
                   </div>
                   <h3 className="font-bold text-base text-slate-800">Export Complete Backup</h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Download a full system JSON package containing all registered vouchers, user lists, categories, app settings, and audit logs for safekeeping.
+                    Download a full system JSON package containing all registered vouchers, user lists, categories, app & integration settings (including all 14 email templates), and audit logs for safekeeping.
                   </p>
                 </div>
 

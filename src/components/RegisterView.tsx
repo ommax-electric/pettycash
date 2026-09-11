@@ -1347,8 +1347,8 @@ export default function RegisterView({
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Date</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Voucher ID</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left;">Paid To</th>
-          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; min-width: 130px;">Particulars</th>
-          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Project Ref</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Particulars</th>
+          <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; min-width: 130px;">Project Ref</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: right; white-space: nowrap;">Debit Amount</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: center; white-space: nowrap;">Mode</th>
           <th style="padding: 7px 5px; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #475569; border-bottom: 2px solid #cbd5e1; text-align: left; white-space: nowrap;">Category</th>
@@ -1361,8 +1361,8 @@ export default function RegisterView({
           <td style="padding: 5px; white-space: nowrap;">${formatDate(t.date)}</td>
           <td style="padding: 5px; font-family: monospace; font-weight: bold; white-space: nowrap;">${t.reference}${t.receiptName ? ' #' : ''}</td>
           <td style="padding: 5px; font-weight: bold; color: #0f172a;">${t.merchant}</td>
-          <td style="padding: 5px 6px; color: #1e293b; font-size: 10px; font-weight: 500; line-height: 1.3;">${t.description}</td>
-          <td style="padding: 5px; font-family: monospace; font-size: 9px; color: #475569; white-space: nowrap;">${t.projectRefNo || '-'}</td>
+          <td style="padding: 5px; font-family: monospace; font-size: 9px; color: #475569; white-space: nowrap;">${t.description}</td>
+          <td style="padding: 5px 6px; color: #1e293b; font-size: 10px; font-weight: 500; line-height: 1.3;">${t.projectRefNo || '-'}</td>
           <td style="padding: 5px; font-weight: bold; color: #e11d48; text-align: right; white-space: nowrap;">${currencySymbol}${t.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td style="padding: 5px; text-align: center; white-space: nowrap;">${t.paymentType === 'ONLINE' ? 'Online' : 'Cash'}</td>
           <td style="padding: 5px; white-space: nowrap;"><span style="background-color: #f1f5f9; color: #334155; padding: 2px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">${t.category}</span></td>
