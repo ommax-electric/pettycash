@@ -40,7 +40,8 @@ import {
   Clock,
   ShieldCheck,
   Check,
-  Activity
+  Activity,
+  ExternalLink
 } from 'lucide-react';
 import { 
   CRMOpportunity, 
@@ -443,6 +444,7 @@ export default function CRMOpportunitiesView({
   // Wizard Account Form Data (Matching CRMAccountsView)
   const [wizardAccountFormData, setWizardAccountFormData] = useState({
     name: '',
+    gstin: '',
     businessCategory: '',
     industry: '',
     phone: '',
@@ -458,6 +460,9 @@ export default function CRMOpportunitiesView({
     assignedTo: currentUser.fullName || currentUser.username,
     notes: ''
   });
+  const [wizardAccountHasGstin, setWizardAccountHasGstin] = useState(false);
+  const [wizardAccountGstinCopied, setWizardAccountGstinCopied] = useState(false);
+  const [wizardAccountGstinWarning, setWizardAccountGstinWarning] = useState<string | null>(null);
   const [wizardAccountShowTypeahead, setWizardAccountShowTypeahead] = useState(false);
   const [wizardAccountDismissDuplicateWarning, setWizardAccountDismissDuplicateWarning] = useState(false);
 
@@ -573,6 +578,7 @@ export default function CRMOpportunitiesView({
     setWizardCreatedAccount(null);
     setWizardAccountFormData({
       name: '',
+      gstin: '',
       businessCategory: '',
       industry: '',
       phone: '',
@@ -588,6 +594,9 @@ export default function CRMOpportunitiesView({
       assignedTo: currentUser.fullName || currentUser.username,
       notes: ''
     });
+    setWizardAccountHasGstin(false);
+    setWizardAccountGstinCopied(false);
+    setWizardAccountGstinWarning(null);
     setWizardAccountDismissDuplicateWarning(false);
     setWizardAccountShowTypeahead(false);
     setWizardStep('CREATE_ACCOUNT');
@@ -613,10 +622,12 @@ export default function CRMOpportunitiesView({
 
     setIsWizardSaving(true);
     try {
+      const finalGstin = wizardAccountHasGstin ? (wizardAccountFormData.gstin || '').trim().toUpperCase() : '';
       let createdAcc: CRMAccount;
       if (onAddAccount) {
         const res = await onAddAccount({
           name: wizardAccountFormData.name.trim(),
+          gstin: finalGstin || undefined,
           businessCategory: wizardAccountFormData.businessCategory,
           industry: wizardAccountFormData.industry,
           phone: wizardAccountFormData.phone.trim(),
@@ -639,6 +650,7 @@ export default function CRMOpportunitiesView({
           createdAcc = {
             id: `ACC-${Date.now().toString().slice(-4)}`,
             name: wizardAccountFormData.name.trim(),
+            gstin: finalGstin || undefined,
             businessCategory: wizardAccountFormData.businessCategory,
             industry: wizardAccountFormData.industry,
             phone: wizardAccountFormData.phone.trim(),
@@ -661,6 +673,7 @@ export default function CRMOpportunitiesView({
         createdAcc = {
           id: `ACC-${Date.now().toString().slice(-4)}`,
           name: wizardAccountFormData.name.trim(),
+          gstin: finalGstin || undefined,
           businessCategory: wizardAccountFormData.businessCategory,
           industry: wizardAccountFormData.industry,
           phone: wizardAccountFormData.phone.trim(),
@@ -3742,6 +3755,103 @@ export default function CRMOpportunitiesView({
                   )}
                 </div>
 
+                {/* GSTIN (Optional Toggle) */}
+                <div className="pt-0.5">
+                  <div className="flex items-center justify-between">
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-700 hover:text-slate-900 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={wizardAccountHasGstin}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setWizardAccountHasGstin(checked);
+                          setWizardAccountGstinWarning(null);
+                          if (!checked) {
+                            setWizardAccountFormData(prev => ({ ...prev, gstin: '' }));
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                      />
+                      <span className="font-bold text-xs text-slate-700">Add GSTIN (Optional)</span>
+                    </label>
+                    {wizardAccountHasGstin && (
+                      <span className="text-[10px] text-slate-400 font-medium">
+                        15-digit alphanumeric Indian GSTIN
+                      </span>
+                    )}
+                  </div>
+
+                  {wizardAccountHasGstin && (
+                    <div className="mt-2">
+                      <div className="grid grid-cols-5 gap-2 items-center">
+                        <div className="col-span-4">
+                          <input
+                            type="text"
+                            maxLength={15}
+                            placeholder="e.g. 33AAAPL1234C1ZV"
+                            value={wizardAccountFormData.gstin}
+                            onChange={e => {
+                              const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
+                              setWizardAccountFormData(prev => ({ ...prev, gstin: val }));
+                              if (wizardAccountGstinWarning) setWizardAccountGstinWarning(null);
+                            }}
+                            className={`w-full px-3.5 py-2.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold tracking-wider text-slate-900 uppercase focus:outline-none focus:bg-white transition-colors ${
+                              wizardAccountGstinWarning ? 'border-rose-400 focus:border-rose-500 ring-1 ring-rose-200' : 'border-slate-200 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <a
+                            href={wizardAccountFormData.gstin?.trim() ? "https://www.cashfree.com/gst-verification/" : "#"}
+                            target={wizardAccountFormData.gstin?.trim() ? "_blank" : undefined}
+                            rel={wizardAccountFormData.gstin?.trim() ? "noopener noreferrer" : undefined}
+                            onClick={e => {
+                              const trimmed = (wizardAccountFormData.gstin || '').trim();
+                              if (!trimmed) {
+                                e.preventDefault();
+                                setWizardAccountGstinWarning('Please enter GSTIN to verify');
+                                return;
+                              }
+                              setWizardAccountGstinWarning(null);
+                              navigator.clipboard?.writeText(trimmed);
+                              setWizardAccountGstinCopied(true);
+                              setTimeout(() => setWizardAccountGstinCopied(false), 2500);
+                            }}
+                            className={`w-full h-full min-h-[38px] flex items-center justify-center gap-1.5 px-2 py-2 text-slate-950 font-extrabold text-xs rounded-xl shadow-2xs transition-all cursor-pointer select-none ${
+                              !wizardAccountFormData.gstin?.trim()
+                                ? 'bg-amber-200/80 hover:bg-amber-300 text-amber-950 border border-amber-300'
+                                : 'bg-[#f7b944] hover:bg-[#f5ad25] active:bg-[#e59d14] hover:shadow-xs'
+                            }`}
+                            title={wizardAccountFormData.gstin?.trim() ? "Copies GSTIN & opens Cashfree Verification in new tab" : "Please enter GSTIN to verify"}
+                          >
+                            {wizardAccountGstinCopied ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-950 stroke-[2.5]" />
+                                <span className="text-[11px] font-extrabold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-950" />
+                                <span className="text-[11px] font-extrabold">Verify</span>
+                              </>
+                            )}
+                          </a>
+                        </div>
+                      </div>
+                      {wizardAccountGstinWarning ? (
+                        <p className="text-[11px] text-rose-600 font-bold mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-150">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>{wizardAccountGstinWarning}</span>
+                        </p>
+                      ) : (wizardAccountFormData.gstin && wizardAccountFormData.gstin.length > 0 && wizardAccountFormData.gstin.length < 15) ? (
+                        <p className="text-[10px] text-amber-600 mt-1 font-medium">
+                          {`${15 - wizardAccountFormData.gstin.length} more character${15 - wizardAccountFormData.gstin.length > 1 ? 's' : ''} required`}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+
                 {/* Business Category & Industry */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
@@ -3871,10 +3981,13 @@ export default function CRMOpportunitiesView({
                     <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
                     <input
                       type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
                       required
                       placeholder="621704"
                       value={wizardAccountFormData.pincode}
-                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, pincode: e.target.value })}
+                      onChange={e => setWizardAccountFormData({ ...wizardAccountFormData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     />
                   </div>
@@ -4337,10 +4450,13 @@ export default function CRMOpportunitiesView({
                         <label className="block font-bold text-slate-700 mb-1">Pin code</label>
                         <input
                           type="text"
-                          placeholder="Pin code"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
+                          placeholder="621704"
                           value={wizardContactFormData.pincode}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.toUpperCase() })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
                         />
                       </div>
                       <div>
@@ -4409,11 +4525,14 @@ export default function CRMOpportunitiesView({
                         <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
                         <input
                           type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
                           required
                           placeholder="621704"
                           value={wizardContactFormData.pincode}
-                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.toUpperCase() })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
+                          onChange={e => setWizardContactFormData({ ...wizardContactFormData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
                         />
                       </div>
                       <div>

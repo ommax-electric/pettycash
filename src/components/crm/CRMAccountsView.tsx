@@ -114,6 +114,7 @@ export default function CRMAccountsView({
   // Form state
   const [formData, setFormData] = useState({
     name: '',
+    gstin: '',
     businessCategory: '',
     industry: '',
     phone: '',
@@ -129,6 +130,9 @@ export default function CRMAccountsView({
     assignedTo: currentUser.fullName || currentUser.username,
     notes: ''
   });
+  const [hasGstin, setHasGstin] = useState(false);
+  const [gstinCopied, setGstinCopied] = useState(false);
+  const [gstinWarning, setGstinWarning] = useState<string | null>(null);
 
   // Deduplication state
   const [dismissDuplicateWarning, setDismissDuplicateWarning] = useState(false);
@@ -171,6 +175,7 @@ export default function CRMAccountsView({
   const resetForm = () => {
     setFormData({
       name: '',
+      gstin: '',
       businessCategory: '',
       industry: '',
       phone: '',
@@ -186,6 +191,9 @@ export default function CRMAccountsView({
       assignedTo: currentUser.fullName || currentUser.username,
       notes: ''
     });
+    setHasGstin(false);
+    setGstinCopied(false);
+    setGstinWarning(null);
     setEditingAccount(null);
     setDismissDuplicateWarning(false);
     setShowTypeaheadSuggestions(true);
@@ -199,8 +207,12 @@ export default function CRMAccountsView({
   const handleOpenEdit = (acc: CRMAccount) => {
     if (!canEdit) return;
     setEditingAccount(acc);
+    setGstinCopied(false);
+    setGstinWarning(null);
+    setHasGstin(Boolean(acc.gstin && acc.gstin.trim().length > 0));
     setFormData({
       name: acc.name || '',
+      gstin: acc.gstin || '',
       businessCategory: acc.businessCategory || '',
       industry: acc.industry || '',
       phone: acc.phone || '',
@@ -289,6 +301,10 @@ export default function CRMAccountsView({
         if (oldCountry.trim() !== (formData.country || 'India').trim()) {
           changes.push({ field: 'Country', oldValue: oldCountry, newValue: formData.country || 'India' });
         }
+        const finalGstin = hasGstin ? (formData.gstin || '').trim().toUpperCase() : '';
+        if ((editingAccount.gstin || '').trim() !== finalGstin) {
+          changes.push({ field: 'GSTIN', oldValue: editingAccount.gstin || '(Blank)', newValue: finalGstin || '(Removed)' });
+        }
         if ((editingAccount.notes || '').trim() !== formData.notes.trim()) {
           changes.push({ field: 'Notes', oldValue: editingAccount.notes || '(Blank)', newValue: formData.notes.trim() || '(Blank)' });
         }
@@ -309,6 +325,7 @@ export default function CRMAccountsView({
         await onUpdateAccount({
           ...editingAccount,
           ...formData,
+          gstin: finalGstin || undefined,
           status: payloadStatus,
           assignedTo: payloadOwner,
           billingCountry: formData.country,
@@ -316,6 +333,7 @@ export default function CRMAccountsView({
           editHistory: updatedHistory
         });
       } else {
+        const finalGstin = hasGstin ? (formData.gstin || '').trim().toUpperCase() : '';
         const historyEntry: AccountEditHistoryEntry = {
           timestamp: now,
           changedBy: actor,
@@ -325,6 +343,7 @@ export default function CRMAccountsView({
 
         await onAddAccount({
           ...formData,
+          gstin: finalGstin || undefined,
           status: payloadStatus,
           assignedTo: payloadOwner,
           billingCountry: formData.country,
@@ -518,6 +537,7 @@ export default function CRMAccountsView({
     const headers = [
       'Account ID',
       'Company Name',
+      'GSTIN',
       'Business Category',
       'Industry',
       'Office Phone',
@@ -538,6 +558,7 @@ export default function CRMAccountsView({
     const rows = filteredAccounts.map(a => [
       `"${a.id}"`,
       `"${(a.name || '').replace(/"/g, '""')}"`,
+      `"${(a.gstin || '').replace(/"/g, '""')}"`,
       `"${(a.businessCategory || '').replace(/"/g, '""')}"`,
       `"${(a.industry || '').replace(/"/g, '""')}"`,
       `"${(a.phone || '').replace(/"/g, '""')}"`,
@@ -571,6 +592,7 @@ export default function CRMAccountsView({
       <tr>
         <td style="font-family: monospace; font-weight: bold;">${a.id}</td>
         <td style="font-weight: bold;">${a.name}</td>
+        <td style="font-family: monospace;">${a.gstin || ''}</td>
         <td>${a.businessCategory || ''}</td>
         <td>${a.industry || ''}</td>
         <td>${a.phone || ''}</td>
@@ -598,6 +620,7 @@ export default function CRMAccountsView({
               <tr style="background-color: #f7b944; color: #000; font-weight: bold;">
                 <th>ID</th>
                 <th>Company Name</th>
+                <th>GSTIN</th>
                 <th>Business Category</th>
                 <th>Industry</th>
                 <th>Office Phone</th>
@@ -1661,6 +1684,28 @@ export default function CRMAccountsView({
                       <span className="text-[11px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
                         {viewingAccount.id}
                       </span>
+                      {viewingAccount.gstin && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                            GSTIN: {viewingAccount.gstin}
+                          </span>
+                          <a
+                            href="https://www.cashfree.com/gst-verification/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => {
+                              if (viewingAccount.gstin) {
+                                navigator.clipboard?.writeText(viewingAccount.gstin.trim());
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 text-[10px] font-extrabold text-amber-900 hover:text-amber-950 bg-[#f7b944]/30 hover:bg-[#f7b944]/50 border border-amber-300 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                            title="Verify on Cashfree (Copies GSTIN to clipboard)"
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                            <span>Verify</span>
+                          </a>
+                        </div>
+                      )}
                       <span className="text-[10px] text-slate-400">
                         Created: {formatCRMIDateTime(viewingAccount.createdAt)}
                       </span>
@@ -2060,6 +2105,103 @@ export default function CRMAccountsView({
                   )}
                 </div>
 
+                {/* GSTIN (Optional Toggle) */}
+                <div className="pt-0.5">
+                  <div className="flex items-center justify-between">
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-700 hover:text-slate-900 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={hasGstin}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setHasGstin(checked);
+                          setGstinWarning(null);
+                          if (!checked) {
+                            setFormData(prev => ({ ...prev, gstin: '' }));
+                          }
+                        }}
+                        className="w-3.5 h-3.5 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                      />
+                      <span className="font-bold text-xs text-slate-700">Add GSTIN (Optional)</span>
+                    </label>
+                    {hasGstin && (
+                      <span className="text-[10px] text-slate-400 font-medium">
+                        15-digit alphanumeric Indian GSTIN
+                      </span>
+                    )}
+                  </div>
+
+                  {hasGstin && (
+                    <div className="mt-2">
+                      <div className="grid grid-cols-5 gap-2 items-center">
+                        <div className="col-span-4">
+                          <input
+                            type="text"
+                            maxLength={15}
+                            placeholder="e.g. 33AAAPL1234C1ZV"
+                            value={formData.gstin}
+                            onChange={e => {
+                              const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
+                              setFormData(prev => ({ ...prev, gstin: val }));
+                              if (gstinWarning) setGstinWarning(null);
+                            }}
+                            className={`w-full px-3.5 py-2.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold tracking-wider text-slate-900 uppercase focus:outline-none focus:bg-white transition-colors ${
+                              gstinWarning ? 'border-rose-400 focus:border-rose-500 ring-1 ring-rose-200' : 'border-slate-200 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <a
+                            href={formData.gstin?.trim() ? "https://www.cashfree.com/gst-verification/" : "#"}
+                            target={formData.gstin?.trim() ? "_blank" : undefined}
+                            rel={formData.gstin?.trim() ? "noopener noreferrer" : undefined}
+                            onClick={e => {
+                              const trimmed = (formData.gstin || '').trim();
+                              if (!trimmed) {
+                                e.preventDefault();
+                                setGstinWarning('Please enter GSTIN to verify');
+                                return;
+                              }
+                              setGstinWarning(null);
+                              navigator.clipboard?.writeText(trimmed);
+                              setGstinCopied(true);
+                              setTimeout(() => setGstinCopied(false), 2500);
+                            }}
+                            className={`w-full h-full min-h-[38px] flex items-center justify-center gap-1.5 px-2 py-2 text-slate-950 font-extrabold text-xs rounded-xl shadow-2xs transition-all cursor-pointer select-none ${
+                              !formData.gstin?.trim()
+                                ? 'bg-amber-200/80 hover:bg-amber-300 text-amber-950 border border-amber-300'
+                                : 'bg-[#f7b944] hover:bg-[#f5ad25] active:bg-[#e59d14] hover:shadow-xs'
+                            }`}
+                            title={formData.gstin?.trim() ? "Copies GSTIN & opens Cashfree Verification in new tab" : "Please enter GSTIN to verify"}
+                          >
+                            {gstinCopied ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-950 stroke-[2.5]" />
+                                <span className="text-[11px] font-extrabold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-950" />
+                                <span className="text-[11px] font-extrabold">Verify</span>
+                              </>
+                            )}
+                          </a>
+                        </div>
+                      </div>
+                      {gstinWarning ? (
+                        <p className="text-[11px] text-rose-600 font-bold mt-1.5 flex items-center gap-1.5 animate-in fade-in duration-150">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>{gstinWarning}</span>
+                        </p>
+                      ) : (formData.gstin && formData.gstin.length > 0 && formData.gstin.length < 15) ? (
+                        <p className="text-[10px] text-amber-600 mt-1 font-medium">
+                          {`${15 - formData.gstin.length} more character${15 - formData.gstin.length > 1 ? 's' : ''} required`}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+
                 {/* Business Category & Industry */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
@@ -2189,10 +2331,13 @@ export default function CRMAccountsView({
                     <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
                     <input
                       type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
                       required
                       placeholder="621704"
                       value={formData.pincode}
-                      onChange={e => setFormData({ ...formData, pincode: e.target.value })}
+                      onChange={e => setFormData({ ...formData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition-colors"
                     />
                   </div>

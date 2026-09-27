@@ -2537,10 +2537,13 @@ export default function CRMContactsView({
                         <label className="block font-bold text-slate-700 mb-1">Pin code</label>
                         <input
                           type="text"
-                          placeholder="Pin code"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
+                          placeholder="621704"
                           value={formData.pincode}
-                          onChange={e => setFormData({ ...formData, pincode: e.target.value.toUpperCase() })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
+                          onChange={e => setFormData({ ...formData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
                         />
                       </div>
                       <div>
@@ -2611,11 +2614,14 @@ export default function CRMContactsView({
                         <label className="block font-bold text-slate-700 mb-1">Pin code *</label>
                         <input
                           type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
                           required
                           placeholder="621704"
                           value={formData.pincode}
-                          onChange={e => setFormData({ ...formData, pincode: e.target.value.toUpperCase() })}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors uppercase"
+                          onChange={e => setFormData({ ...formData, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-none focus:border-amber-500 transition-colors"
                         />
                       </div>
                       <div>

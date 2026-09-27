@@ -47,7 +47,7 @@ export default function CountryPhoneInput({
   });
 
   const [localNumber, setLocalNumber] = useState<string>(() => {
-    return parsed.localNumber || '';
+    return (parsed.localNumber || '').replace(/\D/g, '').slice(0, 10);
   });
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -58,7 +58,7 @@ export default function CountryPhoneInput({
   useEffect(() => {
     const p = parsePhoneNumber(value, defaultCountryCode);
     setSelectedCode(p.countryCode);
-    setLocalNumber(p.localNumber);
+    setLocalNumber((p.localNumber || '').replace(/\D/g, '').slice(0, 10));
   }, [value, defaultCountryCode]);
 
   // Close dropdown on outside click
@@ -123,6 +123,9 @@ export default function CountryPhoneInput({
       setSelectedCode(p.countryCode);
       raw = p.localNumber;
     }
+
+    // Only allow digits and maximum 10 digits
+    raw = raw.replace(/\D/g, '').slice(0, 10);
 
     setLocalNumber(raw);
 
@@ -286,6 +289,9 @@ export default function CountryPhoneInput({
       <input
         id={id}
         type="tel"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={10}
         value={localNumber}
         onChange={handleNumberChange}
         disabled={disabled}

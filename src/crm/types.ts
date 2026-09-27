@@ -17,6 +17,7 @@ export interface AccountEditHistoryEntry {
 export interface CRMAccount {
   id: string;
   name: string;
+  gstin?: string;
   businessCategory?: string;
   industry?: string;
   phone?: string;
