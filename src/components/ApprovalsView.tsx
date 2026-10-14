@@ -325,6 +325,27 @@ export default function ApprovalsView({
     });
   }, [activeTab, pendingApprovalItems, pendingPaymentItems, historyItems]);
 
+  // Total amounts and counts for the currently active tab
+  const tabTotalAmount = React.useMemo(() => {
+    return currentList.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+  }, [currentList]);
+
+  const tabExpenses = React.useMemo(() => {
+    return currentList.filter(item => item.itemType === 'EXPENSE');
+  }, [currentList]);
+
+  const tabAdvances = React.useMemo(() => {
+    return currentList.filter(item => item.itemType === 'ADVANCE');
+  }, [currentList]);
+
+  const tabExpensesAmount = React.useMemo(() => {
+    return tabExpenses.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+  }, [tabExpenses]);
+
+  const tabAdvancesAmount = React.useMemo(() => {
+    return tabAdvances.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+  }, [tabAdvances]);
+
   const triggerSuccessAlert = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(''), 4000);
@@ -560,6 +581,10 @@ export default function ApprovalsView({
                 ? 'There are currently no paid, disbursed, or rejected claims recorded for the current month.'
                 : 'There are currently no expense or advance items waiting for action in this category.'}
             </p>
+            <div className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+              <span className="text-slate-500 dark:text-slate-400">Total Amount:</span>
+              <span className="font-mono font-bold text-slate-900 dark:text-slate-100">{currencySymbol}0.00</span>
+            </div>
           </div>
         ) : (
           <div>
@@ -818,6 +843,26 @@ export default function ApprovalsView({
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50/90 dark:bg-slate-800/80 border-t-2 border-slate-200 dark:border-slate-700 font-bold text-xs">
+                    <td colSpan={6} className="py-3.5 px-2.5 sm:px-3 text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold uppercase tracking-wider text-[11px] text-slate-500 dark:text-slate-400">
+                          Total Amount ({currentList.length} {currentList.length === 1 ? 'item' : 'items'}):
+                        </span>
+                        {tabExpenses.length > 0 && tabAdvances.length > 0 && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                            (Expenses: {currencySymbol}{tabExpensesAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Advances: {currencySymbol}{tabAdvancesAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-2.5 sm:px-3 text-right font-black text-slate-900 dark:text-slate-100 whitespace-nowrap text-sm">
+                      {currencySymbol}{tabTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td colSpan={2} className="py-3.5 px-2.5 sm:px-3"></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
 
@@ -1038,6 +1083,52 @@ export default function ApprovalsView({
                   </div>
                 );
               })}
+            </div>
+
+            {/* 3. TOTAL AMOUNT BOTTOM SUMMARY (MOBILE & DESKTOP RESPONSIVE) */}
+            <div className="mt-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  activeTab === 'PENDING_APPROVAL'
+                    ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+                    : activeTab === 'PENDING_PAYMENT'
+                    ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                }`}>
+                  <IndianRupee className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {activeTab === 'PENDING_APPROVAL' && 'Total Pending Manager Approval'}
+                    {activeTab === 'PENDING_PAYMENT' && 'Total Approved - Ready for Cash Issue'}
+                    {activeTab === 'HISTORY' && 'Total Completed / History (This Month)'}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                    <span>{currentList.length} {currentList.length === 1 ? 'request' : 'requests'}</span>
+                    {tabExpenses.length > 0 && (
+                      <span>• {tabExpenses.length} {tabExpenses.length === 1 ? 'Expense' : 'Expenses'} ({currencySymbol}{tabExpensesAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                    )}
+                    {tabAdvances.length > 0 && (
+                      <span>• {tabAdvances.length} {tabAdvances.length === 1 ? 'Advance' : 'Advances'} ({currencySymbol}{tabAdvancesAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-2.5 sm:pt-0 border-slate-200 dark:border-slate-700/60">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Total Amount:
+                </span>
+                <span className={`text-lg sm:text-xl font-black tracking-tight ${
+                  activeTab === 'PENDING_APPROVAL'
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : activeTab === 'PENDING_PAYMENT'
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-slate-900 dark:text-slate-100'
+                }`}>
+                  {currencySymbol}{tabTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
             </div>
           </div>
         )}
