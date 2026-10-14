@@ -50,13 +50,36 @@ import {
   FileText,
   Phone,
   Star,
-  Package
+  Package,
+  Receipt,
+  HandCoins,
+  ArrowDownRight
 } from 'lucide-react';
 import { User, CategoryLimit, ActivityLog, AppSettings, IntegrationSettings, UserRole, Transaction, ParentModule, ALL_PARENT_MODULES, APP_VERSION, getNextAppVersion } from '../types';
 import { CRMSettings, DEFAULT_CRM_SETTINGS, STANDARD_COUNTRY_CODES, getCountryFromCode, getAllCountryCodes, CountryCodeConfig } from '../crm/types';
 import { formatTimestampInTimezone } from '../utils';
 import { sendEmailNotification, sendCRMEmailNotification, calculateCashBalance } from '../services/notificationService';
-import { substituteSampleTags, substituteCRMSampleTags, parseBodyTextToBlocks, buildModernHtmlEmailFromText, buildModernCRMEmailFromText } from '../utils/emailTemplate';
+import { 
+  substituteSampleTags, 
+  substituteCRMSampleTags, 
+  parseBodyTextToBlocks, 
+  buildModernHtmlEmailFromText, 
+  buildModernCRMEmailFromText,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST,
+  DEFAULT_EMAIL_BODY_ADVANCE_REQUEST,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED,
+  DEFAULT_EMAIL_BODY_ADVANCE_APPROVED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED,
+  DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED,
+  DEFAULT_EMAIL_BODY_ADVANCE_REJECTED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY,
+  DEFAULT_EMAIL_BODY_ADVANCE_QUERY,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE,
+  DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED,
+  DEFAULT_EMAIL_BODY_ADVANCE_REROUTED
+} from '../utils/emailTemplate';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, testCloudinaryConnection } from '../services/fileAttachmentService';
 import { db, doc, updateDoc } from '../firebase';
 
@@ -324,8 +347,17 @@ export default function AdminSettingsView({
     reqRejected: false,
     reqRerouted: false,
     queryRaised: false,
-    queryResponse: false
+    queryResponse: false,
+    advRequest: false,
+    advApproved: false,
+    advDisbursed: false,
+    advRejected: false,
+    advQuery: false,
+    advQueryResponse: false,
+    advRerouted: false
   });
+
+  const [pettyCashTemplateTab, setPettyCashTemplateTab] = useState<'EXPENSES' | 'DEPOSITS' | 'ADVANCES'>('EXPENSES');
 
   const toggleEmailAccordion = (key: string) => {
     setOpenEmailAccordions(prev => ({ ...prev, [key]: !prev[key] }));
@@ -753,6 +785,56 @@ export default function AdminSettingsView({
     return integrationSettings?.emailBodyQueryResponse || localStorage.getItem('petty_cash_email_body_query_response') || DEFAULT_EMAIL_BODY_QUERY_RESPONSE;
   });
 
+  // Advance Email Templates: Request, Approved, Disbursed, Rejected, Query, Query Response, Re-routed
+  const [emailSubjectAdvRequest, setEmailSubjectAdvRequest] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceRequest || localStorage.getItem('petty_cash_email_subject_adv_request') || DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST;
+  });
+  const [emailBodyAdvRequest, setEmailBodyAdvRequest] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceRequest || localStorage.getItem('petty_cash_email_body_adv_request') || DEFAULT_EMAIL_BODY_ADVANCE_REQUEST;
+  });
+
+  const [emailSubjectAdvApproved, setEmailSubjectAdvApproved] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceApproved || localStorage.getItem('petty_cash_email_subject_adv_approved') || DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED;
+  });
+  const [emailBodyAdvApproved, setEmailBodyAdvApproved] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceApproved || localStorage.getItem('petty_cash_email_body_adv_approved') || DEFAULT_EMAIL_BODY_ADVANCE_APPROVED;
+  });
+
+  const [emailSubjectAdvDisbursed, setEmailSubjectAdvDisbursed] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceDisbursed || localStorage.getItem('petty_cash_email_subject_adv_disbursed') || DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED;
+  });
+  const [emailBodyAdvDisbursed, setEmailBodyAdvDisbursed] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceDisbursed || localStorage.getItem('petty_cash_email_body_adv_disbursed') || DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED;
+  });
+
+  const [emailSubjectAdvRejected, setEmailSubjectAdvRejected] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceRejected || localStorage.getItem('petty_cash_email_subject_adv_rejected') || DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED;
+  });
+  const [emailBodyAdvRejected, setEmailBodyAdvRejected] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceRejected || localStorage.getItem('petty_cash_email_body_adv_rejected') || DEFAULT_EMAIL_BODY_ADVANCE_REJECTED;
+  });
+
+  const [emailSubjectAdvQuery, setEmailSubjectAdvQuery] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceQuery || localStorage.getItem('petty_cash_email_subject_adv_query') || DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY;
+  });
+  const [emailBodyAdvQuery, setEmailBodyAdvQuery] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceQuery || localStorage.getItem('petty_cash_email_body_adv_query') || DEFAULT_EMAIL_BODY_ADVANCE_QUERY;
+  });
+
+  const [emailSubjectAdvQueryResponse, setEmailSubjectAdvQueryResponse] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceQueryResponse || localStorage.getItem('petty_cash_email_subject_adv_query_response') || DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE;
+  });
+  const [emailBodyAdvQueryResponse, setEmailBodyAdvQueryResponse] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceQueryResponse || localStorage.getItem('petty_cash_email_body_adv_query_response') || DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE;
+  });
+
+  const [emailSubjectAdvRerouted, setEmailSubjectAdvRerouted] = useState<string>(() => {
+    return integrationSettings?.emailSubjectAdvanceRerouted || localStorage.getItem('petty_cash_email_subject_adv_rerouted') || DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED;
+  });
+  const [emailBodyAdvRerouted, setEmailBodyAdvRerouted] = useState<string>(() => {
+    return integrationSettings?.emailBodyAdvanceRerouted || localStorage.getItem('petty_cash_email_body_adv_rerouted') || DEFAULT_EMAIL_BODY_ADVANCE_REROUTED;
+  });
+
   useEffect(() => {
     if (integrationSettings) {
       setEmailEnabled(integrationSettings.emailEnabled);
@@ -798,6 +880,23 @@ export default function AdminSettingsView({
       setEmailBodyQuery(integrationSettings.emailBodyQuery || DEFAULT_EMAIL_BODY_QUERY);
       setEmailSubjectQueryResponse(integrationSettings.emailSubjectQueryResponse || DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE);
       setEmailBodyQueryResponse(integrationSettings.emailBodyQueryResponse || DEFAULT_EMAIL_BODY_QUERY_RESPONSE);
+      
+      // Advance Email Templates Sync
+      setEmailSubjectAdvRequest(integrationSettings.emailSubjectAdvanceRequest || DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST);
+      setEmailBodyAdvRequest(integrationSettings.emailBodyAdvanceRequest || DEFAULT_EMAIL_BODY_ADVANCE_REQUEST);
+      setEmailSubjectAdvApproved(integrationSettings.emailSubjectAdvanceApproved || DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED);
+      setEmailBodyAdvApproved(integrationSettings.emailBodyAdvanceApproved || DEFAULT_EMAIL_BODY_ADVANCE_APPROVED);
+      setEmailSubjectAdvDisbursed(integrationSettings.emailSubjectAdvanceDisbursed || DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED);
+      setEmailBodyAdvDisbursed(integrationSettings.emailBodyAdvanceDisbursed || DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED);
+      setEmailSubjectAdvRejected(integrationSettings.emailSubjectAdvanceRejected || DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED);
+      setEmailBodyAdvRejected(integrationSettings.emailBodyAdvanceRejected || DEFAULT_EMAIL_BODY_ADVANCE_REJECTED);
+      setEmailSubjectAdvQuery(integrationSettings.emailSubjectAdvanceQuery || DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY);
+      setEmailBodyAdvQuery(integrationSettings.emailBodyAdvanceQuery || DEFAULT_EMAIL_BODY_ADVANCE_QUERY);
+      setEmailSubjectAdvQueryResponse(integrationSettings.emailSubjectAdvanceQueryResponse || DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE);
+      setEmailBodyAdvQueryResponse(integrationSettings.emailBodyAdvanceQueryResponse || DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE);
+      setEmailSubjectAdvRerouted(integrationSettings.emailSubjectAdvanceRerouted || DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED);
+      setEmailBodyAdvRerouted(integrationSettings.emailBodyAdvanceRerouted || DEFAULT_EMAIL_BODY_ADVANCE_REROUTED);
+
       setCloudinaryEnabled(integrationSettings.cloudinaryEnabled ?? false);
       setCloudinaryCloudName(integrationSettings.cloudinaryCloudName || '');
       setCloudinaryApiKey(integrationSettings.cloudinaryApiKey || '');
@@ -848,7 +947,21 @@ export default function AdminSettingsView({
       emailSubjectQuery,
       emailBodyQuery,
       emailSubjectQueryResponse,
-      emailBodyQueryResponse
+      emailBodyQueryResponse,
+      emailSubjectAdvanceRequest: emailSubjectAdvRequest,
+      emailBodyAdvanceRequest: emailBodyAdvRequest,
+      emailSubjectAdvanceApproved: emailSubjectAdvApproved,
+      emailBodyAdvanceApproved: emailBodyAdvApproved,
+      emailSubjectAdvanceDisbursed: emailSubjectAdvDisbursed,
+      emailBodyAdvanceDisbursed: emailBodyAdvDisbursed,
+      emailSubjectAdvanceRejected: emailSubjectAdvRejected,
+      emailBodyAdvanceRejected: emailBodyAdvRejected,
+      emailSubjectAdvanceQuery: emailSubjectAdvQuery,
+      emailBodyAdvanceQuery: emailBodyAdvQuery,
+      emailSubjectAdvanceQueryResponse: emailSubjectAdvQueryResponse,
+      emailBodyAdvanceQueryResponse: emailBodyAdvQueryResponse,
+      emailSubjectAdvanceRerouted: emailSubjectAdvRerouted,
+      emailBodyAdvanceRerouted: emailBodyAdvRerouted
     };
 
     if (onUpdateIntegrationSettings) {
@@ -884,6 +997,21 @@ export default function AdminSettingsView({
       localStorage.setItem('petty_cash_email_body_query', emailBodyQuery);
       localStorage.setItem('petty_cash_email_subject_query_response', emailSubjectQueryResponse);
       localStorage.setItem('petty_cash_email_body_query_response', emailBodyQueryResponse);
+      // Advance templates
+      localStorage.setItem('petty_cash_email_subject_adv_request', emailSubjectAdvRequest);
+      localStorage.setItem('petty_cash_email_body_adv_request', emailBodyAdvRequest);
+      localStorage.setItem('petty_cash_email_subject_adv_approved', emailSubjectAdvApproved);
+      localStorage.setItem('petty_cash_email_body_adv_approved', emailBodyAdvApproved);
+      localStorage.setItem('petty_cash_email_subject_adv_disbursed', emailSubjectAdvDisbursed);
+      localStorage.setItem('petty_cash_email_body_adv_disbursed', emailBodyAdvDisbursed);
+      localStorage.setItem('petty_cash_email_subject_adv_rejected', emailSubjectAdvRejected);
+      localStorage.setItem('petty_cash_email_body_adv_rejected', emailBodyAdvRejected);
+      localStorage.setItem('petty_cash_email_subject_adv_query', emailSubjectAdvQuery);
+      localStorage.setItem('petty_cash_email_body_adv_query', emailBodyAdvQuery);
+      localStorage.setItem('petty_cash_email_subject_adv_query_response', emailSubjectAdvQueryResponse);
+      localStorage.setItem('petty_cash_email_body_adv_query_response', emailBodyAdvQueryResponse);
+      localStorage.setItem('petty_cash_email_subject_adv_rerouted', emailSubjectAdvRerouted);
+      localStorage.setItem('petty_cash_email_body_adv_rerouted', emailBodyAdvRerouted);
     }
     setIntegrationSuccess('Petty Cash email settings & templates saved successfully to Firestore!');
     setTimeout(() => setIntegrationSuccess(''), 3500);
@@ -1044,6 +1172,22 @@ export default function AdminSettingsView({
     setEmailSubjectQueryResponse(DEFAULT_EMAIL_SUBJECT_QUERY_RESPONSE);
     setEmailBodyQueryResponse(DEFAULT_EMAIL_BODY_QUERY_RESPONSE);
     
+    // Reset Advance Email Templates
+    setEmailSubjectAdvRequest(DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST);
+    setEmailBodyAdvRequest(DEFAULT_EMAIL_BODY_ADVANCE_REQUEST);
+    setEmailSubjectAdvApproved(DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED);
+    setEmailBodyAdvApproved(DEFAULT_EMAIL_BODY_ADVANCE_APPROVED);
+    setEmailSubjectAdvDisbursed(DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED);
+    setEmailBodyAdvDisbursed(DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED);
+    setEmailSubjectAdvRejected(DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED);
+    setEmailBodyAdvRejected(DEFAULT_EMAIL_BODY_ADVANCE_REJECTED);
+    setEmailSubjectAdvQuery(DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY);
+    setEmailBodyAdvQuery(DEFAULT_EMAIL_BODY_ADVANCE_QUERY);
+    setEmailSubjectAdvQueryResponse(DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE);
+    setEmailBodyAdvQueryResponse(DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE);
+    setEmailSubjectAdvRerouted(DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED);
+    setEmailBodyAdvRerouted(DEFAULT_EMAIL_BODY_ADVANCE_REROUTED);
+
     setIntegrationSuccess('All Petty Cash email templates have been reset to corporate defaults.');
     setTimeout(() => setIntegrationSuccess(''), 3500);
   };
@@ -3780,7 +3924,7 @@ export default function AdminSettingsView({
               >
                 <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>Petty Cash Templates</span>
-                <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">11 Active</span>
+                <span className="text-[10px] bg-[#f7b944]/20 text-amber-900 px-2 py-0.5 rounded-md font-extrabold">18 Active</span>
               </button>
 
               <button
@@ -3830,45 +3974,44 @@ export default function AdminSettingsView({
 
                 {/* Templates Form */}
                 <form onSubmit={handleSaveEmailSettings} className="space-y-4">
-                  {/* RECIPIENT EMAIL & CASH ADMIN EMAIL ADDRESSES */}
+                  {/* RECIPIENT EMAIL ADDRESSES (PETTY CASH, DEPOSITS & CASH ADMIN) */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Petty Cash Recipient Email Addresses */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-2.5 mb-2">
-                          <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
-                            <Mail className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-xs text-slate-800">Petty Cash Recipient Email Addresses</h4>
-                            <p className="text-[11px] text-slate-500">Finance team & auditors who receive inward deposit and deposit change alerts.</p>
-                          </div>
+                    {/* 1. Deposit & General Petty Cash Notification Recipients */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                          <Mail className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-xs text-slate-800">Petty Cash & Deposit Recipient Email Addresses</h4>
+                          <p className="text-[11px] text-slate-500">Finance team and auditors who receive automated notifications for inward deposits, new vouchers, and alerts.</p>
                         </div>
                       </div>
                       <div>
                         <input
                           type="text"
                           value={pettyCashRecipients}
-                          onChange={(e) => setPettyCashRecipients(e.target.value)}
-                          placeholder="cfo@company.com, auditor@company.com, admin@company.com"
-                          className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono"
+                          onChange={(e) => {
+                            setPettyCashRecipients(e.target.value);
+                            setEmailRecipients(e.target.value);
+                          }}
+                          placeholder="info@ommaxelectric.com, admin@ommaxelectric.com"
+                          className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl text-xs font-mono"
                           required
                         />
                         <span className="text-[10px] text-slate-400 mt-1 block">Separate multiple recipient email addresses with commas</span>
                       </div>
                     </div>
 
-                    {/* Cash Admin Email Address */}
-                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-2.5 mb-2">
-                          <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                            <Mail className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-xs text-slate-800">Cash Admin Email Address</h4>
-                            <p className="text-[11px] text-slate-500">Cashier / Finance Admin who receives action emails when a claim is approved to disburse & issue cash.</p>
-                          </div>
+                    {/* 2. Cash Admin Email Address */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-5 space-y-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                          <Mail className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-xs text-slate-800">Cash Admin Email Address</h4>
+                          <p className="text-[11px] text-slate-500">Cashier / Finance Admin who receives action emails when a claim or advance is approved to disburse cash.</p>
                         </div>
                       </div>
                       <div>
@@ -3880,428 +4023,255 @@ export default function AdminSettingsView({
                           className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-xs font-mono"
                           required
                         />
-                        <span className="text-[10px] text-slate-400 mt-1 block">Cash admin recipient for approved claim disbursement notifications</span>
+                        <span className="text-[10px] text-slate-400 mt-1 block">Cash admin recipient for approved claim and advance disbursement notifications</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* ACCORDION 1: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  {/* Nested Sub-tabs for Petty Cash: Expenses & Claims, Deposits, Cash Advances */}
+                  <div className="bg-slate-100/90 p-1.5 rounded-2xl flex flex-wrap sm:flex-nowrap items-center gap-2 border border-slate-200/80 w-full mb-2">
                     <button
                       type="button"
-                      onClick={() => toggleEmailAccordion('new')}
-                      className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                      onClick={() => setPettyCashTemplateTab('EXPENSES')}
+                      className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                        pettyCashTemplateTab === 'EXPENSES'
+                          ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-red-50 text-[#ed3833] flex items-center justify-center shrink-0">
-                          <Mail className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-sm text-slate-800">1. New Voucher Template & Preview</h4>
-                          <p className="text-xs text-slate-400">Corporate email subject & body sent when a new payment voucher is created</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#ed3833]"></span>
-                        {openEmailAccordions.new ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                      </div>
+                      <Receipt className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>Expense & Claims</span>
+                      <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md font-extrabold">9 Active</span>
                     </button>
 
-                    {openEmailAccordions.new && (
-                      <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                            {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
-                              <button
-                                key={`new-email-${tag}`}
-                                type="button"
-                                onClick={() => setEmailBodyNew(prev => prev + ' ' + tag)}
-                                className="px-2 py-0.5 bg-slate-100 hover:bg-red-50 border border-slate-200 hover:border-red-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-red-800 cursor-pointer transition-all"
-                              >
-                                + {tag}
-                              </button>
-                            ))}
+                    <button
+                      type="button"
+                      onClick={() => setPettyCashTemplateTab('DEPOSITS')}
+                      className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                        pettyCashTemplateTab === 'DEPOSITS'
+                          ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                      }`}
+                    >
+                      <ArrowDownRight className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Deposits</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-extrabold">2 Active</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPettyCashTemplateTab('ADVANCES')}
+                      className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                        pettyCashTemplateTab === 'ADVANCES'
+                          ? 'bg-white text-slate-900 shadow-xs font-extrabold ring-1 ring-slate-200/60'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                      }`}
+                    >
+                      <HandCoins className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Cash Advances</span>
+                      <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md font-extrabold">7 Active</span>
+                    </button>
+                  </div>
+
+                  {/* 1. EXPENSE & CLAIM TEMPLATES */}
+                  {pettyCashTemplateTab === 'EXPENSES' && (
+                    <div className="space-y-4">
+
+                      {/* ACCORDION 1: NEW VOUCHER EMAIL TEMPLATE WITH PREVIEW */}
+                      <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                        <button
+                          type="button"
+                          onClick={() => toggleEmailAccordion('new')}
+                          className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-red-50 text-[#ed3833] flex items-center justify-center shrink-0">
+                              <Mail className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-sm text-slate-800">1. New Voucher Template & Preview</h4>
+                              <p className="text-xs text-slate-400">Corporate email subject & body sent when a new payment voucher is created</p>
+                            </div>
                           </div>
-
-                          <div className="space-y-2">
-                            <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
-                            <input
-                              type="text"
-                              value={emailSubjectNew}
-                              onChange={(e) => setEmailSubjectNew(e.target.value)}
-                              placeholder="Subject line"
-                              className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                              required
-                            />
-                            <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
-                            <textarea
-                              value={emailBodyNew}
-                              onChange={(e) => setEmailBodyNew(e.target.value)}
-                              rows={5}
-                              className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                              required
-                            />
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-[#ed3833]"></span>
+                            {openEmailAccordions.new ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
                           </div>
-                        </div>
+                        </button>
 
-                        {/* Live Card Preview */}
-                        {(() => {
-                          const previewSubject = substituteSampleTags(emailSubjectNew, appSettings.currencySymbol, false);
-                          const previewBodyRaw = substituteSampleTags(emailBodyNew, appSettings.currencySymbol, false);
-                          const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
-
-                          return (
-                            <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
-                                  <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                    New Voucher HTML Email Card Preview
-                                  </span>
-                                </div>
-                                <span className="text-[11px] font-mono text-slate-500">
-                                  From: {msSenderName} &lt;{msSenderEmail}&gt;
-                                </span>
+                        {openEmailAccordions.new && (
+                          <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                                {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                                  <button
+                                    key={`new-email-${tag}`}
+                                    type="button"
+                                    onClick={() => setEmailBodyNew(prev => prev + ' ' + tag)}
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-red-50 border border-slate-200 hover:border-red-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-red-800 cursor-pointer transition-all"
+                                  >
+                                    + {tag}
+                                  </button>
+                                ))}
                               </div>
 
-                              <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
-                                Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                              </div>
-
-                              <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
-                                <iframe
-                                  title="New Voucher Email Preview"
-                                  srcDoc={buildModernHtmlEmailFromText('New Voucher Alert', previewBodyRaw, '#3b82f6', 'NEW')}
-                                  className="w-full h-[580px] border-0"
+                              <div className="space-y-2">
+                                <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                                <input
+                                  type="text"
+                                  value={emailSubjectNew}
+                                  onChange={(e) => setEmailSubjectNew(e.target.value)}
+                                  placeholder="Subject line"
+                                  className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                                  required
+                                />
+                                <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                                <textarea
+                                  value={emailBodyNew}
+                                  onChange={(e) => setEmailBodyNew(e.target.value)}
+                                  rows={5}
+                                  className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                                  required
                                 />
                               </div>
                             </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-                  </div>
 
-                {/* ACCORDION 3: VOUCHER CHANGES EMAIL TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleEmailAccordion('edit')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">2. Voucher Changes Template & Preview</h4>
-                        <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing voucher is modified</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      {openEmailAccordions.edit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
+                            {/* Live Card Preview */}
+                            {(() => {
+                              const previewSubject = substituteSampleTags(emailSubjectNew, appSettings.currencySymbol, false);
+                              const previewBodyRaw = substituteSampleTags(emailBodyNew, appSettings.currencySymbol, false);
+                              const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
-                  {openEmailAccordions.edit && (
-                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
-                            <button
-                              key={`edit-email-${tag}`}
-                              type="button"
-                              onClick={() => setEmailBodyEdit(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
+                              return (
+                                <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                      <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                        New Voucher HTML Email Card Preview
+                                      </span>
+                                    </div>
+                                    <span className="text-[11px] font-mono text-slate-500">
+                                      From: {msSenderName} &lt;{msSenderEmail}&gt;
+                                    </span>
+                                  </div>
 
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
-                          <input
-                            type="text"
-                            value={emailSubjectEdit}
-                            onChange={(e) => setEmailSubjectEdit(e.target.value)}
-                            placeholder="Subject line"
-                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                            required
-                          />
-                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
-                          <textarea
-                            value={emailBodyEdit}
-                            onChange={(e) => setEmailBodyEdit(e.target.value)}
-                            rows={6}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                            required
-                          />
-                        </div>
+                                  <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                                    Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                  </div>
+
+                                  <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                                    <iframe
+                                      title="New Voucher Email Preview"
+                                      srcDoc={buildModernHtmlEmailFromText('New Voucher Alert', previewBodyRaw, '#3b82f6', 'NEW')}
+                                      className="w-full h-[580px] border-0"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
 
-                      {/* Live Card Preview */}
-                      {(() => {
-                        const previewSubject = substituteSampleTags(emailSubjectEdit, appSettings.currencySymbol, true);
-                        const previewBodyRaw = substituteSampleTags(emailBodyEdit, appSettings.currencySymbol, true);
-                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
-
-                        return (
-                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                  Voucher Changes HTML Email Card Preview
-                                </span>
-                              </div>
-                              <span className="text-[11px] font-mono text-slate-500">
-                                From: {msSenderName} &lt;{msSenderEmail}&gt;
-                              </span>
+                      {/* ACCORDION 2: VOUCHER CHANGES EMAIL TEMPLATE WITH PREVIEW */}
+                      <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                        <button
+                          type="button"
+                          onClick={() => toggleEmailAccordion('edit')}
+                          className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                              <Mail className="w-4 h-4" />
                             </div>
-
-                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
-                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                            </div>
-
-                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
-                              <iframe
-                                title="Voucher Changes Email Preview"
-                                srcDoc={buildModernHtmlEmailFromText('Voucher Changes Alert', previewBodyRaw, '#f7b944', 'EDIT')}
-                                className="w-full h-[580px] border-0"
-                              />
+                            <div>
+                              <h4 className="font-bold text-sm text-slate-800">2. Voucher Changes Template & Preview</h4>
+                              <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing voucher is modified</p>
                             </div>
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-
-                {/* ACCORDION 3: DEPOSIT EMAIL TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleEmailAccordion('inward')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#00bc7d] flex items-center justify-center shrink-0">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">3. Deposit Template & Preview</h4>
-                        <p className="text-xs text-slate-400">Corporate email subject & body sent when cash is deposited into petty cash</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#00bc7d]"></span>
-                      {openEmailAccordions.inward ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openEmailAccordions.inward && (
-                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
-                            <button
-                              key={`inward-email-${tag}`}
-                              type="button"
-                              onClick={() => setEmailBodyInward(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
-                          <input
-                            type="text"
-                            value={emailSubjectInward}
-                            onChange={(e) => setEmailSubjectInward(e.target.value)}
-                            placeholder="Subject line"
-                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                            required
-                          />
-                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
-                          <textarea
-                            value={emailBodyInward}
-                            onChange={(e) => setEmailBodyInward(e.target.value)}
-                            rows={5}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      {/* Live Card Preview */}
-                      {(() => {
-                        const previewSubject = substituteSampleTags(emailSubjectInward, appSettings.currencySymbol, false)
-                          .replace(/VOUCHER-104/g, 'IW-101')
-                          .replace(/₹3,500/g, '₹25,000')
-                          .replace(/\$3,500/g, '$25,000')
-                          .replace(/Rahul Sharma/g, 'HDFC Bank (Parthiban)');
-                        const previewBodyRaw = substituteSampleTags(emailBodyInward, appSettings.currencySymbol, false)
-                          .replace(/VOUCHER-104/g, 'IW-101')
-                          .replace(/₹3,500/g, '₹25,000')
-                          .replace(/\$3,500/g, '$25,000')
-                          .replace(/Rahul Sharma/g, 'HDFC Bank (Parthiban)')
-                          .replace(/Office Supplies/g, 'Bank Cash Withdrawal')
-                          .replace(/A4 printer paper & stationery/g, 'Cash withdrawn from HDFC Bank for Petty Cash replenishment')
-                          .replace(/Invoice #INV-2026-902 attached/g, 'Cheque #CHQ-88290 verified')
-                          .replace(/₹12,500/g, '₹37,500')
-                          .replace(/\$12,500/g, '$37,500');
-                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
-
-                        return (
-                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-[#00bc7d] animate-pulse"></span>
-                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                  Cash Deposit HTML Email Card Preview
-                                </span>
-                              </div>
-                              <span className="text-[11px] font-mono text-slate-500">
-                                From: {msSenderName} &lt;{msSenderEmail}&gt;
-                              </span>
-                            </div>
-
-                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
-                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                            </div>
-
-                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
-                              <iframe
-                                title="Cash Deposit Email Preview"
-                                srcDoc={buildModernHtmlEmailFromText('Deposit Alert', previewBodyRaw, '#00bc7d', 'INWARD')}
-                                className="w-full h-[580px] border-0"
-                              />
-                            </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                            {openEmailAccordions.edit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
+                        </button>
 
-                {/* ACCORDION 4: DEPOSIT CHANGES EMAIL TEMPLATE WITH PREVIEW */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
-                  <button
-                    type="button"
-                    onClick={() => toggleEmailAccordion('inwardEdit')}
-                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-800">4. Deposit Changes Template & Preview</h4>
-                        <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing inward deposit is modified</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      {openEmailAccordions.inwardEdit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                    </div>
-                  </button>
-
-                  {openEmailAccordions.inwardEdit && (
-                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
-                          {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
-                            <button
-                              key={`inward-edit-email-${tag}`}
-                              type="button"
-                              onClick={() => setEmailBodyInwardEdit(prev => prev + ' ' + tag)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
-                            >
-                              + {tag}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
-                          <input
-                            type="text"
-                            value={emailSubjectInwardEdit}
-                            onChange={(e) => setEmailSubjectInwardEdit(e.target.value)}
-                            placeholder="Subject line"
-                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
-                            required
-                          />
-                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
-                          <textarea
-                            value={emailBodyInwardEdit}
-                            onChange={(e) => setEmailBodyInwardEdit(e.target.value)}
-                            rows={6}
-                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      {/* Live Card Preview */}
-                      {(() => {
-                        const previewSubject = substituteSampleTags(emailSubjectInwardEdit, appSettings.currencySymbol, true)
-                          .replace(/VOUCHER-104/g, 'IW-101')
-                          .replace(/₹3,500/g, '₹25,000')
-                          .replace(/\$3,500/g, '$25,000')
-                          .replace(/Rahul Sharma/g, 'HDFC Bank (Parthiban)');
-                        const previewBodyRaw = substituteSampleTags(emailBodyInwardEdit, appSettings.currencySymbol, true)
-                          .replace(/VOUCHER-104/g, 'IW-101')
-                          .replace(/₹3,500/g, '₹25,000')
-                          .replace(/\$3,500/g, '$25,000')
-                          .replace(/Rahul Sharma/g, 'HDFC Bank (Parthiban)')
-                          .replace(/Office Supplies/g, 'Bank Cash Withdrawal')
-                          .replace(/A4 printer paper & stationery/g, 'Cash withdrawn from HDFC Bank for Petty Cash replenishment')
-                          .replace(/Invoice #INV-2026-902 attached/g, 'Cheque #CHQ-88290 verified')
-                          .replace(/₹12,500/g, '₹37,500')
-                          .replace(/\$12,500/g, '$37,500');
-                        const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
-
-                        return (
-                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-[#f7b944] animate-pulse"></span>
-                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                                  Deposit Changes HTML Email Card Preview
-                                </span>
+                        {openEmailAccordions.edit && (
+                          <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                                {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                                  <button
+                                    key={`edit-email-${tag}`}
+                                    type="button"
+                                    onClick={() => setEmailBodyEdit(prev => prev + ' ' + tag)}
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
+                                  >
+                                    + {tag}
+                                  </button>
+                                ))}
                               </div>
-                              <span className="text-[11px] font-mono text-slate-500">
-                                From: {msSenderName} &lt;{msSenderEmail}&gt;
-                              </span>
+
+                              <div className="space-y-2">
+                                <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                                <input
+                                  type="text"
+                                  value={emailSubjectEdit}
+                                  onChange={(e) => setEmailSubjectEdit(e.target.value)}
+                                  placeholder="Subject line"
+                                  className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                                  required
+                                />
+                                <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                                <textarea
+                                  value={emailBodyEdit}
+                                  onChange={(e) => setEmailBodyEdit(e.target.value)}
+                                  rows={6}
+                                  className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                                  required
+                                />
+                              </div>
                             </div>
 
-                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
-                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
-                            </div>
+                            {/* Live Card Preview */}
+                            {(() => {
+                              const previewSubject = substituteSampleTags(emailSubjectEdit, appSettings.currencySymbol, true);
+                              const previewBodyRaw = substituteSampleTags(emailBodyEdit, appSettings.currencySymbol, true);
+                              const previewBlocks = parseBodyTextToBlocks(previewBodyRaw);
 
-                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
-                              <iframe
-                                title="Deposit Changes Email Preview"
-                                srcDoc={buildModernHtmlEmailFromText('Deposit Changes Alert', previewBodyRaw, '#f7b944', 'INWARD_EDIT')}
-                                className="w-full h-[580px] border-0"
-                              />
-                            </div>
+                              return (
+                                <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                      <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                        Voucher Changes HTML Email Card Preview
+                                      </span>
+                                    </div>
+                                    <span className="text-[11px] font-mono text-slate-500">
+                                      From: {msSenderName} &lt;{msSenderEmail}&gt;
+                                    </span>
+                                  </div>
+
+                                  <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                                    Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                                  </div>
+
+                                  <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                                    <iframe
+                                      title="Voucher Changes Email Preview"
+                                      srcDoc={buildModernHtmlEmailFromText('Voucher Changes Alert', previewBodyRaw, '#f7b944', 'EDIT')}
+                                      className="w-full h-[580px] border-0"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
+                        )}
+                      </div>
 
                 {/* ACCORDION 5: CLAIM REQUEST SUBMITTED TEMPLATE & PREVIEW */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
@@ -5009,8 +4979,893 @@ export default function AdminSettingsView({
                     </div>
                   )}
                 </div>
+              </div>
+            )}
 
-                {/* Bottom Actions Bar */}
+            {/* 2. DEPOSITS TEMPLATES (2 Active) */}
+            {pettyCashTemplateTab === 'DEPOSITS' && (
+              <div className="space-y-4">
+                {/* ACCORDION 1: INWARD DEPOSIT EMAIL TEMPLATE WITH PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('inward')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <ArrowDownRight className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">1. Inward Deposit Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Corporate email subject & body sent when cash is deposited into the petty cash balance</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      {openEmailAccordions.inward ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.inward && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                            <button
+                              key={`inward-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyInward(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectInward}
+                            onChange={(e) => setEmailSubjectInward(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyInward}
+                            onChange={(e) => setEmailBodyInward(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectInward, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyInward, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Inward Deposit HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Inward Deposit Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Inward Deposit Alert', previewBodyRaw, '#10b981', 'INWARD')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 2: DEPOSIT CHANGES ALERT TEMPLATE WITH PREVIEW */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('inwardEdit')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
+                        <ArrowDownRight className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">2. Deposit Changes Alert Template & Preview</h4>
+                        <p className="text-xs text-slate-400">Corporate email subject & body sent when an existing inward deposit record is modified</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                      {openEmailAccordions.inwardEdit ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.inwardEdit && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{voucher_id}', '{changed_fields}', '{updated_by}', '{amount}', '{paid_to}', '{particulars}', '{category}', '{remarks}', '{date}', '{attachment}', '{balance}'].map((tag) => (
+                            <button
+                              key={`inward-edit-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyInwardEdit(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-teal-50 border border-slate-200 hover:border-teal-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-teal-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectInwardEdit}
+                            onChange={(e) => setEmailSubjectInwardEdit(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyInwardEdit}
+                            onChange={(e) => setEmailBodyInwardEdit(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectInwardEdit, appSettings.currencySymbol, true);
+                        const previewBodyRaw = substituteSampleTags(emailBodyInwardEdit, appSettings.currencySymbol, true);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-teal-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Deposit Changes HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Deposit Changes Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Deposit Changes Alert', previewBodyRaw, '#0d9488', 'INWARD_EDIT')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 3. CASH ADVANCE TEMPLATES (7 Active) */}
+            {pettyCashTemplateTab === 'ADVANCES' && (
+              <div className="space-y-4">
+                {/* ACCORDION 1: ADVANCE REQUEST NOTIFICATION */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advRequest')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#ff7900] flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">1. Advance Request Notification & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Reporting Manager when an employee submits a new cash advance request</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[#ff7900]"></span>
+                      {openEmailAccordions.advRequest ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advRequest && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{purpose}', '{category}', '{request_date}', '{project_ref}', '{expected_settlement_date}'].map((tag) => (
+                            <button
+                              key={`adv-req-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvRequest(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvRequest}
+                            onChange={(e) => setEmailSubjectAdvRequest(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvRequest}
+                            onChange={(e) => setEmailBodyAdvRequest(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvRequest, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvRequest, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-[#ff7900] animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Request HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Request Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Request Pending Approval', previewBodyRaw, '#ff7900', 'ADVANCE_REQUEST')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 2: ADVANCE APPROVED NOTIFICATION */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advApproved')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <Check className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">2. Advance Approved (Issue Cash) Notification & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Cash Admin & Employee when advance request is approved to disburse cash</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      {openEmailAccordions.advApproved ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advApproved && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{approved_by}', '{purpose}', '{category}', '{request_date}', '{project_ref}', '{expected_settlement_date}'].map((tag) => (
+                            <button
+                              key={`adv-app-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvApproved(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-blue-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvApproved}
+                            onChange={(e) => setEmailSubjectAdvApproved(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvApproved}
+                            onChange={(e) => setEmailBodyAdvApproved(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvApproved, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvApproved, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Approved HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Approved Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Approved - Disburse Cash', previewBodyRaw, '#2563eb', 'ADVANCE_APPROVED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 3: CASH ISSUED / DISBURSED NOTIFICATION */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advDisbursed')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <HandCoins className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">3. Cash Issued / Disbursed Notification & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Employee when cash is disbursed by the Cash Admin</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                      {openEmailAccordions.advDisbursed ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advDisbursed && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{issued_by}', '{purpose}', '{date}', '{expected_settlement_date}'].map((tag) => (
+                            <button
+                              key={`adv-disb-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvDisbursed(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-emerald-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvDisbursed}
+                            onChange={(e) => setEmailSubjectAdvDisbursed(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvDisbursed}
+                            onChange={(e) => setEmailBodyAdvDisbursed(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvDisbursed, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvDisbursed, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Cash Disbursed HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Disbursed Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Disbursed', previewBodyRaw, '#10b981', 'ADVANCE_DISBURSED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 4: ADVANCE REJECTED NOTIFICATION */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advRejected')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-red-50 text-[#ed3833] flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">4. Advance Rejected Notification & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Employee when advance request is rejected with reason</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[#ed3833]"></span>
+                      {openEmailAccordions.advRejected ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advRejected && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{rejected_by}', '{reason}', '{date}'].map((tag) => (
+                            <button
+                              key={`adv-rej-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvRejected(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-red-50 border border-slate-200 hover:border-red-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-red-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvRejected}
+                            onChange={(e) => setEmailSubjectAdvRejected(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvRejected}
+                            onChange={(e) => setEmailBodyAdvRejected(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvRejected, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvRejected, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-[#ed3833] animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Rejected HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Rejected Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Request Rejected', previewBodyRaw, '#ef4444', 'ADVANCE_REJECTED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 5: ADVANCE QUERY (MANAGER TO EMPLOYEE) */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advQuery')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                        <MessageSquare className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">5. Advance Query (Manager to Employee) & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Employee when manager requests clarification on their advance</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                      {openEmailAccordions.advQuery ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advQuery && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{manager_name}', '{query_text}'].map((tag) => (
+                            <button
+                              key={`adv-qry-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvQuery(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-purple-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvQuery}
+                            onChange={(e) => setEmailSubjectAdvQuery(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvQuery}
+                            onChange={(e) => setEmailBodyAdvQuery(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvQuery, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvQuery, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-purple-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Query HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Query Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Clarification Required', previewBodyRaw, '#7c3aed', 'ADVANCE_QUERY')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 6: ADVANCE QUERY RESPONSE (EMPLOYEE TO MANAGER) */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advQueryResponse')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                        <MessageSquare className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">6. Advance Query Response (Employee to Manager) & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to Manager when employee submits clarification for advance request</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                      {openEmailAccordions.advQueryResponse ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advQueryResponse && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{manager_name}', '{query_text}', '{date}'].map((tag) => (
+                            <button
+                              key={`adv-qry-res-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvQueryResponse(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-purple-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvQueryResponse}
+                            onChange={(e) => setEmailSubjectAdvQueryResponse(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvQueryResponse}
+                            onChange={(e) => setEmailBodyAdvQueryResponse(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvQueryResponse, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvQueryResponse, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-purple-600 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Query Response HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Query Response Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Query Response Submitted', previewBodyRaw, '#7c3aed', 'ADVANCE_QUERY_RESPONSE')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* ACCORDION 7: ADVANCE RE-ROUTED NOTIFICATION */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmailAccordion('advRerouted')}
+                    className="w-full p-5 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <Share2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800">7. Advance Re-Routed Notification & Preview</h4>
+                        <p className="text-xs text-slate-400">Sent to new Assigned Approver when an advance request is re-routed</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      {openEmailAccordions.advRerouted ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                    </div>
+                  </button>
+
+                  {openEmailAccordions.advRerouted && (
+                    <div className="p-6 border-t border-slate-100 space-y-6 animate-in fade-in duration-200">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 mr-1">Insert Placeholders:</span>
+                          {['{advance_id}', '{amount}', '{requested_by}', '{re_routed_by}', '{re_routed_to}', '{re_route_reason}', '{purpose}', '{category}', '{project_ref}', '{expected_settlement_date}'].map((tag) => (
+                            <button
+                              key={`adv-reroute-email-${tag}`}
+                              type="button"
+                              onClick={() => setEmailBodyAdvRerouted(prev => prev + ' ' + tag)}
+                              className="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-lg text-[10px] font-mono font-bold text-slate-700 hover:text-amber-800 cursor-pointer transition-all"
+                            >
+                              + {tag}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-700">Email Subject Line</label>
+                          <input
+                            type="text"
+                            value={emailSubjectAdvRerouted}
+                            onChange={(e) => setEmailSubjectAdvRerouted(e.target.value)}
+                            placeholder="Subject line"
+                            className="w-full py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-semibold"
+                            required
+                          />
+                          <label className="block text-xs font-bold text-slate-700 pt-1">Email Body Text</label>
+                          <textarea
+                            value={emailBodyAdvRerouted}
+                            onChange={(e) => setEmailBodyAdvRerouted(e.target.value)}
+                            rows={6}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white rounded-xl text-xs font-mono leading-relaxed"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Card Preview */}
+                      {(() => {
+                        const previewSubject = substituteSampleTags(emailSubjectAdvRerouted, appSettings.currencySymbol, false);
+                        const previewBodyRaw = substituteSampleTags(emailBodyAdvRerouted, appSettings.currencySymbol, false);
+
+                        return (
+                          <div className="bg-slate-100/80 rounded-2xl p-6 border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                                  Advance Re-Routed HTML Email Card Preview
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                From: {msSenderName} &lt;{msSenderEmail}&gt;
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200">
+                              Subject: <span className="font-mono text-slate-800">{previewSubject}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm max-w-2xl mx-auto">
+                              <iframe
+                                title="Advance Re-Route Email Preview"
+                                srcDoc={buildModernHtmlEmailFromText('Cash Advance Request Re-Routed', previewBodyRaw, '#f59e0b', 'ADVANCE_REROUTED')}
+                                className="w-full h-[580px] border-0"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Bottom Actions Bar */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <button
                     type="button"

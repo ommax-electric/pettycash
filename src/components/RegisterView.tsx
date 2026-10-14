@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, IndianRupee, Ban, AlertTriangle, ShieldCheck } from 'lucide-react';
-import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings } from '../types';
-import { openAttachmentInNewTab, sortTransactionsByIdDesc, isTxnSubmitter } from '../utils';
+import { Search, Plus, Filter, FileSpreadsheet, Download, X, Paperclip, AlertCircle, CheckCircle, CheckCircle2, FileText, Pencil, Trash2, ArrowDownLeft, ArrowUpRight, ArrowRightLeft, Clock, Check, Printer, History, Eye, Info, ExternalLink, RefreshCw, ChevronDown, ChevronRight, IndianRupee, Ban, AlertTriangle, ShieldCheck, HandCoins, Wallet } from 'lucide-react';
+import { Transaction, CategoryLimit, User, TransactionType, TransactionStatus, AppSettings, IntegrationSettings, CashAdvance } from '../types';
+import { openAttachmentInNewTab, sortTransactionsByIdDesc, isTxnSubmitter, getNextInwardVoucherNumber, getNextOutwardVoucherNumber, isMatchUserIdentifier } from '../utils';
 import { uploadReceiptToCloudinary, compressAndProcessFile } from '../services/cloudinaryService';
 import { convertExternalUrlToDataUrl, uploadFileToCloudinary, deleteFileFromCloudinary } from '../services/fileAttachmentService';
 import { uploadToFirebaseStorage } from '../services/firebaseStorageService';
@@ -19,6 +19,23 @@ interface RegisterViewProps {
   forceType?: 'IN' | 'OUT';
   appSettings?: AppSettings;
   integrationSettings?: IntegrationSettings;
+  advances?: CashAdvance[];
+  onSettleAdvance?: (
+    advanceId: string, 
+    settlement: {
+      amount: number;
+      category: string;
+      particulars: string;
+      date: string;
+      receiptName?: string | null;
+      receiptUrl?: string | null;
+      isFinalSettlement?: boolean;
+      returnCashAmount?: number;
+      reimburseAmount?: number;
+      isPending?: boolean;
+    }
+  ) => Promise<void> | void;
+  onNavigateToAdvances?: (openSettleModal?: boolean) => void;
 }
 
 // Dedicated PDF In-App Previewer Component
@@ -242,13 +259,70 @@ export default function RegisterView({
   onDeleteTransaction,
   forceType,
   appSettings,
-  integrationSettings
+  integrationSettings,
+  advances = [],
+  onSettleAdvance,
+  onNavigateToAdvances
 }: RegisterViewProps) {
   const currencySymbol = appSettings?.currencySymbol || '₹';
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
   const formatDate = (dateStr: string) => formatDateToDMY(dateStr, dateFormat);
   const forceTypeVal: string | undefined = forceType;
   const todayStr = new Date().toISOString().split('T')[0];
+
+  // User Active Cash Advances (DISBURSED with remaining amount)
+  const userActiveAdvances = useMemo(() => {
+    if (!advances || advances.length === 0) return [];
+    const myName = (currentUser.fullName || '').trim().toLowerCase();
+    const myUser = (currentUser.username || '').trim().toLowerCase();
+    const myEmpId = (currentUser.empId || '').trim().toLowerCase();
+    const myEmail = (currentUser.email || '').trim().toLowerCase();
+    return advances.filter(a => {
+      // Advance is active for expense settlement only after cash has been issued (DISBURSED, PARTIALLY_SETTLED, or SETTLEMENT_PENDING)
+      // Cannot settle before manager approval (PENDING_APPROVAL) or before cash issue (APPROVED)
+      const isCashIssued = a.status === 'DISBURSED' || a.status === 'PARTIALLY_SETTLED' || a.status === 'SETTLEMENT_PENDING';
+      if (!isCashIssued) return false;
+      const rem = a.remainingAmount ?? (a.amount - (a.settledAmount || 0));
+      if (rem <= 0) return false;
+      if (currentUser.role === 'ADMIN') return true;
+      const req = (a.requestedBy || '').trim().toLowerCase();
+      if (a.requesterEmpId && myEmpId && a.requesterEmpId.toLowerCase() === myEmpId) return true;
+      if (a.requesterEmail && myEmail && a.requesterEmail.toLowerCase() === myEmail) return true;
+      if (myName && req === myName) return true;
+      if (myUser && req === myUser) return true;
+      return (
+        isMatchUserIdentifier(a.requestedBy, currentUser.fullName) ||
+        isMatchUserIdentifier(a.requestedBy, currentUser.username) ||
+        isMatchUserIdentifier(a.requestedBy, currentUser.email) ||
+        isMatchUserIdentifier(a.requesterEmpId, currentUser.empId) ||
+        isMatchUserIdentifier(a.requesterEmail, currentUser.email)
+      );
+    });
+  }, [advances, currentUser]);
+
+  // Total unsettled advance balance for user
+  const totalUnsettledAdvanceAmount = useMemo(() => {
+    return userActiveAdvances.reduce((sum, a) => {
+      const rem = a.remainingAmount ?? (a.amount - (a.settledAmount || 0));
+      return sum + Math.max(0, rem);
+    }, 0);
+  }, [userActiveAdvances]);
+
+  // Advance Settlement Choice & Form States
+  const [isAdvanceChoiceModalOpen, setIsAdvanceChoiceModalOpen] = useState(false);
+  const [isSettlingAgainstAdvance, setIsSettlingAgainstAdvance] = useState(false);
+  const [selectedAdvanceId, setSelectedAdvanceId] = useState('');
+  const [isFinalAdvanceSettlement, setIsFinalAdvanceSettlement] = useState(false);
+
+  // Active selected advance object
+  const activeSelectedAdvance = useMemo(() => {
+    if (!isSettlingAgainstAdvance) return null;
+    if (selectedAdvanceId) {
+      const match = userActiveAdvances.find(a => a.id === selectedAdvanceId);
+      if (match) return match;
+    }
+    return userActiveAdvances[0] || null;
+  }, [isSettlingAgainstAdvance, selectedAdvanceId, userActiveAdvances]);
 
   // Company Stamp Settings
   const companyStampUrl = appSettings?.companyStampUrl || '';
@@ -557,7 +631,7 @@ export default function RegisterView({
   const uniquePayees = Array.from(
     new Set(
       transactions
-        .filter(t => t.type === 'OUT' && t.merchant)
+        .filter(t => t.type === 'OUT' && !t.isAdvanceDisbursal && t.merchant)
         .map(t => t.merchant.trim())
     )
   ).sort((a, b) => a.localeCompare(b));
@@ -577,6 +651,9 @@ export default function RegisterView({
       if (forceType === 'IN') {
         return matchesType && matchesDate;
       } else if (forceType === 'OUT') {
+        // Exclude advance cash disbursal entries from expense registry (tracked in Cash Advance module)
+        if (txn.isAdvanceDisbursal) return false;
+
         const matchesPayee = filterPayee.length === 0 || filterPayee.includes('ALL') || filterPayee.includes(txn.merchant.trim());
         const matchesCategory = filterCategory.length === 0 || filterCategory.includes('ALL') || filterCategory.includes(txn.category);
         const matchesPaymentMode = filterPaymentMode.length === 0 || filterPaymentMode.includes('ALL') || filterPaymentMode.includes(txn.paymentType || 'CASH');
@@ -802,6 +879,10 @@ export default function RegisterView({
 
   const closeModal = () => {
     setIsModalOpen(false);
+    setIsAdvanceChoiceModalOpen(false);
+    setIsSettlingAgainstAdvance(false);
+    setSelectedAdvanceId('');
+    setIsFinalAdvanceSettlement(false);
     setEditingTransaction(null);
     setFormDate(new Date().toISOString().split('T')[0]);
     setFormType(forceType || 'OUT');
@@ -818,10 +899,10 @@ export default function RegisterView({
     setFormError('');
   };
 
-  const handleOpenAddModal = (overrideType?: TransactionType) => {
+  const openActualExpenseModal = (overrideType?: any) => {
     setEditingTransaction(null);
     setFormDate(new Date().toISOString().split('T')[0]);
-    const targetType = overrideType || forceType || 'OUT';
+    const targetType: TransactionType = (overrideType === 'IN' || overrideType === 'OUT') ? overrideType : (forceType || 'OUT');
     setFormType(targetType);
     if (targetType === 'IN') {
       const nextInRef = getNextInwardVoucherNumber(transactions);
@@ -842,6 +923,18 @@ export default function RegisterView({
     setReceiptFile(null);
     setFormError('');
     setIsModalOpen(true);
+  };
+
+  const handleOpenAddModal = (overrideType?: any) => {
+    const targetType: TransactionType = (overrideType === 'IN' || overrideType === 'OUT') ? overrideType : (forceType || 'OUT');
+    if (targetType === 'OUT' && userActiveAdvances.length > 0) {
+      setIsAdvanceChoiceModalOpen(true);
+      return;
+    }
+    setIsSettlingAgainstAdvance(false);
+    setSelectedAdvanceId('');
+    setIsFinalAdvanceSettlement(false);
+    openActualExpenseModal(targetType);
   };
 
   const canUserEditTxn = (txn: Transaction): boolean => {
@@ -1068,7 +1161,7 @@ export default function RegisterView({
       category: categoryName,
       userName: userName,
       activeColorBorderClass: activeColorBorderClass,
-      onConfirm: () => {
+      onConfirm: async () => {
         try {
           if (editingTransaction) {
             // If the transaction previously had a Cloudinary receipt URL and it was removed or replaced
@@ -1114,9 +1207,11 @@ export default function RegisterView({
               : (isTopAdminOrCustodian ? 'PAID' : 'PENDING');
 
             const reqUser = currentUser.fullName || currentUser.username || 'User';
-            const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? reqUser : 'admin');
+            const targetApprover = hasReportingManager ? repTo : (isTopAdminOrCustodian ? reqUser : 'Manager');
 
             const effectivePaymentType = currentUser.role === 'ADMIN' ? (formPaymentType || 'CASH') : 'CASH';
+
+            const linkedAdvId = isSettlingAgainstAdvance && activeSelectedAdvance ? activeSelectedAdvance.id : undefined;
 
             onAddTransaction({
               date: formDate,
@@ -1133,9 +1228,46 @@ export default function RegisterView({
               receiptSize: receiptFile?.size || null,
               receiptUrl: finalReceiptUrl || null,
               remarks: formRemarks.trim(),
-              projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : '',
-              paymentType: effectivePaymentType
+              projectRefNo: formProjectRefNo ? formProjectRefNo.trim() : (activeSelectedAdvance?.projectRefNo || ''),
+              paymentType: effectivePaymentType,
+              advanceId: linkedAdvId,
+              isAdvanceSettlement: !!linkedAdvId,
+              unspentCashToCollect: (activeSelectedAdvance && isFinalAdvanceSettlement && parsedAmount < (activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))))
+                ? ((activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))) - parsedAmount)
+                : undefined,
+              excessReimburseAmount: (activeSelectedAdvance && parsedAmount > (activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))))
+                ? (parsedAmount - (activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))))
+                : undefined,
+              isFinalSettlement: isFinalAdvanceSettlement || Boolean(activeSelectedAdvance && parsedAmount >= (activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))))
             });
+
+            if (linkedAdvId && activeSelectedAdvance && onSettleAdvance) {
+              let returnCashAmt = 0;
+              let reimburseAmt = 0;
+              const currentRemaining = activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0));
+              if (parsedAmount > currentRemaining) {
+                reimburseAmt = parsedAmount - currentRemaining;
+              } else if (isFinalAdvanceSettlement && parsedAmount < currentRemaining) {
+                returnCashAmt = currentRemaining - parsedAmount;
+              }
+
+              try {
+                await onSettleAdvance(linkedAdvId, {
+                  amount: parsedAmount,
+                  category: categoryName,
+                  particulars: formDescription.trim() || `Settlement for advance ${linkedAdvId}`,
+                  date: formDate,
+                  receiptName: receiptFile?.name || null,
+                  receiptUrl: finalReceiptUrl || null,
+                  isFinalSettlement: isFinalAdvanceSettlement || parsedAmount >= currentRemaining,
+                  returnCashAmount: returnCashAmt > 0 ? returnCashAmt : undefined,
+                  reimburseAmount: reimburseAmt > 0 ? reimburseAmt : undefined,
+                  isPending: initialStatus === 'PENDING'
+                });
+              } catch (settleErr) {
+                console.warn('Error settling advance from register:', settleErr);
+              }
+            }
           }
         } catch (err) {
           console.error('Error executing transaction entry:', err);
@@ -4299,7 +4431,6 @@ export default function RegisterView({
 
   return (
     <div className="space-y-6 flex flex-col min-h-0">
-      
       {/* Single Consolidated Outward Section Card */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden flex flex-col flex-1 min-h-0">
         
@@ -4383,7 +4514,7 @@ export default function RegisterView({
 
               {currentUser.role !== 'AUDITOR' && (
                 <button 
-                  onClick={handleOpenAddModal}
+                  onClick={() => handleOpenAddModal('OUT')}
                   className="col-span-1 sm:col-span-auto w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-xl text-xs shadow-md shadow-rose-950/15 transition-all flex items-center justify-center gap-1.5 cursor-pointer h-[36px] shrink-0 whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4 stroke-[3] shrink-0" />
@@ -5453,6 +5584,174 @@ export default function RegisterView({
                       </div>
                     )}
 
+                    {/* Unsettled Advance Alert Banner (when raising normal expense while having active advances) */}
+                    {!isSettlingAgainstAdvance && !editingTransaction && userActiveAdvances.length > 0 && (
+                      <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-2xl shadow-2xs">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <div className="flex items-start sm:items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+                            <p className="text-xs text-amber-950 font-bold leading-snug">
+                              <span className="font-extrabold uppercase tracking-wide text-amber-900 mr-1.5">Unsettled Advance Alert.</span>
+                              You have unsettled advance amount <span className="font-black text-amber-950 underline">{currencySymbol}{totalUnsettledAdvanceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> {userActiveAdvances.length === 1 ? `(${userActiveAdvances[0].id})` : `across ${userActiveAdvances.length} advances`}!
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsModalOpen(false);
+                              if (onNavigateToAdvances) {
+                                onNavigateToAdvances(true);
+                              } else {
+                                setIsSettlingAgainstAdvance(true);
+                                setSelectedAdvanceId(userActiveAdvances[0].id);
+                              }
+                            }}
+                            className="self-start sm:self-auto px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-extrabold shrink-0 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+                          >
+                            <HandCoins className="w-3.5 h-3.5" />
+                            <span>Settle Advance</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Advance Settlement Info Banner (if settling against advance) */}
+                    {isSettlingAgainstAdvance && (
+                      <div className="p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-2xl space-y-3 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
+                              <HandCoins className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="text-xs font-black text-amber-950 uppercase tracking-wider">
+                              Expense against Advance
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSettlingAgainstAdvance(false);
+                              setSelectedAdvanceId('');
+                            }}
+                            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 underline cursor-pointer"
+                          >
+                            Switch to Normal Expense
+                          </button>
+                        </div>
+
+                        {/* Advance Selection (Tick-to-Select method matching Advance Module) */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                              <HandCoins className="w-3.5 h-3.5 text-amber-700" />
+                              <span>Select Advance to Settle (Tick to select):</span>
+                            </label>
+                            <span className="text-[10px] font-bold text-amber-800">
+                              {userActiveAdvances.length} Available
+                            </span>
+                          </div>
+
+                          <div className={`grid ${userActiveAdvances.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} gap-2 max-h-48 overflow-y-auto pr-0.5`}>
+                            {userActiveAdvances.map(adv => {
+                              const isSelected = (selectedAdvanceId || activeSelectedAdvance?.id) === adv.id;
+                              const rem = adv.remainingAmount ?? (adv.amount - (adv.settledAmount || 0));
+                              return (
+                                <div
+                                  key={adv.id}
+                                  onClick={() => setSelectedAdvanceId(adv.id)}
+                                  className={`p-2.5 sm:p-3 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-2.5 ${
+                                    isSelected
+                                      ? 'border-amber-400 bg-amber-50/70 shadow-2xs'
+                                      : 'border-slate-200 bg-white hover:border-slate-300 opacity-80'
+                                  }`}
+                                >
+                                  <div className={`w-4 h-4 rounded flex items-center justify-center mt-0.5 border transition-all shrink-0 ${
+                                    isSelected
+                                      ? 'bg-amber-600 border-amber-600 text-white'
+                                      : 'border-slate-300 bg-white'
+                                  }`}>
+                                    {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="font-outfit font-black text-xs text-indigo-700">
+                                        {adv.id}
+                                      </span>
+                                      <span className="font-outfit text-[10px] text-slate-400">
+                                        {adv.requestDate || adv.createdAt}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-800 truncate mt-0.5" title={adv.purpose}>
+                                      {adv.purpose}
+                                    </p>
+                                    <div className="flex items-center justify-between mt-1 text-[11px]">
+                                      <span className="text-slate-500 font-medium font-outfit">Orig: {currencySymbol}{adv.amount.toLocaleString('en-IN')}</span>
+                                      <span className="font-outfit font-bold text-amber-800">
+                                        Rem: {currencySymbol}{rem.toLocaleString('en-IN')}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Live balance indicator */}
+                        {activeSelectedAdvance && (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-bold bg-white/80 p-2 rounded-xl border border-amber-200/60">
+                              <div>
+                                <span className="text-slate-400 block">Total Advance</span>
+                                <span className="text-xs font-mono text-slate-800">{currencySymbol}{activeSelectedAdvance.amount.toLocaleString('en-IN')}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block">Already Settled</span>
+                                <span className="text-xs font-mono text-blue-600">{currencySymbol}{(activeSelectedAdvance.settledAmount || 0).toLocaleString('en-IN')}</span>
+                              </div>
+                              <div>
+                                <span className="text-amber-800 block">Remaining</span>
+                                <span className="text-xs font-mono text-amber-800 font-black">
+                                  {currencySymbol}{(activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Final settlement checkbox - hidden when expense exceeds advance */}
+                            {parseFloat(formAmount || '0') <= (activeSelectedAdvance.remainingAmount ?? (activeSelectedAdvance.amount - (activeSelectedAdvance.settledAmount || 0))) && (
+                              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                                <input
+                                  type="checkbox"
+                                  checked={isFinalAdvanceSettlement}
+                                  onChange={(e) => setIsFinalAdvanceSettlement(e.target.checked)}
+                                  className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                />
+                                <span className="text-xs font-bold text-amber-950">
+                                  Mark as Final Settlement (Close Advance)
+                                </span>
+                              </label>
+                            )}
+
+                            {isFinalAdvanceSettlement && (
+                              <div className="text-[11px] p-2.5 bg-amber-100/70 rounded-xl text-amber-950 font-medium border border-amber-200">
+                                {parseFloat(formAmount || '0') < (activeSelectedAdvance.remainingAmount ?? activeSelectedAdvance.amount) ? (
+                                  <span>
+                                    Unspent cash of <strong>{currencySymbol}{((activeSelectedAdvance.remainingAmount ?? activeSelectedAdvance.amount) - parseFloat(formAmount || '0')).toFixed(2)}</strong> will be returned to Cash Admin.
+                                  </span>
+                                ) : parseFloat(formAmount || '0') > (activeSelectedAdvance.remainingAmount ?? activeSelectedAdvance.amount) ? (
+                                  <span>
+                                    Excess spent of <strong>{currencySymbol}{(parseFloat(formAmount || '0') - (activeSelectedAdvance.remainingAmount ?? activeSelectedAdvance.amount)).toFixed(2)}</strong> will be reimbursed via a separate Petty Cash Outward Voucher.
+                                  </span>
+                                ) : (
+                                  <span>Advance balance will be exactly zero and marked as fully settled.</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Row 1: Voucher No. & Date */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -5806,6 +6105,134 @@ export default function RegisterView({
                   </form>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Pop-up: Choice between Expense against Advance vs Direct New Expense */}
+      <AnimatePresence>
+        {isAdvanceChoiceModalOpen && (
+          <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-800">
+                    <HandCoins className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-slate-900">Unsettled Advance Alert</h3>
+                    <p className="text-[11px] text-amber-800 font-bold">
+                      You have unsettled advance amount {currencySymbol}{totalUnsettledAdvanceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsAdvanceChoiceModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-3">
+                {/* Alert Info Notice */}
+                <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-2xl text-xs text-amber-900">
+                  <p className="font-medium leading-relaxed">
+                    You have unsettled advance cash in your account. If this expense was paid using your advance cash, please select <strong>Expense against Advance</strong> so your advance is reconciled.
+                  </p>
+                </div>
+
+                {/* Option 1: Expense Against Advance */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAdvanceChoiceModalOpen(false);
+                    if (onNavigateToAdvances) {
+                      onNavigateToAdvances(true);
+                    } else {
+                      setIsSettlingAgainstAdvance(true);
+                      if (userActiveAdvances.length > 0) {
+                        setSelectedAdvanceId(userActiveAdvances[0].id);
+                      }
+                      openActualExpenseModal('OUT');
+                    }
+                  }}
+                  className="w-full text-left p-4 rounded-2xl border-2 border-amber-300 hover:border-amber-500 bg-amber-50/40 hover:bg-amber-50 transition-all cursor-pointer group shadow-xs"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                        <HandCoins className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900 group-hover:text-amber-950">
+                            Expense against Advance
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                            {userActiveAdvances.length} Active
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Settle your bill/receipt against an existing cash advance balance.
+                        </p>
+                        <div className="mt-2 text-[11px] font-mono font-bold text-amber-900 bg-white/80 px-2.5 py-1 rounded-lg border border-amber-200 inline-block">
+                          {userActiveAdvances.length === 1
+                            ? `${userActiveAdvances[0].id}: ${currencySymbol}${(userActiveAdvances[0].remainingAmount ?? userActiveAdvances[0].amount).toLocaleString('en-IN')} remaining`
+                            : `${userActiveAdvances.length} advances available to settle`}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-amber-600 shrink-0 group-hover:translate-x-0.5 transition-transform mt-2" />
+                  </div>
+                </button>
+
+                {/* Option 2: New Expense (Normal Direct Claim) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAdvanceChoiceModalOpen(false);
+                    setIsSettlingAgainstAdvance(false);
+                    setSelectedAdvanceId('');
+                    openActualExpenseModal('OUT');
+                  }}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-slate-400 bg-white hover:bg-slate-50 transition-all cursor-pointer group shadow-2xs"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0 mt-0.5">
+                        <Plus className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="font-extrabold text-sm text-slate-900 group-hover:text-slate-950">
+                          New Expense
+                        </span>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Regular direct out-of-pocket petty cash expense voucher.
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-400 shrink-0 group-hover:translate-x-0.5 transition-transform mt-2" />
+                  </div>
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsAdvanceChoiceModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-white transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

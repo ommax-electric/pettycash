@@ -106,6 +106,21 @@ export interface IntegrationSettings {
   emailBodyQuery?: string;
   emailSubjectQueryResponse?: string;
   emailBodyQueryResponse?: string;
+  // Advance Email Templates (7 Templates)
+  emailSubjectAdvanceRequest?: string;
+  emailBodyAdvanceRequest?: string;
+  emailSubjectAdvanceApproved?: string;
+  emailBodyAdvanceApproved?: string;
+  emailSubjectAdvanceDisbursed?: string;
+  emailBodyAdvanceDisbursed?: string;
+  emailSubjectAdvanceRejected?: string;
+  emailBodyAdvanceRejected?: string;
+  emailSubjectAdvanceQuery?: string;
+  emailBodyAdvanceQuery?: string;
+  emailSubjectAdvanceQueryResponse?: string;
+  emailBodyAdvanceQueryResponse?: string;
+  emailSubjectAdvanceRerouted?: string;
+  emailBodyAdvanceRerouted?: string;
   crmEmailSubjectNewOpp?: string;
   crmEmailBodyNewOpp?: string;
   crmEmailSubjectWinOpp?: string;
@@ -206,6 +221,103 @@ export interface Transaction {
   deletedBy?: string; // Full name of person who deleted/voided
   deletedAt?: string; // Timestamp if deleted
   deleteReason?: string; // Reason for deletion
+  // Advance linkage
+  advanceId?: string; // e.g. 'ADV-001'
+  isAdvanceSettlement?: boolean;
+  isAdvanceDisbursal?: boolean;
+  isAdvanceReturn?: boolean;
+  unspentCashToCollect?: number; // Cash to be collected from employee upon final settlement
+  excessReimburseAmount?: number; // Cash to be paid/reimbursed to employee when expense > advance
+  isFinalSettlement?: boolean;
+  unspentCashCollected?: boolean;
+  unspentCashCollectedBy?: string;
+  unspentCashCollectedAt?: string;
+}
+
+export type AdvanceStatus = 
+  | 'PENDING_APPROVAL' 
+  | 'APPROVED' 
+  | 'DISBURSED' 
+  | 'PARTIALLY_SETTLED'
+  | 'SETTLEMENT_PENDING'
+  | 'SETTLED' 
+  | 'REJECTED'
+  | 'VOID'
+  | 'DELETED';
+
+export interface AdvanceSettlementEntry {
+  id: string;
+  date: string;
+  transactionId?: string;
+  voucherNo?: string;
+  amount: number;
+  category: string;
+  particulars: string;
+  receiptName?: string | null;
+  receiptUrl?: string | null;
+  recordedBy: string;
+  settledAt: string;
+}
+
+export interface CashAdvance {
+  id: string; // e.g. ADV-001
+  requestDate: string;
+  requestedBy: string; // Full name or username of employee
+  requesterEmpId?: string;
+  requesterEmail?: string;
+  amount: number;
+  purpose: string;
+  category?: string;
+  projectRefNo?: string;
+  expectedSettlementDate?: string;
+  notes?: string;
+  
+  // 2-Step Approval Workflow
+  status: AdvanceStatus;
+  approverName?: string; // Assigned manager for approval
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  reRoutedBy?: string;
+  reRoutedAt?: string;
+  reRouteReason?: string;
+  queryStatus?: 'OPEN' | 'CLOSED';
+  hasQuery?: boolean;
+  latestQueryId?: string;
+  
+  // Deletion / Void audit
+  deletedBy?: string;
+  deletedAt?: string;
+  deleteReason?: string;
+  
+  // Disbursal by Cash Admin / Custodian
+  disbursedBy?: string;
+  disbursedAt?: string;
+  disbursalVoucherNo?: string; // Linked Outward Payment Voucher (e.g. PCV-0042)
+  disbursalTransactionId?: string;
+  paymentType?: 'CASH' | 'ONLINE';
+  
+  // Settlement tracking
+  settledAmount: number; // Total amount settled so far by bills
+  remainingAmount: number; // Amount remaining to be accounted for
+  pendingSettlementAmount?: number; // Amount currently submitted and awaiting approval
+  pendingExcessAmount?: number; // Excess claim amount awaiting cash issue
+  settlements?: AdvanceSettlementEntry[];
+  
+  // Final closure details
+  settledAt?: string;
+  settledBy?: string;
+  returnedCashAmount?: number; // Cash returned into vault if bills < advance
+  returnedCashVoucherNo?: string; // Linked Inward Voucher
+  returnedCashTransactionId?: string;
+  reimbursedAmount?: number; // Cash reimbursed if bills > advance
+  reimbursementVoucherNo?: string; // Linked Outward Voucher
+  reimbursementTransactionId?: string;
+  
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const formatDateToDMY = (dateStr?: string | null, customFormat?: string): string => {

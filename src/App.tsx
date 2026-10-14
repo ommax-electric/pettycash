@@ -30,18 +30,19 @@ import {
   Wrench,
   HelpCircle,
   MessageSquareQuote,
-  AlertTriangle
+  AlertTriangle,
+  HandCoins
 } from 'lucide-react';
-import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry, ExpenseQuery, QueryMessage, ParentModule, ALL_PARENT_MODULES } from './types';
+import { User, Transaction, CategoryLimit, ActivityLog, TransactionStatus, UserRole, AppSettings, IntegrationSettings, WorkflowHistoryEntry, ExpenseQuery, QueryMessage, ParentModule, ALL_PARENT_MODULES, CashAdvance, AdvanceStatus, AdvanceSettlementEntry } from './types';
 import { CRMAccount, CRMContact, CRMOpportunity, CRMSettings, CRMTab, OpportunityStage, OpportunityEditHistoryEntry, DEFAULT_CRM_SETTINGS, INITIAL_CRM_ACCOUNTS, INITIAL_CRM_CONTACTS, INITIAL_CRM_OPPORTUNITIES } from './crm/types';
 import { SolarQuotation, QuotationStatus, QuotationMasterConfig, DEFAULT_QUOTATION_MASTER_CONFIG } from './quotation/types';
 import { INITIAL_SOLAR_QUOTATIONS } from './quotation/data';
 import { MOCK_USERS, MOCK_CATEGORIES, INITIAL_TRANSACTIONS, INITIAL_LOGS, DEFAULT_APP_SETTINGS, DEFAULT_INTEGRATION_SETTINGS } from './data';
-import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc, query, orderBy, limit } from './firebase';
-import { sendEmailNotification, sendCRMEmailNotification } from './services/notificationService';
+import { db, collection, doc, getDoc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc, query, orderBy, limit, sanitizeForFirestore } from './firebase';
+import { sendEmailNotification, sendCRMEmailNotification, sendAdvanceEmailNotification } from './services/notificationService';
 import { convertExternalUrlToDataUrl, deleteFileFromCloudinary } from './services/fileAttachmentService';
 import { uploadToFirebaseStorage } from './services/firebaseStorageService';
-import { sortTransactionsByIdDesc, isAssignedManagerForTxn, isTxnSubmitter } from './utils';
+import { sortTransactionsByIdDesc, isAssignedManagerForTxn, isTxnSubmitter, getNextOutwardVoucherNumber, getNextInwardVoucherNumber, isQueryParticipant } from './utils';
 
 
 // Subcomponents
@@ -52,6 +53,7 @@ import ApprovalsView from './components/ApprovalsView';
 import QueriesView from './components/QueriesView';
 import SettingsView from './components/SettingsView';
 import AdminSettingsView, { AdminTab } from './components/AdminSettingsView';
+import CashAdvancesView from './components/CashAdvancesView';
 
 // CRM Subcomponents
 import CRMDashboardView from './components/crm/CRMDashboardView';
@@ -126,6 +128,7 @@ type NavigationTab =
   | 'CASHBOOK_DASHBOARD'
   | 'CASHBOOK_INWARD'
   | 'CASHBOOK_OUTWARD'
+  | 'CASHBOOK_ADVANCE'
   | 'CASHBOOK_APPROVALS'
   | 'CASHBOOK_QUERIES'
   | 'CASHBOOK_SETTINGS'
@@ -170,6 +173,8 @@ const getActiveTabClass = (tabId: NavigationTab) => {
       return 'bg-emerald-600 text-white shadow-md shadow-emerald-950/20';
     case 'CASHBOOK_OUTWARD':
       return 'bg-rose-600 text-white shadow-md shadow-rose-950/20';
+    case 'CASHBOOK_ADVANCE':
+      return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
     case 'CASHBOOK_APPROVALS':
       return 'bg-amber-600 text-white shadow-md shadow-amber-950/20';
     case 'CASHBOOK_QUERIES':
@@ -196,6 +201,7 @@ export default function App() {
   
   // Admin sub tab state
   const [adminSubTab, setAdminSubTab] = useState<AdminTab>('APP_SETTINGS');
+  const [autoOpenSettleAdvance, setAutoOpenSettleAdvance] = useState(false);
   
   // App States (Cash Book)
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
@@ -205,6 +211,7 @@ export default function App() {
   const [categories, setCategories] = useState<CategoryLimit[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [queries, setQueries] = useState<ExpenseQuery[]>([]);
+  const [advances, setAdvances] = useState<CashAdvance[]>([]);
   const [selectedQueryId, setSelectedQueryId] = useState<string | null>(null);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
 
@@ -456,7 +463,21 @@ export default function App() {
         }
       }, (err) => console.warn('Expense queries sync notice:', err));
 
-      unsubs = [unsubTxns, unsubCats, unsubQueries];
+      const unsubAdvances = onSnapshot(collection(db, 'advances'), (snapshot) => {
+        if (snapshot.empty) {
+          setAdvances([]);
+        } else {
+          const list: CashAdvance[] = [];
+          snapshot.forEach(d => {
+            const data = d.data() as CashAdvance;
+            list.push({ ...data, id: data.id || d.id });
+          });
+          list.sort((a, b) => new Date(b.createdAt || b.requestDate).getTime() - new Date(a.createdAt || a.requestDate).getTime());
+          setAdvances(list);
+        }
+      }, (err) => console.warn('Firestore advances sync notice:', err));
+
+      unsubs = [unsubTxns, unsubCats, unsubQueries, unsubAdvances];
     } catch (err) {
       console.error('Cash Book sync setup error:', err);
     }
@@ -963,14 +984,36 @@ export default function App() {
       actor: realApprover
     };
 
+    const isAdvSettlement = Boolean(targetTxn.advanceId) && (targetTxn.isAdvanceSettlement || targetTxn.type === 'OUT');
+    const excessAmt = targetTxn.excessReimburseAmount || 0;
+    const unspentAmt = targetTxn.unspentCashToCollect || 0;
+    const requiresCashAction = excessAmt > 0 || unspentAmt > 0;
+    const isDirectSettle = isAdvSettlement && !requiresCashAction;
+
+    const newTxnStatus: TransactionStatus = isDirectSettle ? 'PAID' : 'APPROVED';
+
     const updatedTxn: Transaction = {
       ...targetTxn,
-      status: 'APPROVED',
+      status: newTxnStatus,
       approvedAt: now,
       approverName: realApprover,
       approvedBy: realApprover,
+      paidAt: isDirectSettle ? now : targetTxn.paidAt,
+      paidBy: isDirectSettle ? realApprover : targetTxn.paidBy,
       queryStatus: targetTxn.hasQuery ? 'CLOSED' : targetTxn.queryStatus,
-      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
+      workflowHistory: isDirectSettle
+        ? [
+            ...existingWorkflowHistory,
+            newWorkflowStep,
+            {
+              id: String(Date.now() + 1),
+              timestamp: now,
+              action: 'PAID',
+              actor: realApprover,
+              reason: 'Settled directly against advance (no cash payout required)'
+            }
+          ]
+        : [...existingWorkflowHistory, newWorkflowStep]
     };
 
     // Auto-close any open queries for this transaction upon manager approval
@@ -988,19 +1031,193 @@ export default function App() {
       setDoc(doc(db, 'expense_queries', q.id), updatedQuery).catch(e => console.warn(e));
     });
 
+    // If settled directly, update category spent
+    if (isDirectSettle) {
+      const updatedCats = categories.map(cat => {
+        if (cat.name === targetTxn.category) {
+          const newSpent = cat.spent + targetTxn.amount;
+          updateDoc(doc(db, 'categories', String(cat.id)), { spent: newSpent }).catch(e => console.warn(e));
+          return { ...cat, spent: newSpent };
+        }
+        return cat;
+      });
+      setCategories(updatedCats);
+    }
+
     setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
     setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
 
-    addLog('TXN_APPROVE', `Approved petty cash request ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)} for ${updatedTxn.merchant}`);
+    // Update Advance record upon manager approval
+    if (targetTxn.advanceId && (targetTxn.isAdvanceSettlement || targetTxn.type === 'OUT')) {
+      const advIds = targetTxn.advanceId.split(',').map(s => s.trim());
+      for (const advId of advIds) {
+        const adv = advances.find(a => a.id === advId);
+        if (adv) {
+          if (isDirectSettle) {
+            const currentSettled = adv.settledAmount || 0;
+            const currentRem = adv.remainingAmount ?? (adv.amount - currentSettled);
+            const alreadyHasSettle = (adv.settlements || []).some(s => s.voucherNo === targetTxn.reference || s.amount === targetTxn.amount);
+            let finalSettled = currentSettled;
+            let finalRemaining = currentRem;
+            if (!alreadyHasSettle) {
+              const addSettle = Math.min(currentRem, targetTxn.amount);
+              finalSettled = currentSettled + addSettle;
+              finalRemaining = targetTxn.isFinalSettlement ? 0 : Math.max(0, adv.amount - finalSettled);
+            } else {
+              finalRemaining = targetTxn.isFinalSettlement ? 0 : Math.max(0, adv.remainingAmount ?? (adv.amount - finalSettled));
+            }
+            const isFully = targetTxn.isFinalSettlement || finalRemaining <= 0;
 
-    sendEmailNotification('REQUEST_APPROVED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+            const updatedAdv: CashAdvance = {
+              ...adv,
+              settledAmount: finalSettled,
+              remainingAmount: finalRemaining,
+              pendingSettlementAmount: 0,
+              pendingExcessAmount: 0,
+              status: isFully ? 'SETTLED' : 'PARTIALLY_SETTLED',
+              settledAt: isFully ? now : adv.settledAt,
+              settledBy: isFully ? realApprover : adv.settledBy,
+              updatedAt: now
+            };
+            setAdvances(prev => prev.map(a => a.id === adv.id ? updatedAdv : a));
+            setDoc(doc(db, 'advances', adv.id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+          } else {
+            const updatedAdv: CashAdvance = {
+              ...adv,
+              status: 'SETTLEMENT_PENDING',
+              updatedAt: now
+            };
+            setAdvances(prev => prev.map(a => a.id === adv.id ? updatedAdv : a));
+            setDoc(doc(db, 'advances', adv.id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+          }
+        }
+      }
+    }
+
+    if (isDirectSettle) {
+      addLog('TXN_PAY', `Approved and settled voucher #${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)} against Advance #${targetTxn.advanceId} (No cash disbursement required - cash was already issued).`);
+      sendEmailNotification('REQUEST_PAID', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+    } else {
+      addLog('TXN_APPROVE', `Approved petty cash request ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)} for ${updatedTxn.merchant}`);
+      sendEmailNotification('REQUEST_APPROVED', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+    }
   };
 
-  // Workflow Handler: Admin / Custodian Issue Cash & Mark Paid
-  const handlePayRequest = (id: string, paidBy: string) => {
+  // Advance Settlement Collection Handler: Collect unspent cash from employee upon final settlement approval
+  const handleCollectAdvanceSettlementCash = async (id: string, collectedBy: string) => {
     if (!currentUser) return;
     const targetTxn = transactions.find(t => t.id === id);
     if (!targetTxn) return;
+
+    const realCollector = resolveRealPersonName(collectedBy, currentUser.role === 'CUSTODIAN' ? 'CUSTODIAN' : 'ADMIN');
+    const now = new Date().toISOString();
+    const existingWorkflowHistory = targetTxn.workflowHistory || [];
+    const unspentAmt = targetTxn.unspentCashToCollect || 0;
+    const excessAmt = targetTxn.excessReimburseAmount || 0;
+
+    const newWorkflowStep: WorkflowHistoryEntry = {
+      id: String(Date.now()),
+      timestamp: now,
+      action: 'PAID',
+      actor: realCollector,
+      reason: excessAmt > 0
+        ? `Issued excess cash reimbursement: ${appSettings.currencySymbol}${excessAmt.toFixed(2)}`
+        : unspentAmt > 0
+        ? `Collected unspent advance cash: ${appSettings.currencySymbol}${unspentAmt.toFixed(2)}`
+        : 'Advance settlement completed'
+    };
+
+    const updatedTxn: Transaction = {
+      ...targetTxn,
+      status: 'PAID',
+      paidAt: now,
+      paidBy: realCollector,
+      unspentCashCollected: unspentAmt > 0 ? true : targetTxn.unspentCashCollected,
+      unspentCashCollectedBy: unspentAmt > 0 ? realCollector : targetTxn.unspentCashCollectedBy,
+      unspentCashCollectedAt: unspentAmt > 0 ? now : targetTxn.unspentCashCollectedAt,
+      workflowHistory: [...existingWorkflowHistory, newWorkflowStep]
+    };
+
+    // Update Category spent
+    const updatedCats = categories.map(cat => {
+      if (cat.name === targetTxn.category) {
+        const newSpent = cat.spent + targetTxn.amount;
+        updateDoc(doc(db, 'categories', String(cat.id)), { spent: newSpent }).catch(e => console.warn(e));
+        return { ...cat, spent: newSpent };
+      }
+      return cat;
+    });
+    setCategories(updatedCats);
+
+    // Update Advance record upon Admin confirming settlement / paying excess / collecting unspent
+    if (targetTxn.advanceId) {
+      const advIds = targetTxn.advanceId.split(',').map(s => s.trim());
+      for (const advId of advIds) {
+        const adv = advances.find(a => a.id === advId);
+        if (adv) {
+          const newReturnedCash = unspentAmt > 0 ? ((adv.returnedCashAmount || 0) + unspentAmt) : adv.returnedCashAmount;
+          const newReimbursedCash = excessAmt > 0 ? ((adv.reimbursedAmount || 0) + excessAmt) : adv.reimbursedAmount;
+
+          let newSettledAmount = adv.settledAmount || 0;
+          let newRemaining = adv.remainingAmount ?? (adv.amount - (adv.settledAmount || 0));
+
+          if (excessAmt > 0) {
+            newSettledAmount = adv.amount;
+            newRemaining = 0;
+          } else if (unspentAmt > 0) {
+            newSettledAmount = Math.max(0, adv.amount - unspentAmt);
+            newRemaining = 0;
+          } else {
+            const addSettle = Math.min(newRemaining, targetTxn.amount);
+            newSettledAmount = (adv.settledAmount || 0) + addSettle;
+            newRemaining = targetTxn.isFinalSettlement ? 0 : Math.max(0, adv.amount - newSettledAmount);
+          }
+
+          const isFullySettled = (excessAmt > 0) || (unspentAmt > 0 && Boolean(targetTxn.isFinalSettlement)) || Boolean(targetTxn.isFinalSettlement) || (newRemaining <= 0);
+
+          const updatedAdv: CashAdvance = {
+            ...adv,
+            settledAmount: newSettledAmount,
+            remainingAmount: newRemaining,
+            returnedCashAmount: newReturnedCash,
+            reimbursedAmount: newReimbursedCash,
+            pendingSettlementAmount: 0,
+            pendingExcessAmount: 0,
+            status: isFullySettled ? 'SETTLED' : 'PARTIALLY_SETTLED',
+            settledAt: isFullySettled ? now : adv.settledAt,
+            settledBy: isFullySettled ? realCollector : adv.settledBy,
+            updatedAt: now
+          };
+          setAdvances(prev => prev.map(a => a.id === adv.id ? updatedAdv : a));
+          await setDoc(doc(db, 'advances', adv.id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+        }
+      }
+    }
+
+    setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
+    await setDoc(doc(db, 'transactions', id), sanitizeForFirestore(updatedTxn)).catch(e => console.warn(e));
+
+    const logMsg = excessAmt > 0
+      ? `Issued ${appSettings.currencySymbol}${excessAmt.toFixed(2)} extra cash reimbursement to ${targetTxn.merchant || targetTxn.requestedBy} for advance #${targetTxn.advanceId} (Voucher #${targetTxn.reference}). Advance marked SETTLED.`
+      : unspentAmt > 0
+      ? `Collected ${appSettings.currencySymbol}${unspentAmt.toFixed(2)} unspent advance cash from ${targetTxn.merchant || targetTxn.requestedBy} for advance #${targetTxn.advanceId} (Voucher #${targetTxn.reference}). Cash on hand revised directly.`
+      : `Confirmed advance settlement for voucher #${targetTxn.reference} (Advance #${targetTxn.advanceId}).`;
+    addLog('TXN_PAY', logMsg);
+
+    sendEmailNotification('REQUEST_PAID', updatedTxn, currentUser, transactions, appSettings, undefined, integrationSettings, users);
+  };
+
+  // Workflow Handler: Admin / Custodian Issue Cash & Mark Paid
+  const handlePayRequest = async (id: string, paidBy: string) => {
+    if (!currentUser) return;
+    const targetTxn = transactions.find(t => t.id === id);
+    if (!targetTxn) return;
+
+    // If this is an advance settlement, route to advance settlement collection/completion
+    if (targetTxn.isAdvanceSettlement || Boolean(targetTxn.advanceId)) {
+      await handleCollectAdvanceSettlementCash(id, paidBy);
+      return;
+    }
 
     const realPayer = resolveRealPersonName(paidBy, currentUser.role === 'CUSTODIAN' ? 'CUSTODIAN' : 'ADMIN');
     const now = new Date().toISOString();
@@ -1067,6 +1284,32 @@ export default function App() {
 
     setTransactions(prev => prev.map(t => t.id === id ? updatedTxn : t));
     setDoc(doc(db, 'transactions', id), updatedTxn).catch(e => console.warn(e));
+
+    // If an advance settlement was rejected, revert advance status & settlement entry
+    if (targetTxn.advanceId && (targetTxn.isAdvanceSettlement || targetTxn.type === 'OUT')) {
+      const advIds = targetTxn.advanceId.split(',').map(s => s.trim());
+      for (const advId of advIds) {
+        const adv = advances.find(a => a.id === advId);
+        if (adv) {
+          const remainingSettlements = (adv.settlements || []).filter(s => s.voucherNo !== targetTxn.reference);
+          const settledTotal = remainingSettlements.reduce((sum, s) => sum + s.amount, 0);
+          const rem = Math.max(0, adv.amount - settledTotal);
+          const prevStatus: AdvanceStatus = settledTotal > 0 ? 'PARTIALLY_SETTLED' : 'DISBURSED';
+          const updatedAdv: CashAdvance = {
+            ...adv,
+            settledAmount: settledTotal,
+            remainingAmount: rem,
+            pendingSettlementAmount: 0,
+            pendingExcessAmount: 0,
+            settlements: remainingSettlements,
+            status: prevStatus,
+            updatedAt: now
+          };
+          setAdvances(prev => prev.map(a => a.id === adv.id ? updatedAdv : a));
+          setDoc(doc(db, 'advances', adv.id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+        }
+      }
+    }
 
     addLog('TXN_REJECT', `Rejected petty cash request ${updatedTxn.reference} of ${appSettings.currencySymbol}${updatedTxn.amount.toFixed(2)}: ${reason}`);
 
@@ -1195,30 +1438,39 @@ export default function App() {
 
     addLog('UPDATE_TRANSACTION', `${realSender} replied to query on voucher #${targetQuery.voucherNo}: "${messageText.slice(0, 50)}"`);
 
-    // Find linked transaction to dispatch email notification
+    // Find linked transaction or advance to dispatch email notification
     const associatedTxn = transactions.find(t => t.id === targetQuery.transactionId || t.reference === targetQuery.voucherNo);
-    const txnForEmail: Transaction = associatedTxn || {
-      id: targetQuery.transactionId,
-      date: (targetQuery.createdAt || now).split('T')[0],
-      reference: targetQuery.voucherNo,
-      type: 'OUT',
-      amount: targetQuery.amount,
-      category: targetQuery.category,
-      description: targetQuery.particulars,
-      merchant: targetQuery.requestedBy,
-      requestedBy: targetQuery.requestedBy,
-      recordedBy: targetQuery.requestedBy,
-      approverName: targetQuery.managerName,
-      status: 'PENDING_APPROVAL',
-      cashBalance: 0
-    };
+    const associatedAdv = advances.find(a => a.id === targetQuery.transactionId || a.id === targetQuery.voucherNo);
 
-    // If submitter/claimant replied, dispatch QUERY_RESPONSE email to manager
-    sendEmailNotification('QUERY_RESPONSE', txnForEmail, currentUser, transactions, appSettings, undefined, integrationSettings, users, {
-      responseBy: realSender,
-      responseMessage: messageText,
-      managerName: targetQuery.managerName
-    });
+    if (associatedAdv) {
+      sendAdvanceEmailNotification('ADVANCE_QUERY_RESPONSE', associatedAdv, currentUser, appSettings, integrationSettings, users, {
+        managerName: targetQuery.managerName,
+        queryText: messageText
+      });
+    } else {
+      const txnForEmail: Transaction = associatedTxn || {
+        id: targetQuery.transactionId,
+        date: (targetQuery.createdAt || now).split('T')[0],
+        reference: targetQuery.voucherNo,
+        type: 'OUT',
+        amount: targetQuery.amount,
+        category: targetQuery.category,
+        description: targetQuery.particulars,
+        merchant: targetQuery.requestedBy,
+        requestedBy: targetQuery.requestedBy,
+        recordedBy: targetQuery.requestedBy,
+        approverName: targetQuery.managerName,
+        status: 'PENDING_APPROVAL',
+        cashBalance: 0
+      };
+
+      // If submitter/claimant replied, dispatch QUERY_RESPONSE email to manager
+      sendEmailNotification('QUERY_RESPONSE', txnForEmail, currentUser, transactions, appSettings, undefined, integrationSettings, users, {
+        responseBy: realSender,
+        responseMessage: messageText,
+        managerName: targetQuery.managerName
+      });
+    }
   };
 
   // Workflow Handler: Close Query (Manager / Admin)
@@ -1255,6 +1507,466 @@ export default function App() {
     }
 
     addLog('UPDATE_TRANSACTION', `Closed clarification query on voucher #${targetQuery.voucherNo}: ${reason || 'Resolved'}`);
+  };
+
+  // Advance Handler: Record new Advance Request
+  const handleAddAdvance = async (advanceData: Omit<CashAdvance, 'id' | 'createdAt' | 'updatedAt' | 'settledAmount' | 'remainingAmount'>) => {
+    if (!currentUser) return;
+    const existingNums = new Set<number>();
+    advances.forEach(a => {
+      const numMatch = a.id.match(/\d+/);
+      if (numMatch) {
+        existingNums.add(parseInt(numMatch[0], 10));
+      }
+    });
+    let nextNum = 1;
+    while (existingNums.has(nextNum)) {
+      nextNum++;
+    }
+    const nextAdvId = `ADV-${String(nextNum).padStart(3, '0')}`;
+    const now = new Date().toISOString();
+    const newAdvance: CashAdvance = {
+      ...advanceData,
+      id: nextAdvId,
+      settledAmount: 0,
+      remainingAmount: advanceData.amount,
+      settlements: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    setAdvances(prev => [newAdvance, ...prev]);
+    await setDoc(doc(db, 'advances', nextAdvId), sanitizeForFirestore(newAdvance)).catch(e => console.warn(e));
+    addLog('TXN_CREATE', `User "${currentUser.fullName}" requested Cash Advance ${nextAdvId} for ${appSettings.currencySymbol}${newAdvance.amount.toFixed(2)} (${newAdvance.purpose})`);
+    sendAdvanceEmailNotification('ADVANCE_REQUEST', newAdvance, currentUser, appSettings, integrationSettings, users);
+    return newAdvance;
+  };
+
+  // Advance Handler: Step 1 Approval (Manager)
+  const handleApproveAdvance = async (id: string, approverName: string) => {
+    if (!currentUser) return;
+    const target = advances.find(a => a.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const updated: CashAdvance = {
+      ...target,
+      status: 'APPROVED',
+      approvedBy: approverName,
+      approvedAt: now,
+      queryStatus: target.hasQuery ? 'CLOSED' : target.queryStatus,
+      updatedAt: now
+    };
+
+    // Auto-close any open queries for this advance upon manager approval
+    const openQueriesForAdv = queries.filter(q => (q.transactionId === id || q.voucherNo === id) && q.status === 'OPEN');
+    openQueriesForAdv.forEach(q => {
+      const updatedQuery: ExpenseQuery = {
+        ...q,
+        status: 'CLOSED',
+        closedAt: now,
+        closedBy: approverName,
+        closeReason: 'Auto-closed upon manager approval',
+        updatedAt: now
+      };
+      setQueries(prev => prev.map(item => item.id === q.id ? updatedQuery : item));
+      setDoc(doc(db, 'expense_queries', q.id), sanitizeForFirestore(updatedQuery)).catch(e => console.warn(e));
+    });
+
+    setAdvances(prev => prev.map(a => a.id === id ? updated : a));
+    await setDoc(doc(db, 'advances', id), sanitizeForFirestore(updated)).catch(e => console.warn(e));
+    addLog('APPROVE', `${approverName} approved Cash Advance ${id} (${appSettings.currencySymbol}${target.amount.toFixed(2)}) for ${target.requestedBy}`);
+    sendAdvanceEmailNotification('ADVANCE_APPROVED', updated, currentUser, appSettings, integrationSettings, users, {
+      approvedBy: approverName
+    });
+  };
+
+  // Advance Handler: Re-Route Approval to Another Manager
+  const handleReRouteAdvance = async (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => {
+    if (!currentUser) return;
+    const targetAdv = advances.find(a => a.id === id);
+    if (!targetAdv) return;
+
+    const realRerouter = resolveRealPersonName(reRoutedBy, 'MANAGER');
+    const now = new Date().toISOString();
+
+    const updatedAdv: CashAdvance = {
+      ...targetAdv,
+      approverName: targetManagerName,
+      reRoutedBy: realRerouter,
+      reRoutedAt: now,
+      reRouteReason: reason,
+      updatedAt: now
+    };
+
+    setAdvances(prev => prev.map(a => a.id === id ? updatedAdv : a));
+    await setDoc(doc(db, 'advances', id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+
+    addLog('TXN_REROUTE', `Re-routed approval for Cash Advance ${id} (${appSettings.currencySymbol}${targetAdv.amount.toFixed(2)}) to ${targetManagerName}: ${reason}`);
+    sendAdvanceEmailNotification('ADVANCE_REROUTED', updatedAdv, currentUser, appSettings, integrationSettings, users, {
+      reRoutedBy: realRerouter,
+      reRoutedTo: targetManagerName,
+      reRouteReason: reason
+    });
+  };
+
+  // Advance Handler: Raise Clarification Query
+  const handleRaiseAdvanceQuery = async (adv: CashAdvance, initialMessage: string) => {
+    if (!currentUser) return;
+    const realManager = resolveRealPersonName(currentUser.fullName, 'MANAGER');
+    const now = new Date().toISOString();
+    const queryId = `QRY-${Date.now().toString().slice(-6)}`;
+
+    const newMsg: QueryMessage = {
+      id: `MSG-${Date.now()}`,
+      senderId: currentUser.id,
+      senderName: realManager,
+      senderEmail: currentUser.email,
+      senderRole: (currentUser.role === 'ADMIN' ? 'ADMIN' : 'MANAGER') as 'ADMIN' | 'MANAGER',
+      message: initialMessage,
+      timestamp: now
+    };
+
+    const newQuery: ExpenseQuery = {
+      id: queryId,
+      transactionId: adv.id,
+      voucherNo: adv.id,
+      amount: adv.amount,
+      particulars: adv.purpose,
+      category: adv.category || 'Advance',
+      requestedBy: adv.requestedBy,
+      managerName: realManager,
+      status: 'OPEN',
+      messages: [newMsg],
+      createdAt: now,
+      updatedAt: now
+    };
+
+    setQueries(prev => [newQuery, ...prev]);
+    await setDoc(doc(db, 'expense_queries', queryId), sanitizeForFirestore(newQuery)).catch(e => console.warn(e));
+
+    const updatedAdv: CashAdvance = {
+      ...adv,
+      queryStatus: 'OPEN',
+      hasQuery: true,
+      latestQueryId: queryId,
+      updatedAt: now
+    };
+    setAdvances(prev => prev.map(a => a.id === adv.id ? updatedAdv : a));
+    await setDoc(doc(db, 'advances', adv.id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+
+    addLog('UPDATE_TRANSACTION', `Raised clarification query for Cash Advance #${adv.id} to ${adv.requestedBy}`);
+    sendAdvanceEmailNotification('ADVANCE_QUERY', updatedAdv, currentUser, appSettings, integrationSettings, users, {
+      managerName: realManager,
+      queryText: initialMessage
+    });
+  };
+
+  // Advance Handler: Rejection
+  const handleRejectAdvance = async (id: string, reason: string, rejectedBy: string) => {
+    if (!currentUser) return;
+    const target = advances.find(a => a.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const updated: CashAdvance = {
+      ...target,
+      status: 'REJECTED',
+      rejectedBy,
+      rejectedAt: now,
+      rejectionReason: reason,
+      updatedAt: now
+    };
+    setAdvances(prev => prev.map(a => a.id === id ? updated : a));
+    await setDoc(doc(db, 'advances', id), sanitizeForFirestore(updated)).catch(e => console.warn(e));
+    addLog('TXN_REJECT', `${rejectedBy} rejected Cash Advance ${id} for reason: ${reason}`);
+    sendAdvanceEmailNotification('ADVANCE_REJECTED', updated, currentUser, appSettings, integrationSettings, users, {
+      rejectedBy,
+      rejectionReason: reason
+    });
+  };
+
+  // Advance Handler: Update / Edit
+  const handleUpdateAdvance = async (updatedAdv: CashAdvance) => {
+    if (!currentUser) return;
+    const now = new Date().toISOString();
+    const finalized = { ...updatedAdv, updatedAt: now };
+    setAdvances(prev => prev.map(a => a.id === finalized.id ? finalized : a));
+    await setDoc(doc(db, 'advances', finalized.id), sanitizeForFirestore(finalized)).catch(e => console.warn(e));
+    addLog('TXN_EDIT', `Updated Cash Advance ${finalized.id} for ${finalized.requestedBy}`);
+  };
+
+  // Advance Handler: Delete (Void vs Permanent Delete)
+  const handleDeleteAdvance = async (id: string, reason?: string, permanent: boolean = false) => {
+    if (!currentUser || currentUser.role !== 'ADMIN') return;
+    const target = advances.find(a => a.id === id);
+    if (!target) return;
+
+    if (permanent) {
+      setAdvances(prev => prev.filter(a => a.id !== id));
+      await deleteDoc(doc(db, 'advances', id)).catch(e => console.warn(e));
+
+      // Cascade delete all related expense / settlement / disbursal transactions from Expense Registry
+      const relatedTxns = transactions.filter(t => {
+        if (!t.advanceId) return false;
+        const ids = t.advanceId.split(',').map(s => s.trim());
+        return ids.includes(id) || t.advanceId === id;
+      });
+
+      if (relatedTxns.length > 0) {
+        const relatedIds = relatedTxns.map(t => t.id);
+        setTransactions(prev => prev.filter(t => !relatedIds.includes(t.id)));
+        for (const rTxn of relatedTxns) {
+          await deleteDoc(doc(db, 'transactions', rTxn.id)).catch(e => console.warn(e));
+        }
+        addLog('TXN_DELETE', `Deleted ${relatedTxns.length} related expense/settlement voucher(s) for permanently deleted advance ${id}`);
+      }
+
+      addLog('TXN_DELETE', `Permanently deleted Cash Advance ${id} (${target?.requestedBy || 'Unknown'}, ${appSettings.currencySymbol}${target.amount.toFixed(2)}). ID released to reuse.`);
+      return;
+    }
+
+    const deletionReasonStr = reason?.trim() || 'Advance cancelled / voided by admin';
+    const now = new Date().toISOString();
+    const voidedAdvance: CashAdvance = {
+      ...target,
+      status: 'VOID',
+      deletedBy: currentUser.fullName,
+      deletedAt: now,
+      deleteReason: deletionReasonStr,
+      updatedAt: now
+    };
+
+    setAdvances(prev => prev.map(a => a.id === id ? voidedAdvance : a));
+    await setDoc(doc(db, 'advances', id), sanitizeForFirestore(voidedAdvance)).catch(e => console.warn(e));
+    addLog('TXN_DELETE', `Voided Cash Advance ${id} (${target?.requestedBy || 'Unknown'}, ${appSettings.currencySymbol}${target.amount.toFixed(2)}). Reason: ${deletionReasonStr}`);
+  };
+
+  // Advance Handler: Step 2 Disbursal (Custodian / Cash Admin)
+  const handleDisburseAdvance = async (id: string, paymentType: 'CASH' | 'ONLINE', disbursedDate?: string) => {
+    if (!currentUser) return;
+    const target = advances.find(a => a.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const disburseDate = disbursedDate || now.split('T')[0];
+    const nextNum = getNextOutwardVoucherNumber(transactions);
+    const disbursalVoucherNo = String(nextNum);
+    const disbursalTxnId = `TXN-2026-${Date.now().toString().slice(-4)}`;
+
+    // Create Outward Transaction Voucher so cash book reflects the cash disbursement
+    const disbursalTxn: Transaction = {
+      id: disbursalTxnId,
+      reference: disbursalVoucherNo,
+      date: disburseDate,
+      amount: target.amount,
+      type: 'OUT',
+      category: 'Cash Advance',
+      merchant: target.requestedBy,
+      requestedBy: target.requestedBy,
+      description: `Advance disbursed: ${target.purpose}`,
+      status: 'PAID',
+      paymentType,
+      receiptName: null,
+      receiptSize: null,
+      recordedBy: currentUser.fullName,
+      approvedBy: target.approvedBy || currentUser.fullName,
+      paidBy: currentUser.fullName,
+      paidAt: now,
+      advanceId: id,
+      isAdvanceDisbursal: true,
+      workflowHistory: [
+        {
+          id: String(Date.now()),
+          timestamp: now,
+          action: 'PAID',
+          actor: currentUser.fullName,
+          target: target.requestedBy,
+          reason: `Advance disbursed (${paymentType})`
+        }
+      ]
+    };
+
+    setTransactions(prev => [disbursalTxn, ...prev]);
+    await setDoc(doc(db, 'transactions', disbursalTxnId), sanitizeForFirestore(disbursalTxn)).catch(e => console.warn(e));
+
+    // Update Advance record
+    const updatedAdv: CashAdvance = {
+      ...target,
+      status: 'DISBURSED',
+      disbursedBy: currentUser.fullName,
+      disbursedAt: now,
+      disbursalVoucherNo,
+      disbursalTransactionId: disbursalTxnId,
+      paymentType,
+      remainingAmount: target.amount,
+      settledAmount: 0,
+      updatedAt: now
+    };
+
+    setAdvances(prev => prev.map(a => a.id === id ? updatedAdv : a));
+    await setDoc(doc(db, 'advances', id), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+    addLog('PAY', `Disbursed cash advance ${id} (${appSettings.currencySymbol}${target.amount.toFixed(2)}) to ${target.requestedBy} under voucher #${disbursalVoucherNo}`);
+    sendAdvanceEmailNotification('ADVANCE_DISBURSED', updatedAdv, currentUser, appSettings, integrationSettings, users, {
+      issuedBy: currentUser.fullName
+    });
+  };
+
+  // Advance Handler: Expense Settlement
+  const handleSettleAdvance = async (
+    advanceId: string,
+    settlement: {
+      amount: number;
+      category: string;
+      particulars: string;
+      date: string;
+      receiptName?: string | null;
+      receiptUrl?: string | null;
+      isFinalSettlement?: boolean;
+      returnCashAmount?: number;
+      reimburseAmount?: number;
+      isPending?: boolean;
+    }
+  ) => {
+    if (!currentUser) return;
+    const target = advances.find(a => a.id === advanceId);
+    if (!target) return;
+    const now = new Date().toISOString();
+
+    const newSettlementEntry: AdvanceSettlementEntry = {
+      id: `SETTLE-${Date.now().toString().slice(-4)}`,
+      date: settlement.date,
+      amount: settlement.amount,
+      category: settlement.category,
+      particulars: settlement.particulars,
+      receiptName: settlement.receiptName || null,
+      receiptUrl: settlement.receiptUrl || null,
+      recordedBy: currentUser.fullName,
+      settledAt: now
+    };
+
+    const updatedSettlements = [...(target.settlements || []), newSettlementEntry];
+
+    const newSettledTotal = updatedSettlements.reduce((sum, s) => sum + s.amount, 0);
+    const newRemaining = Math.max(0, target.amount - newSettledTotal);
+    const isFullySettled = settlement.isFinalSettlement || newRemaining <= 0;
+
+    if (settlement.isPending) {
+      const updatedAdv: CashAdvance = {
+        ...target,
+        settledAmount: newSettledTotal,
+        remainingAmount: settlement.isFinalSettlement ? 0 : newRemaining,
+        status: isFullySettled ? 'SETTLEMENT_PENDING' : 'PARTIALLY_SETTLED',
+        pendingSettlementAmount: Math.min(target.remainingAmount ?? target.amount, settlement.amount),
+        pendingExcessAmount: settlement.reimburseAmount || 0,
+        settlements: updatedSettlements,
+        updatedAt: now
+      };
+      setAdvances(prev => prev.map(a => a.id === advanceId ? updatedAdv : a));
+      await setDoc(doc(db, 'advances', advanceId), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+      return;
+    }
+
+    let returnCashVoucherNo: string | undefined = target.returnedCashVoucherNo;
+    let returnCashTxnId: string | undefined = target.returnedCashTransactionId;
+
+    // If returning unspent cash to vault (Deposit / Inward)
+    if (settlement.returnCashAmount && settlement.returnCashAmount > 0) {
+      const nextInRef = getNextInwardVoucherNumber(transactions);
+      returnCashVoucherNo = nextInRef;
+      returnCashTxnId = `TXN-2026-${Date.now().toString().slice(-4)}`;
+
+      const inwardTxn: Transaction = {
+        id: returnCashTxnId,
+        reference: nextInRef,
+        date: settlement.date,
+        amount: settlement.returnCashAmount,
+        type: 'IN',
+        category: 'Cash Source',
+        merchant: target.requestedBy,
+        description: `Return of unspent cash advance: ${target.id} (${target.purpose})`,
+        status: 'APPROVED',
+        paymentType: 'CASH',
+        receiptName: null,
+        receiptSize: null,
+        recordedBy: currentUser.fullName,
+        advanceId: target.id,
+        isAdvanceReturn: true,
+        workflowHistory: [
+          {
+            id: String(Date.now()),
+            timestamp: now,
+            action: 'CREATED',
+            actor: currentUser.fullName,
+            reason: `Advance cash return (${target.id})`
+          }
+        ]
+      };
+
+      setTransactions(prev => [inwardTxn, ...prev]);
+      await setDoc(doc(db, 'transactions', returnCashTxnId), sanitizeForFirestore(inwardTxn)).catch(e => console.warn(e));
+      addLog('TXN_CREATE', `Recorded return cash deposit ${nextInRef} of ${appSettings.currencySymbol}${settlement.returnCashAmount.toFixed(2)} from ${target.requestedBy} for advance ${target.id}`);
+    }
+
+    // If reimbursing excess spent (Petty Cash Voucher for excess claim)
+    let reimbursementVoucherNo: string | undefined = target.reimbursementVoucherNo;
+    let reimbursementTxnId: string | undefined = target.reimbursementTransactionId;
+
+    if (settlement.reimburseAmount && settlement.reimburseAmount > 0) {
+      const nextOutRef = String(getNextOutwardVoucherNumber(transactions));
+      reimbursementVoucherNo = nextOutRef;
+      reimbursementTxnId = `TXN-2026-${Date.now().toString().slice(-4)}`;
+
+      const excessOutwardTxn: Transaction = {
+        id: reimbursementTxnId,
+        reference: nextOutRef,
+        date: settlement.date,
+        amount: settlement.reimburseAmount,
+        type: 'OUT',
+        category: settlement.category || 'Reimbursement',
+        merchant: target.requestedBy,
+        description: `Excess expense reimbursement for advance ${target.id}`,
+        status: 'PAID',
+        paymentType: 'CASH',
+        receiptName: null,
+        receiptSize: null,
+        recordedBy: currentUser.fullName,
+        paidBy: currentUser.fullName,
+        paidAt: now,
+        advanceId: target.id,
+        isAdvanceSettlement: true,
+        workflowHistory: [
+          {
+            id: String(Date.now()),
+            timestamp: now,
+            action: 'PAID',
+            actor: currentUser.fullName,
+            reason: `Excess reimbursement for advance ${target.id}`
+          }
+        ]
+      };
+
+      setTransactions(prev => [excessOutwardTxn, ...prev]);
+      await setDoc(doc(db, 'transactions', reimbursementTxnId), sanitizeForFirestore(excessOutwardTxn)).catch(e => console.warn(e));
+      addLog('PAY', `Reimbursed excess claim voucher #${nextOutRef} of ${appSettings.currencySymbol}${settlement.reimburseAmount.toFixed(2)} to ${target.requestedBy}`);
+    }
+
+    const updatedAdv: CashAdvance = {
+      ...target,
+      settledAmount: newSettledTotal,
+      remainingAmount: settlement.isFinalSettlement ? 0 : newRemaining,
+      settlements: updatedSettlements,
+      status: isFullySettled ? 'SETTLED' : 'PARTIALLY_SETTLED',
+      settledAt: isFullySettled ? now : target.settledAt,
+      settledBy: isFullySettled ? currentUser.fullName : target.settledBy,
+      returnedCashAmount: settlement.returnCashAmount ? ((target.returnedCashAmount || 0) + settlement.returnCashAmount) : target.returnedCashAmount,
+      returnedCashVoucherNo: returnCashVoucherNo,
+      returnedCashTransactionId: returnCashTxnId,
+      reimbursedAmount: settlement.reimburseAmount ? ((target.reimbursedAmount || 0) + settlement.reimburseAmount) : target.reimbursedAmount,
+      reimbursementVoucherNo,
+      reimbursementTransactionId: reimbursementTxnId,
+      updatedAt: now
+    };
+
+    setAdvances(prev => prev.map(a => a.id === advanceId ? updatedAdv : a));
+    await setDoc(doc(db, 'advances', advanceId), sanitizeForFirestore(updatedAdv)).catch(e => console.warn(e));
+    addLog('TXN_CREATE', `Settled ${appSettings.currencySymbol}${settlement.amount.toFixed(2)} against advance ${target.id} by ${target.requestedBy} (${isFullySettled ? 'FINAL SETTLED' : 'PARTIAL'})`);
   };
 
   // General Status Update Handler
@@ -1535,15 +2247,22 @@ export default function App() {
     }
   };
 
-  // Calculate Pending Approvals Count for Badging
+  // Calculate Pending Approvals Count for Badging (Expenses + Cash Advances)
   const pendingApprovalsCount = React.useMemo(() => {
     if (!currentUser) return 0;
-    return transactions.filter(t => {
+    const pendingExpenses = transactions.filter(t => {
       if (t.type !== 'OUT') return false;
       if (t.status !== 'PENDING') return false;
       return isAssignedManagerForTxn(t, currentUser, users);
     }).length;
-  }, [transactions, currentUser, users]);
+
+    const pendingAdvances = advances.filter(a => {
+      if (a.status !== 'PENDING_APPROVAL') return false;
+      return isAssignedManagerForTxn(a, currentUser, users);
+    }).length;
+
+    return pendingExpenses + pendingAdvances;
+  }, [transactions, advances, currentUser, users]);
 
   // Dynamic Navigation Configuration
   const isUserAdmin = currentUser?.role === 'ADMIN';
@@ -1608,17 +2327,8 @@ export default function App() {
   // Cash Book Sub Tabs
   const userOpenQueriesCount = useMemo(() => {
     if (!currentUser) return 0;
-    return queries.filter(q => {
-      if (q.status !== 'OPEN') return false;
-      if (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') return true;
-      const myName = (currentUser.fullName || '').toLowerCase();
-      const myUser = (currentUser.username || '').toLowerCase();
-      const myEmail = (currentUser.email || '').toLowerCase();
-      const myEmp = (currentUser.empId || '').toLowerCase();
-      const req = (q.requestedBy || '').toLowerCase();
-      return req === myName || req === myUser || req === myEmail || req === myEmp || (myName && req.includes(myName));
-    }).length;
-  }, [queries, currentUser]);
+    return queries.filter(q => q.status === 'OPEN' && isQueryParticipant(q, currentUser, transactions)).length;
+  }, [queries, currentUser, transactions]);
 
   const cashBookSubTabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = useMemo(() => {
     const tabs: { id: NavigationTab; label: string; icon: any; badge?: number }[] = [
@@ -1630,6 +2340,32 @@ export default function App() {
     }
 
     tabs.push({ id: 'CASHBOOK_OUTWARD', label: 'Expense', icon: ArrowUpCircle });
+
+    const activeUserAdvancesCount = advances.filter(a => {
+      if (!currentUser) return false;
+      // Only count active disbursed advances currently held by this specific user (settlement pending)
+      if (a.status === 'DISBURSED' && (a.remainingAmount === undefined || a.remainingAmount > 0)) {
+        const myName = (currentUser.fullName || '').trim().toLowerCase();
+        const myUser = (currentUser.username || '').trim().toLowerCase();
+        const myEmpId = (currentUser.empId || '').trim().toLowerCase();
+        const myEmail = (currentUser.email || '').trim().toLowerCase();
+        const req = (a.requestedBy || '').trim().toLowerCase();
+        
+        if (a.requesterEmpId && myEmpId && a.requesterEmpId.toLowerCase() === myEmpId) return true;
+        if (a.requesterEmail && myEmail && a.requesterEmail.toLowerCase() === myEmail) return true;
+        if (myName && req === myName) return true;
+        if (myUser && req === myUser) return true;
+        return false;
+      }
+      return false;
+    }).length;
+
+    tabs.push({
+      id: 'CASHBOOK_ADVANCE',
+      label: 'Advance',
+      icon: HandCoins,
+      badge: activeUserAdvancesCount > 0 ? activeUserAdvancesCount : undefined
+    });
 
     if (isManagerOrAdmin) {
       tabs.push({ 
@@ -2170,6 +2906,15 @@ export default function App() {
       setActiveTab('QUOTATION_TOOLS');
     }
     setOpenParentModule('QUOTATION');
+  };
+
+  const handleNavigateToSettleAdvance = (openSettleModal: boolean = true) => {
+    setActiveTab('CASHBOOK_ADVANCE');
+    setOpenParentModule('CASH_BOOK');
+    if (openSettleModal) {
+      setAutoOpenSettleAdvance(false);
+      setTimeout(() => setAutoOpenSettleAdvance(true), 20);
+    }
   };
 
   // Guard: Redirect to secure login
@@ -3030,6 +3775,30 @@ export default function App() {
               forceType="OUT"
               appSettings={appSettings}
               integrationSettings={integrationSettings}
+              advances={advances}
+              onSettleAdvance={handleSettleAdvance}
+              onNavigateToAdvances={handleNavigateToSettleAdvance}
+            />
+          )}
+          {activeTab === 'CASHBOOK_ADVANCE' && (
+            <CashAdvancesView 
+              advances={advances}
+              currentUser={currentUser}
+              users={users}
+              appSettings={appSettings}
+              categories={categories}
+              transactions={transactions}
+              onAddAdvance={handleAddAdvance}
+              onUpdateAdvance={handleUpdateAdvance}
+              onDeleteAdvance={handleDeleteAdvance}
+              onApproveAdvance={handleApproveAdvance}
+              onRejectAdvance={handleRejectAdvance}
+              onDisburseAdvance={handleDisburseAdvance}
+              onSettleAdvance={handleSettleAdvance}
+              onAddTransaction={handleAddTransaction}
+              integrationSettings={integrationSettings}
+              autoOpenSettleModal={autoOpenSettleAdvance}
+              onResetAutoOpenSettle={() => setAutoOpenSettleAdvance(false)}
             />
           )}
           {activeTab === 'CASHBOOK_APPROVALS' && (
@@ -3038,11 +3807,18 @@ export default function App() {
               categories={categories}
               currentUser={currentUser}
               users={users}
+              advances={advances}
               onApproveRequest={handleApproveRequest}
               onPayRequest={handlePayRequest}
               onRejectRequest={handleRejectRequest}
               onReRouteRequest={handleReRouteRequest}
               onRaiseQuery={handleRaiseQuery}
+              onApproveAdvance={handleApproveAdvance}
+              onRejectAdvance={handleRejectAdvance}
+              onDisburseAdvance={handleDisburseAdvance}
+              onReRouteAdvance={handleReRouteAdvance}
+              onRaiseAdvanceQuery={handleRaiseAdvanceQuery}
+              onCollectAdvanceSettlementCash={handleCollectAdvanceSettlementCash}
               appSettings={appSettings}
             />
           )}
@@ -3124,6 +3900,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_DASHBOARD' && <LayoutDashboard className="w-5 h-5 text-sky-600" />}
               {activeTab === 'CASHBOOK_INWARD' && <ArrowDownCircle className="w-5 h-5 text-emerald-600" />}
               {activeTab === 'CASHBOOK_OUTWARD' && <ArrowUpCircle className="w-5 h-5 text-rose-600" />}
+              {activeTab === 'CASHBOOK_ADVANCE' && <HandCoins className="w-5 h-5 text-amber-600" />}
               {activeTab === 'CASHBOOK_APPROVALS' && <CheckCircle2 className="w-5 h-5 text-amber-600" />}
               {activeTab === 'CASHBOOK_QUERIES' && <MessageSquareQuote className="w-5 h-5 text-violet-600" />}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && <Settings className="w-5 h-5 text-slate-600" />}
@@ -3150,6 +3927,7 @@ export default function App() {
                 {activeTab === 'CASHBOOK_DASHBOARD' && 'Financial Overview'}
                 {activeTab === 'CASHBOOK_INWARD' && 'Deposit Cash Registry'}
                 {activeTab === 'CASHBOOK_OUTWARD' && 'Expense Registry'}
+                {activeTab === 'CASHBOOK_ADVANCE' && 'Advance'}
                 {activeTab === 'CASHBOOK_APPROVALS' && 'Petty Cash Approvals Console'}
                 {activeTab === 'CASHBOOK_QUERIES' && 'Expense Queries & Clarifications'}
                 {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Settings & Personal Preferences'}
@@ -3184,6 +3962,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_DASHBOARD' && 'Overview of inflows, record disbursements, and monitor petty cash balances.'}
               {activeTab === 'CASHBOOK_INWARD' && 'Log and record deposits.'}
               {activeTab === 'CASHBOOK_OUTWARD' && 'Record cash disbursements and track voucher disbursements.'}
+              {activeTab === 'CASHBOOK_ADVANCE' && 'Employee cash advance requests and disbursals'}
               {activeTab === 'CASHBOOK_APPROVALS' && 'Authorize pending petty cash requests and issue disbursements.'}
               {activeTab === 'CASHBOOK_QUERIES' && 'Threaded clarification requests between managers and expense claimants.'}
               {(activeTab === 'CASHBOOK_SETTINGS' || activeTab === 'SETTINGS') && 'Manage password credentials, phone dialing defaults, and workspace preferences.'}
@@ -3326,6 +4105,7 @@ export default function App() {
               {activeTab === 'CASHBOOK_DASHBOARD' && (
                 <DashboardView 
                   transactions={transactions} 
+                  advances={advances}
                   categories={categories} 
                   currentUser={currentUser}
                   onNavigateToRegister={() => setActiveTab('CASHBOOK_OUTWARD')}
@@ -3358,6 +4138,30 @@ export default function App() {
                   forceType="OUT"
                   appSettings={appSettings}
                   integrationSettings={integrationSettings}
+                  advances={advances}
+                  onSettleAdvance={handleSettleAdvance}
+                  onNavigateToAdvances={handleNavigateToSettleAdvance}
+                />
+              )}
+              {activeTab === 'CASHBOOK_ADVANCE' && (
+                <CashAdvancesView 
+                  advances={advances}
+                  currentUser={currentUser}
+                  users={users}
+                  appSettings={appSettings}
+                  categories={categories}
+                  transactions={transactions}
+                  onAddAdvance={handleAddAdvance}
+                  onUpdateAdvance={handleUpdateAdvance}
+                  onDeleteAdvance={handleDeleteAdvance}
+                  onApproveAdvance={handleApproveAdvance}
+                  onRejectAdvance={handleRejectAdvance}
+                  onDisburseAdvance={handleDisburseAdvance}
+                  onSettleAdvance={handleSettleAdvance}
+                  onAddTransaction={handleAddTransaction}
+                  integrationSettings={integrationSettings}
+                  autoOpenSettleModal={autoOpenSettleAdvance}
+                  onResetAutoOpenSettle={() => setAutoOpenSettleAdvance(false)}
                 />
               )}
               {activeTab === 'CASHBOOK_APPROVALS' && (
@@ -3366,11 +4170,18 @@ export default function App() {
                   categories={categories}
                   currentUser={currentUser}
                   users={users}
+                  advances={advances}
                   onApproveRequest={handleApproveRequest}
                   onPayRequest={handlePayRequest}
                   onRejectRequest={handleRejectRequest}
                   onReRouteRequest={handleReRouteRequest}
                   onRaiseQuery={handleRaiseQuery}
+                  onApproveAdvance={handleApproveAdvance}
+                  onRejectAdvance={handleRejectAdvance}
+                  onDisburseAdvance={handleDisburseAdvance}
+                  onReRouteAdvance={handleReRouteAdvance}
+                  onRaiseAdvanceQuery={handleRaiseAdvanceQuery}
+                  onCollectAdvanceSettlementCash={handleCollectAdvanceSettlementCash}
                   appSettings={appSettings}
                 />
               )}

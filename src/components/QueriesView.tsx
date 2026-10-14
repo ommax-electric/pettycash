@@ -8,7 +8,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { ExpenseQuery, QueryMessage, Transaction, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
-import { openAttachmentInNewTab, isAssignedManagerForTxn, isMatchUserIdentifier } from '../utils';
+import { openAttachmentInNewTab, isAssignedManagerForTxn, isMatchUserIdentifier, isQueryParticipant } from '../utils';
 
 interface QueriesViewProps {
   queries: ExpenseQuery[];
@@ -61,10 +61,15 @@ export default function QueriesView({
     }
   }, [initialSelectedQueryId, queries]);
 
-  // Unique Payee List from Queries & associated Transactions
+  // Strict privacy: Only queries where currentUser is the claimant user or the assigned manager can be accessed
+  const accessibleQueries = useMemo(() => {
+    return queries.filter(q => isQueryParticipant(q, currentUser, transactions));
+  }, [queries, currentUser, transactions]);
+
+  // Unique Payee List from accessible Queries & associated Transactions
   const payeeOptions = useMemo(() => {
     const set = new Set<string>();
-    queries.forEach(q => {
+    accessibleQueries.forEach(q => {
       if (q.requestedBy && q.requestedBy.trim()) {
         set.add(q.requestedBy.trim());
       }
@@ -77,7 +82,7 @@ export default function QueriesView({
       }
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [queries, transactions]);
+  }, [accessibleQueries, transactions]);
 
   // Handle outside click for multi-select payee dropdown
   useEffect(() => {
@@ -106,41 +111,21 @@ export default function QueriesView({
   useEffect(() => {
     if (initialSelectedQueryId) {
       setSelectedId(initialSelectedQueryId);
-      const q = queries.find(item => item.id === initialSelectedQueryId);
+      const q = accessibleQueries.find(item => item.id === initialSelectedQueryId);
       if (q) {
         setActiveSection(q.status);
       }
     }
-  }, [initialSelectedQueryId, queries]);
+  }, [initialSelectedQueryId, accessibleQueries]);
 
   // Determine user permissions
   const isManagerOrAdmin = currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER' || (currentUser as any).isManager;
 
-  // Filter queries according to user role, section, date range, and payees
+  // Filter queries according to section, date range, and payees from accessibleQueries
   const filteredQueries = useMemo(() => {
-    return queries.filter(q => {
+    return accessibleQueries.filter(q => {
       // Status filter
       if (q.status !== activeSection) return false;
-
-      // Access control:
-      // Admins see all queries
-      // Managers see queries assigned to them or where they raised it
-      // Users see queries on their submitted claims
-      if (currentUser.role !== 'ADMIN') {
-        const isUserClaimant = isMatchUserIdentifier(q.requestedBy, currentUser.fullName) ||
-          isMatchUserIdentifier(q.requestedBy, currentUser.username) ||
-          isMatchUserIdentifier(q.requestedBy, currentUser.email) ||
-          isMatchUserIdentifier(q.requestedBy, currentUser.empId);
-
-        const isUserManager = isMatchUserIdentifier(q.managerName, currentUser.fullName) ||
-          isMatchUserIdentifier(q.managerName, currentUser.username) ||
-          isMatchUserIdentifier(q.managerName, currentUser.email) ||
-          isMatchUserIdentifier(q.managerName, currentUser.empId);
-
-        if (!isUserClaimant && !isUserManager) {
-          return false;
-        }
-      }
 
       // Date Range Filter (From Date - To Date)
       if (fromDate || toDate) {
@@ -206,34 +191,14 @@ export default function QueriesView({
     return transactions.find(t => t.id === selectedQuery.transactionId || t.reference === selectedQuery.voucherNo) || null;
   }, [transactions, selectedQuery]);
 
-  // Count stats
+  // Count stats strictly from accessible queries
   const openCount = useMemo(() => {
-    return queries.filter(q => {
-      if (q.status !== 'OPEN') return false;
-      if (currentUser.role === 'ADMIN') return true;
-      const isUserClaimant = isMatchUserIdentifier(q.requestedBy, currentUser.fullName) ||
-        isMatchUserIdentifier(q.requestedBy, currentUser.username) ||
-        isMatchUserIdentifier(q.requestedBy, currentUser.email);
-      const isUserManager = isMatchUserIdentifier(q.managerName, currentUser.fullName) ||
-        isMatchUserIdentifier(q.managerName, currentUser.username) ||
-        isMatchUserIdentifier(q.managerName, currentUser.email);
-      return isUserClaimant || isUserManager;
-    }).length;
-  }, [queries, currentUser]);
+    return accessibleQueries.filter(q => q.status === 'OPEN').length;
+  }, [accessibleQueries]);
 
   const closedCount = useMemo(() => {
-    return queries.filter(q => {
-      if (q.status !== 'CLOSED') return false;
-      if (currentUser.role === 'ADMIN') return true;
-      const isUserClaimant = isMatchUserIdentifier(q.requestedBy, currentUser.fullName) ||
-        isMatchUserIdentifier(q.requestedBy, currentUser.username) ||
-        isMatchUserIdentifier(q.requestedBy, currentUser.email);
-      const isUserManager = isMatchUserIdentifier(q.managerName, currentUser.fullName) ||
-        isMatchUserIdentifier(q.managerName, currentUser.username) ||
-        isMatchUserIdentifier(q.managerName, currentUser.email);
-      return isUserClaimant || isUserManager;
-    }).length;
-  }, [queries, currentUser]);
+    return accessibleQueries.filter(q => q.status === 'CLOSED').length;
+  }, [accessibleQueries]);
 
   // Auto scroll to latest message
   useEffect(() => {
@@ -276,7 +241,7 @@ export default function QueriesView({
   };
 
   // Check if current user can close this query:
-  // ONLY the managing approver can close. If admin submitted the expense and manager raised the query, admin CANNOT close.
+  // ONLY the managing approver of this conversation can close. Claimants, other managers, and non-participant admins cannot close.
   const canCloseSelectedQuery = useMemo(() => {
     if (!selectedQuery || selectedQuery.status === 'CLOSED') return false;
 
@@ -287,25 +252,32 @@ export default function QueriesView({
       isMatchUserIdentifier(selectedQuery.requestedBy, currentUser.empId);
 
     if (isClaimant) {
-      return false; // Submitter/claimant cannot close query (even if they are an admin)
+      return false; // Submitter/claimant cannot close query
     }
 
     // Check if current user is the manager assigned/raised for this query
     const isManagerOfQuery = isMatchUserIdentifier(selectedQuery.managerName, currentUser.fullName) ||
       isMatchUserIdentifier(selectedQuery.managerName, currentUser.username) ||
-      isMatchUserIdentifier(selectedQuery.managerName, currentUser.email);
+      isMatchUserIdentifier(selectedQuery.managerName, currentUser.email) ||
+      isMatchUserIdentifier(selectedQuery.managerName, currentUser.empId);
 
     if (isManagerOfQuery) {
       return true;
     }
 
-    // If current user is Admin (and NOT the claimant)
-    if (currentUser.role === 'ADMIN') {
+    // Check associated transaction approverName
+    const associated = transactions.find(t => t.id === selectedQuery.transactionId || (selectedQuery.voucherNo && t.reference === selectedQuery.voucherNo));
+    if (associated?.approverName && (
+      isMatchUserIdentifier(associated.approverName, currentUser.fullName) ||
+      isMatchUserIdentifier(associated.approverName, currentUser.username) ||
+      isMatchUserIdentifier(associated.approverName, currentUser.email) ||
+      isMatchUserIdentifier(associated.approverName, currentUser.empId)
+    )) {
       return true;
     }
 
-    return currentUser.role === 'MANAGER' || (currentUser as any).isManager;
-  }, [selectedQuery, currentUser]);
+    return false;
+  }, [selectedQuery, currentUser, transactions]);
 
   const handleConfirmClose = () => {
     if (!selectedQuery) return;

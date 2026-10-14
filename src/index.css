@@ -5,6 +5,10 @@
   font-family: 'Foldit', display, cursive, sans-serif;
 }
 
+.font-outfit {
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
 .font-satisfy {
   font-family: 'Satisfy', cursive;
 }

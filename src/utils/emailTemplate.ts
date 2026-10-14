@@ -104,16 +104,32 @@ export function substituteSampleTags(
 
   return templateText
     .replace(/\{voucher_id\}/g, 'VOUCHER-104')
+    .replace(/\{advance_id\}/g, 'ADV-2026-042')
     .replace(/\{amount\}/g, `${currencySymbol}3,500.00`)
     .replace(/\{paid_to\}/g, 'Rahul Sharma')
+    .replace(/\{requested_by\}/g, 'Rahul Sharma')
     .replace(/\{particulars\}/g, 'A4 printer paper & stationary')
-    .replace(/\{category\}/g, 'Office Supplies')
+    .replace(/\{purpose\}/g, 'Site electrical testing tools & local conveyance')
+    .replace(/\{category\}/g, 'Site Operations')
+    .replace(/\{project_ref\}/g, 'PRJ-BLR-089')
+    .replace(/\{request_date\}/g, '28-07-2026')
+    .replace(/\{expected_settlement_date\}/g, '10-08-2026')
     .replace(/\{remarks\}/g, 'Invoice #INV-2026-902 attached')
     .replace(/\{date\}/g, '28-07-2026')
     .replace(/\{attachment\}/g, 'YES')
     .replace(/\{balance\}/g, `${currencySymbol}12,500.00`)
     .replace(/\{changed_fields\}/g, 'Amount and Category')
     .replace(/\{updated_by\}/g, 'Anita')
+    .replace(/\{approved_by\}/g, 'Vikram Verma')
+    .replace(/\{issued_by\}/g, 'Sunil Cashier')
+    .replace(/\{rejected_by\}/g, 'Vikram Verma')
+    .replace(/\{manager_name\}/g, 'Vikram Verma')
+    .replace(/\{query_by\}/g, 'Vikram Verma')
+    .replace(/\{query_text\}/g, 'Please provide the project billing breakdown and estimated timeline')
+    .replace(/\{query_message\}/g, 'Please provide the project billing breakdown and estimated timeline')
+    .replace(/\{response_by\}/g, 'Rahul Sharma')
+    .replace(/\{response_message\}/g, 'Submitted estimated testing timeline and supplier quote for review')
+    .replace(/\{reason\}/g, 'Exceeds maximum allowable advance limit for category')
     .replace(/\{re_routed_to\}/g, 'Rajesh Sharma')
     .replace(/\{re_routed_by\}/g, 'Mohan Kumar')
     .replace(/\{re_route_reason\}/g, 'Exceeds branch limit authorization threshold');
@@ -284,6 +300,13 @@ export function buildModernHtmlEmailFromText(
     if (norm === 'REQUEST_PAID') return '✓ PAYMENT DISBURSED';
     if (norm === 'REQUEST_REJECTED') return '✕ CLAIM REJECTED';
     if (norm === 'REQUEST_REROUTED') return '🔀 ACTION REQUIRED: REQUEST RE-ROUTED';
+    if (norm === 'ADVANCE_REQUEST') return '⏳ ACTION REQUIRED: ADVANCE APPROVAL PENDING';
+    if (norm === 'ADVANCE_APPROVED') return '🕒 ACTION REQUIRED: DISBURSE CASH';
+    if (norm === 'ADVANCE_DISBURSED') return '✓ ADVANCE CASH ISSUED';
+    if (norm === 'ADVANCE_REJECTED') return '✕ ADVANCE REQUEST REJECTED';
+    if (norm === 'ADVANCE_QUERY') return '❓ CLARIFICATION NEEDED: ADVANCE QUERY';
+    if (norm === 'ADVANCE_QUERY_RESPONSE') return '💬 QUERY RESPONSE RECEIVED';
+    if (norm === 'ADVANCE_REROUTED') return '🔀 ACTION REQUIRED: ADVANCE RE-ROUTED';
     return '🔔 PETTY CASH NOTIFICATION';
   };
 
@@ -371,8 +394,12 @@ function renderTimelineHeaderHtml(title: string, typeOrStatus?: string): string 
   const normType = (typeOrStatus || '').toUpperCase();
   const normTitle = (title || '').toLowerCase();
 
-  // Deposits and deposit changes do NOT need timeline tracking
-  if (normType === 'INWARD' || normType === 'INWARD_EDIT' || normTitle.includes('deposit')) {
+  // Deposits and queries do NOT need timeline tracking
+  if (
+    normType === 'INWARD' || normType === 'INWARD_EDIT' || normTitle.includes('deposit') ||
+    normType === 'QUERY' || normType === 'QUERY_RESPONSE' || normType === 'QUERY_RAISED' ||
+    normType === 'ADVANCE_QUERY' || normType === 'ADVANCE_QUERY_RESPONSE' || normTitle.includes('query')
+  ) {
     return '';
   }
 
@@ -382,22 +409,35 @@ function renderTimelineHeaderHtml(title: string, typeOrStatus?: string): string 
   let step3State: StepState = 'pending';
   let step4State: StepState = 'pending';
 
-  if (normType === 'REQUEST_APPROVED' || normTitle.includes('approved') || normTitle.includes('issue cash')) {
+  if (
+    normType === 'REQUEST_APPROVED' || normType === 'ADVANCE_APPROVED' || 
+    normTitle.includes('approved') || normTitle.includes('issue cash')
+  ) {
     step1State = 'completed';
     step2State = 'completed';
     step3State = 'active';
     step4State = 'pending';
-  } else if (normType === 'REQUEST_PAID' || normTitle.includes('paid') || normTitle.includes('payment issued') || normTitle.includes('disbursed')) {
+  } else if (
+    normType === 'REQUEST_PAID' || normType === 'ADVANCE_DISBURSED' || 
+    normTitle.includes('paid') || normTitle.includes('payment issued') || 
+    normTitle.includes('disbursed') || normTitle.includes('cash issued')
+  ) {
     step1State = 'completed';
     step2State = 'completed';
     step3State = 'completed';
     step4State = 'completed';
-  } else if (normType === 'REQUEST_REJECTED' || normTitle.includes('rejected')) {
+  } else if (
+    normType === 'REQUEST_REJECTED' || normType === 'ADVANCE_REJECTED' || 
+    normTitle.includes('rejected')
+  ) {
     step1State = 'completed';
     step2State = 'rejected';
     step3State = 'pending';
     step4State = 'pending';
-  } else if (normType === 'REQUEST_REROUTED' || normTitle.includes('re-routed') || normTitle.includes('rerouted')) {
+  } else if (
+    normType === 'REQUEST_REROUTED' || normType === 'ADVANCE_REROUTED' || 
+    normTitle.includes('re-routed') || normTitle.includes('rerouted')
+  ) {
     step1State = 'active';
     step2State = 'pending';
     step3State = 'pending';
@@ -742,4 +782,130 @@ export function buildModernCRMEmailFromText(
 </body>
 </html>`;
 }
+
+// --- Default Advance Email Templates ---
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST = '[Cash Advance Request] {advance_id} for {amount} requested by {requested_by}';
+export const DEFAULT_EMAIL_BODY_ADVANCE_REQUEST = `Hello Manager / Approver,
+
+A new cash advance request has been submitted for your approval:
+
+Advance ID: #{advance_id}
+Requested By: {requested_by}
+Amount: {amount}
+Category: {category}
+Date: {request_date}
+Project Ref: {project_ref}
+Expected Settlement: {expected_settlement_date}
+
+Purpose:
+{purpose}
+
+Please log in to the Petty Cash Portal to review, approve, raise a query, or re-route this advance request.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED = '[Cash Advance Approved] {advance_id} for {amount} - Issue Cash';
+export const DEFAULT_EMAIL_BODY_ADVANCE_APPROVED = `Hello Cash Admin & Employee,
+
+Cash advance #{advance_id} requested by {requested_by} has been APPROVED by {approved_by} and is ready for cash disbursal:
+
+Advance ID: #{advance_id}
+Requested By: {requested_by}
+Approved By: {approved_by}
+Amount Approved: {amount}
+Category: {category}
+Date: {request_date}
+Project Ref: {project_ref}
+Expected Settlement: {expected_settlement_date}
+
+Purpose:
+{purpose}
+
+Notice to Cash Admin:
+Please prepare the funds and disburse the cash to {requested_by}. Remember to record the cash issuance in the portal.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED = '[Cash Advance Issued] Advance #{advance_id} - {amount} Disbursed';
+export const DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED = `Hello {requested_by},
+
+Your cash advance #{advance_id} for {amount} has been DISBURSED by {issued_by}:
+
+Advance ID: #{advance_id}
+Issued To: {requested_by}
+Issued By: {issued_by}
+Amount Received: {amount}
+Disbursal Date: {date}
+Expected Settlement: {expected_settlement_date}
+
+Purpose:
+{purpose}
+
+Important Reminder:
+Please retain all valid GST/tax invoices, bills, and payment receipts. You are required to submit and settle your expense claims against this advance on or before {expected_settlement_date}.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED = '[Cash Advance Rejected] Advance #{advance_id} - {amount}';
+export const DEFAULT_EMAIL_BODY_ADVANCE_REJECTED = `Hello {requested_by},
+
+Your cash advance request #{advance_id} for {amount} was REJECTED by {rejected_by}.
+
+Advance ID: #{advance_id}
+Requested By: {requested_by}
+Amount: {amount}
+Reviewed By: {rejected_by}
+Date: {date}
+
+Rejection Reason:
+{reason}
+
+If you require further clarification, please discuss directly with your reporting manager.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY = '[Cash Advance Query] Clarification Required for Advance #{advance_id} - {amount}';
+export const DEFAULT_EMAIL_BODY_ADVANCE_QUERY = `Hello {requested_by},
+
+Your reporting manager ({manager_name}) has raised a query regarding your cash advance request #{advance_id}:
+
+Advance ID: #{advance_id}
+Amount: {amount}
+Requested By: {requested_by}
+Manager: {manager_name}
+
+Query / Clarification Requested:
+{query_text}
+
+Please open the Petty Cash Advance portal to reply and provide clarification so your request can proceed.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE = '[Cash Advance Query Response] Clarification Submitted for Advance #{advance_id} - {amount}';
+export const DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE = `Hello {manager_name},
+
+{requested_by} has submitted a clarification response regarding cash advance request #{advance_id}:
+
+Advance ID: #{advance_id}
+Amount: {amount}
+Requested By: {requested_by}
+Response Date: {date}
+
+Employee Explanation:
+{query_text}
+
+Please open the Petty Cash Advance portal to review the response and take approval action.`;
+
+export const DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED = '[Cash Advance Re-Route] Approval Request #{advance_id} Re-Routed to You';
+export const DEFAULT_EMAIL_BODY_ADVANCE_REROUTED = `Hello {re_routed_to},
+
+An approval request for cash advance #{advance_id} has been re-routed to you by {re_routed_by}:
+
+Advance ID: #{advance_id}
+Requested By: {requested_by}
+Re-routed By: {re_routed_by}
+Assigned Approver: {re_routed_to}
+Amount: {amount}
+Category: {category}
+Project Ref: {project_ref}
+Expected Settlement: {expected_settlement_date}
+
+Re-Route Reason:
+{re_route_reason}
+
+Purpose:
+{purpose}
+
+Please review and approve this advance request in the Petty Cash Portal.`;
+
 

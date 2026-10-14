@@ -1,4 +1,4 @@
-import { AppSettings, User } from './types';
+import { AppSettings, User, Transaction } from './types';
 
 /**
  * Extracts standard IANA timezone identifier from AppSettings.timezone string
@@ -274,23 +274,32 @@ export const isAssignedManagerForTxn = (
     targetApprover = txn.approverName.trim();
   } else if (reqUser?.reportingTo && reqUser.reportingTo.trim().length > 0 && !isGenericRoleName(reqUser.reportingTo)) {
     targetApprover = reqUser.reportingTo.trim();
+  } else if (txn.approverName && txn.approverName.trim().length > 0) {
+    targetApprover = txn.approverName.trim();
+  } else if (reqUser?.reportingTo && reqUser.reportingTo.trim().length > 0) {
+    targetApprover = reqUser.reportingTo.trim();
   } else {
-    targetApprover = 'admin';
+    targetApprover = 'manager';
   }
 
-  // If targetApprover matches the requester themselves, fallback to admin (requester cannot approve own request)
+  // If targetApprover matches the requester themselves, requester cannot approve own request
   if (reqUser) {
     if (
       isMatchUserIdentifier(targetApprover, reqUser.username) ||
       isMatchUserIdentifier(targetApprover, reqUser.fullName) ||
       isMatchUserIdentifier(targetApprover, reqUser.email)
     ) {
-      targetApprover = 'admin';
+      return false;
     }
   }
 
-  // RULE 3: If a specific manager target is designated (and is NOT generic admin)
-  if (targetApprover && targetApprover.toLowerCase() !== 'admin' && targetApprover.toLowerCase() !== 'administrator') {
+  // RULE 3: If a specific designated manager is targeted (not generic admin or manager)
+  if (
+    targetApprover && 
+    targetApprover.toLowerCase() !== 'admin' && 
+    targetApprover.toLowerCase() !== 'administrator' &&
+    targetApprover.toLowerCase() !== 'manager'
+  ) {
     // Check direct string match with currentUser
     if (isMatchCurrent(targetApprover)) {
       return true;
@@ -312,16 +321,83 @@ export const isAssignedManagerForTxn = (
       ) {
         return true;
       }
+      // Designated to another specific manager: neither admins nor other managers can see/approve
+      return false;
     }
 
-    // Target is a specific manager (e.g., Parthiban); other non-assigned users/admins (like Moorthi) CANNOT approve
+    // Unresolved specific name: only match if direct match succeeded
     return false;
   }
 
-  // RULE 4: If targetApprover is 'admin' or unassigned:
-  // Only ADMIN role users can approve unassigned or admin-directed claims
-  if (currentUser.role === 'ADMIN') {
+  // RULE 4: If targetApprover is explicitly 'admin' or 'administrator' (e.g. requester's reporting manager is Admin)
+  if (targetApprover.toLowerCase() === 'admin' || targetApprover.toLowerCase() === 'administrator') {
+    if (currentUser.role === 'ADMIN' || isMatchCurrent('admin')) {
+      return true;
+    }
+    return false;
+  }
+
+  // RULE 5: If targetApprover is generic 'manager' or unassigned:
+  // Strictly only users with MANAGER role can see and approve. Admins cannot see pending approvals of others.
+  if (currentUser.role === 'MANAGER' || (currentUser as any).isManager) {
     return true;
+  }
+
+  return false;
+};
+
+/**
+ * Checks if the current user is a participant (either the claimant/submitter user or the assigned manager)
+ * in an expense clarification query conversation.
+ * Strict privacy: Only between the manager and user involved.
+ */
+export const isQueryParticipant = (
+  query: {
+    requestedBy?: string;
+    managerName?: string;
+    transactionId?: string;
+    voucherNo?: string;
+  },
+  currentUser?: User | null,
+  transactions: Transaction[] = []
+): boolean => {
+  if (!currentUser) return false;
+
+  const isMatchCurrent = (val?: string | null): boolean => {
+    if (!val) return false;
+    return (
+      isMatchUserIdentifier(val, currentUser.username) ||
+      isMatchUserIdentifier(val, currentUser.fullName) ||
+      isMatchUserIdentifier(val, currentUser.email) ||
+      isMatchUserIdentifier(val, currentUser.empId)
+    );
+  };
+
+  // 1. Is current user the claimant / submitter?
+  if (isMatchCurrent(query.requestedBy)) {
+    return true;
+  }
+
+  // 2. Is current user the assigned manager on the query?
+  if (isMatchCurrent(query.managerName)) {
+    return true;
+  }
+
+  // 3. Check associated transaction if available
+  const associatedTxn = transactions.find(
+    t => t.id === query.transactionId || (query.voucherNo && t.reference === query.voucherNo)
+  );
+  if (associatedTxn) {
+    if (
+      isMatchCurrent(associatedTxn.requestedBy) ||
+      isMatchCurrent(associatedTxn.recordedBy) ||
+      isMatchCurrent(associatedTxn.merchant)
+    ) {
+      return true;
+    }
+    if (isMatchCurrent(associatedTxn.approverName)) {
+      return true;
+    }
   }
 
   return false;
@@ -345,6 +421,45 @@ export const isTxnSubmitter = (
     );
   };
   return isMatchCurrent(txn.requestedBy) || isMatchCurrent(txn.recordedBy) || isMatchCurrent(txn.merchant);
+};
+
+export const getNextOutwardVoucherNumber = (txns: { type: string; reference?: string; id?: string }[], excludeId?: string): number => {
+  let maxNum = 0;
+  txns.forEach(t => {
+    if (excludeId && t.id === excludeId) return;
+    if (t.type === 'IN' || (t.reference && t.reference.toUpperCase().startsWith('IW-'))) return;
+    const refStr = (t.reference || '').trim();
+    if (refStr) {
+      const matches = refStr.match(/\d+/g);
+      if (matches) {
+        matches.forEach(m => {
+          const val = parseInt(m, 10);
+          if (val > maxNum && val < 1000) {
+            maxNum = val;
+          }
+        });
+      }
+    }
+  });
+  return maxNum + 1;
+};
+
+export const getNextInwardVoucherNumber = (txns: { type: string; reference?: string; id?: string }[], excludeId?: string): string => {
+  let maxNum = 0;
+  txns.forEach(t => {
+    if (excludeId && t.id === excludeId) return;
+    if (t.type === 'IN') {
+      const refStr = (t.reference || '').trim();
+      const numMatch = refStr.match(/\d+/);
+      if (numMatch) {
+        const val = parseInt(numMatch[0], 10);
+        if (val > maxNum) {
+          maxNum = val;
+        }
+      }
+    }
+  });
+  return `IW-${String(maxNum + 1).padStart(3, '0')}`;
 };
 
 

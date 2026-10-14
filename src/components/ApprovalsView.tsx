@@ -5,19 +5,43 @@ import {
   Eye, FileText, Check, X, Paperclip, ExternalLink, ArrowRightLeft,
   HelpCircle, MessageSquareQuote
 } from 'lucide-react';
-import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime } from '../types';
+import { Transaction, CategoryLimit, User as UserType, AppSettings, formatDateToDMY, formatISTDateTime, CashAdvance } from '../types';
 import { openAttachmentInNewTab, sortTransactionsByIdDesc, isAssignedManagerForTxn, isMatchUserIdentifier } from '../utils';
+
+export type ApprovalItemType = 'EXPENSE' | 'ADVANCE';
+
+export interface UnifiedApprovalItem {
+  id: string;
+  itemType: ApprovalItemType;
+  reference: string;
+  date: string;
+  claimant: string;
+  category: string;
+  particulars: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
+  approverTarget?: string;
+  rawTxn?: Transaction;
+  rawAdv?: CashAdvance;
+}
 
 interface ApprovalsViewProps {
   transactions: Transaction[];
   categories: CategoryLimit[];
   currentUser: UserType;
   users: UserType[];
+  advances?: CashAdvance[];
   onApproveRequest: (id: string, approverName: string) => void;
   onPayRequest: (id: string, paidBy: string) => void;
   onRejectRequest: (id: string, reason: string, rejectedBy: string) => void;
   onReRouteRequest?: (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => void;
   onRaiseQuery?: (txn: Transaction, initialMessage: string) => Promise<void> | void;
+  onApproveAdvance?: (id: string, approverName: string) => Promise<void> | void;
+  onRejectAdvance?: (id: string, reason: string, rejectedBy: string) => Promise<void> | void;
+  onDisburseAdvance?: (id: string, paymentType: 'CASH' | 'ONLINE', disbursedDate?: string) => Promise<void> | void;
+  onReRouteAdvance?: (id: string, targetManagerName: string, reason: string, reRoutedBy: string) => Promise<void> | void;
+  onRaiseAdvanceQuery?: (adv: CashAdvance, initialMessage: string) => Promise<void> | void;
+  onCollectAdvanceSettlementCash?: (txnId: string, collectorName: string) => Promise<void> | void;
   appSettings?: AppSettings;
 }
 
@@ -25,11 +49,18 @@ export default function ApprovalsView({
   transactions,
   currentUser,
   users = [],
+  advances = [],
   onApproveRequest,
   onPayRequest,
   onRejectRequest,
   onReRouteRequest,
   onRaiseQuery,
+  onApproveAdvance,
+  onRejectAdvance,
+  onDisburseAdvance,
+  onReRouteAdvance,
+  onRaiseAdvanceQuery,
+  onCollectAdvanceSettlementCash,
   appSettings
 }: ApprovalsViewProps) {
   const currencySymbol = appSettings?.currencySymbol || '₹';
@@ -76,8 +107,11 @@ export default function ApprovalsView({
     return 'Mohan';
   };
 
-  const getAssignedManagerName = (txn: Transaction) => {
-    const reqStr = (txn.requestedBy || txn.merchant || '').trim();
+  const getAssignedManagerName = (claimant: string, approverExplicit?: string) => {
+    if (approverExplicit && !isGenericRoleName(approverExplicit)) {
+      return approverExplicit;
+    }
+    const reqStr = (claimant || '').trim();
     const reqUser = users.find(u => 
       isMatchUserIdentifier(u.fullName, reqStr) ||
       isMatchUserIdentifier(u.username, reqStr) ||
@@ -87,10 +121,7 @@ export default function ApprovalsView({
     if (reqUser?.reportingTo) {
       return reqUser.reportingTo;
     }
-    if (txn.approverName && !isGenericRoleName(txn.approverName)) {
-      return txn.approverName;
-    }
-    return 'Admin';
+    return 'Manager';
   };
 
   const getEffectiveUserFullName = () => {
@@ -107,27 +138,27 @@ export default function ApprovalsView({
   const [activeTab, setActiveTab] = useState<'PENDING_APPROVAL' | 'PENDING_PAYMENT' | 'HISTORY'>('PENDING_APPROVAL');
   
   // Modals state
-  const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
-  const [rejectingTxnId, setRejectingTxnId] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<UnifiedApprovalItem | null>(null);
+  const [rejectingItem, setRejectingItem] = useState<UnifiedApprovalItem | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectError, setRejectError] = useState('');
 
-  // Re-Route Modal state
-  const [reRoutingTxn, setReRoutingTxn] = useState<Transaction | null>(null);
+  // Re-Route Modal state (Expenses & Advances)
+  const [reRoutingItem, setReRoutingItem] = useState<UnifiedApprovalItem | null>(null);
   const [targetManager, setTargetManager] = useState<string>('');
   const [reRouteReasonInput, setReRouteReasonInput] = useState<string>('');
   const [reRouteError, setReRouteError] = useState<string>('');
 
-  // Query Modal state
-  const [queryingTxn, setQueryingTxn] = useState<Transaction | null>(null);
+  // Query Modal state (Expenses & Advances)
+  const [queryingItem, setQueryingItem] = useState<UnifiedApprovalItem | null>(null);
   const [queryInputText, setQueryInputText] = useState<string>('');
   const [queryError, setQueryError] = useState<string>('');
   const [isSubmittingQuery, setIsSubmittingQuery] = useState(false);
 
   // Dynamic Confirmation Popup State
   const [confirmApprovalPopup, setConfirmApprovalPopup] = useState<{
-    type: 'APPROVE' | 'PAY';
-    txn: Transaction;
+    type: 'APPROVE' | 'PAY' | 'COLLECT' | 'COMPLETE_SETTLEMENT' | 'ISSUE_EXCESS_CASH';
+    item: UnifiedApprovalItem;
     userName: string;
     activeColorBorderClass: string;
     onConfirm: () => void;
@@ -137,16 +168,8 @@ export default function ApprovalsView({
 
   // Check user role privileges
   const isAdminOrCustodian = currentUser.role === 'ADMIN' || currentUser.role === 'CUSTODIAN';
-  const isManagerRole = currentUser.role === 'MANAGER'; // Strictly MANAGER role only (excludes ADMIN)
+  const isManagerRole = currentUser.role === 'MANAGER' || currentUser.role === 'ADMIN'; // Manager and Admin have approval and query/reroute rights
 
-  // Count items per queue
-  const pendingApprovalTxns = transactions.filter(t => 
-    t.type === 'OUT' && 
-    t.status === 'PENDING' && 
-    isAssignedManagerForTxn(t, currentUser, users)
-  );
-  const pendingPaymentTxns = transactions.filter(t => t.type === 'OUT' && t.status === 'APPROVED');
-  
   // Helper to determine if a date or timestamp string falls within the current calendar month
   const isDateInCurrentMonth = (dateStr?: string | null): boolean => {
     if (!dateStr) return false;
@@ -170,68 +193,270 @@ export default function ApprovalsView({
     return false;
   };
 
-  // Completed / History queue restricted strictly to current month to optimize display & resource overhead
-  const historyTxns = transactions.filter(t => 
-    t.type === 'OUT' && 
-    (t.status === 'PAID' || t.status === 'REJECTED') &&
-    (isDateInCurrentMonth(t.paidAt) || isDateInCurrentMonth(t.rejectedAt) || isDateInCurrentMonth(t.date))
-  );
+  // 1. Pending Approvals queue (Expenses + Advances)
+  const pendingApprovalExpenses: UnifiedApprovalItem[] = transactions
+    .filter(t => t.type === 'OUT' && t.status === 'PENDING' && isAssignedManagerForTxn(t, currentUser, users))
+    .map(t => ({
+      id: t.id,
+      itemType: 'EXPENSE',
+      reference: t.reference || t.id,
+      date: t.date,
+      claimant: t.merchant || t.requestedBy || 'Unknown',
+      category: t.category,
+      particulars: t.description || 'N/A',
+      amount: t.amount,
+      status: 'PENDING',
+      approverTarget: t.approverName,
+      rawTxn: t
+    }));
 
-  // Get current active tab list
-  const getTabTransactions = () => {
-    if (activeTab === 'PENDING_APPROVAL') return pendingApprovalTxns;
-    if (activeTab === 'PENDING_PAYMENT') return pendingPaymentTxns;
-    return historyTxns;
-  };
+  const pendingApprovalAdvances: UnifiedApprovalItem[] = advances
+    .filter(a => a.status === 'PENDING_APPROVAL' && isAssignedManagerForTxn(a, currentUser, users))
+    .map(a => ({
+      id: a.id,
+      itemType: 'ADVANCE',
+      reference: a.id,
+      date: a.requestDate || a.createdAt,
+      claimant: a.requestedBy,
+      category: a.category || 'Advance',
+      particulars: a.purpose,
+      amount: a.amount,
+      status: 'PENDING',
+      approverTarget: a.approverName,
+      rawAdv: a
+    }));
 
-  const currentList = sortTransactionsByIdDesc(getTabTransactions());
+  const pendingApprovalItems: UnifiedApprovalItem[] = [...pendingApprovalExpenses, ...pendingApprovalAdvances];
+
+  // 2. Pending Payment queue (Approved Expenses + Approved Advances ready for cash issue)
+  const pendingPaymentExpenses: UnifiedApprovalItem[] = transactions
+    .filter(t => {
+      if (t.type !== 'OUT' || t.status !== 'APPROVED') return false;
+      const isAdv = t.isAdvanceSettlement || Boolean(t.advanceId);
+      const excess = t.excessReimburseAmount || 0;
+      const unspent = t.unspentCashToCollect || 0;
+      // Advance settlement with no excess cash to disburse and no unspent cash to collect
+      // was already paid via advance cash and does not require cash admin payout
+      if (isAdv && excess <= 0 && unspent <= 0) return false;
+      return true;
+    })
+    .map(t => ({
+      id: t.id,
+      itemType: 'EXPENSE',
+      reference: t.reference || t.id,
+      date: t.date,
+      claimant: t.merchant || t.requestedBy || 'Unknown',
+      category: t.category,
+      particulars: t.description || 'N/A',
+      amount: t.amount,
+      status: 'APPROVED',
+      rawTxn: t
+    }));
+
+  const pendingPaymentAdvances: UnifiedApprovalItem[] = advances
+    .filter(a => a.status === 'APPROVED')
+    .map(a => ({
+      id: a.id,
+      itemType: 'ADVANCE',
+      reference: a.id,
+      date: a.requestDate || a.createdAt,
+      claimant: a.requestedBy,
+      category: a.category || 'Advance',
+      particulars: a.purpose,
+      amount: a.amount,
+      status: 'APPROVED',
+      rawAdv: a
+    }));
+
+  const pendingPaymentItems: UnifiedApprovalItem[] = [...pendingPaymentExpenses, ...pendingPaymentAdvances];
+
+  // 3. Completed / History queue (Current month)
+  const historyExpenses: UnifiedApprovalItem[] = transactions
+    .filter(t => 
+      t.type === 'OUT' && 
+      (t.status === 'PAID' || t.status === 'REJECTED') &&
+      (isDateInCurrentMonth(t.paidAt) || isDateInCurrentMonth(t.rejectedAt) || isDateInCurrentMonth(t.date))
+    )
+    .map(t => ({
+      id: t.id,
+      itemType: 'EXPENSE',
+      reference: t.reference || t.id,
+      date: t.date,
+      claimant: t.merchant || t.requestedBy || 'Unknown',
+      category: t.category,
+      particulars: t.description || 'N/A',
+      amount: t.amount,
+      status: t.status as 'PAID' | 'REJECTED',
+      rawTxn: t
+    }));
+
+  const historyAdvances: UnifiedApprovalItem[] = advances
+    .filter(a => 
+      (a.status === 'DISBURSED' || a.status === 'SETTLED' || a.status === 'REJECTED') &&
+      (isDateInCurrentMonth(a.disbursedAt) || isDateInCurrentMonth(a.rejectedAt) || isDateInCurrentMonth(a.requestDate))
+    )
+    .map(a => ({
+      id: a.id,
+      itemType: 'ADVANCE',
+      reference: a.id,
+      date: a.requestDate || a.createdAt,
+      claimant: a.requestedBy,
+      category: a.category || 'Advance',
+      particulars: a.purpose,
+      amount: a.amount,
+      status: a.status === 'REJECTED' ? 'REJECTED' : 'PAID',
+      rawAdv: a
+    }));
+
+  const historyItems: UnifiedApprovalItem[] = [...historyExpenses, ...historyAdvances];
+
+  // Active list sorted descending
+  const currentList = React.useMemo(() => {
+    let list: UnifiedApprovalItem[] = [];
+    if (activeTab === 'PENDING_APPROVAL') list = pendingApprovalItems;
+    else if (activeTab === 'PENDING_PAYMENT') list = pendingPaymentItems;
+    else list = historyItems;
+
+    return [...list].sort((a, b) => {
+      const d1 = new Date(b.date).getTime() || 0;
+      const d2 = new Date(a.date).getTime() || 0;
+      if (d1 !== d2) return d1 - d2;
+      return b.reference.localeCompare(a.reference);
+    });
+  }, [activeTab, pendingApprovalItems, pendingPaymentItems, historyItems]);
 
   const triggerSuccessAlert = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(''), 4000);
   };
 
-  const handleConfirmApprove = (txn: Transaction) => {
+  const handleConfirmApprove = (item: UnifiedApprovalItem) => {
     const userName = getEffectiveUserFullName();
     setConfirmApprovalPopup({
       type: 'APPROVE',
-      txn,
+      item,
       userName,
       activeColorBorderClass: 'border-amber-500',
-      onConfirm: () => {
-        onApproveRequest(txn.id, userName);
-        triggerSuccessAlert(`Voucher #${txn.reference || txn.id} successfully APPROVED! Sent for cash disbursement.`);
+      onConfirm: async () => {
+        if (item.itemType === 'ADVANCE' && item.rawAdv) {
+          if (onApproveAdvance) await onApproveAdvance(item.rawAdv.id, userName);
+          triggerSuccessAlert(`Cash Advance ${item.reference} successfully APPROVED! Ready for cash disbursal.`);
+        } else if (item.rawTxn) {
+          onApproveRequest(item.rawTxn.id, userName);
+          const isAdv = item.rawTxn.isAdvanceSettlement || Boolean(item.rawTxn.advanceId);
+          const excess = item.rawTxn.excessReimburseAmount || 0;
+          const unspent = item.rawTxn.unspentCashToCollect || 0;
+          if (isAdv && excess <= 0 && unspent <= 0) {
+            triggerSuccessAlert(`Voucher #${item.reference} APPROVED and SETTLED against Advance! No cash disbursement required.`);
+          } else {
+            triggerSuccessAlert(`Voucher #${item.reference} successfully APPROVED! Sent for cash disbursement.`);
+          }
+        }
         setConfirmApprovalPopup(null);
       }
     });
   };
 
-  const handleConfirmPay = (txn: Transaction) => {
+  const handleConfirmPay = (item: UnifiedApprovalItem) => {
     const userName = getEffectiveUserFullName();
+    const isAdvSettlement = item.itemType === 'EXPENSE' && (item.rawTxn?.isAdvanceSettlement || Boolean(item.rawTxn?.advanceId));
+    const unspentCashToCollect = item.rawTxn?.unspentCashToCollect || 0;
+    const excessReimburseAmount = item.rawTxn?.excessReimburseAmount || 0;
+
+    if (isAdvSettlement) {
+      if (excessReimburseAmount > 0) {
+        setConfirmApprovalPopup({
+          type: 'ISSUE_EXCESS_CASH',
+          item,
+          userName,
+          activeColorBorderClass: 'border-amber-600',
+          onConfirm: async () => {
+            if (onCollectAdvanceSettlementCash && item.rawTxn) {
+              await onCollectAdvanceSettlementCash(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Disbursed ${currencySymbol}${excessReimburseAmount.toFixed(2)} extra cash reimbursement to ${item.claimant} for Advance #${item.rawTxn.advanceId}! Advance settlement completed.`);
+            } else if (item.rawTxn) {
+              onPayRequest(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Advance settlement for Voucher #${item.reference} recorded with ${currencySymbol}${excessReimburseAmount.toFixed(2)} extra cash paid!`);
+            }
+            setConfirmApprovalPopup(null);
+          }
+        });
+        return;
+      } else if (unspentCashToCollect > 0) {
+        setConfirmApprovalPopup({
+          type: 'COLLECT',
+          item,
+          userName,
+          activeColorBorderClass: 'border-emerald-600',
+          onConfirm: async () => {
+            if (onCollectAdvanceSettlementCash && item.rawTxn) {
+              await onCollectAdvanceSettlementCash(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Collected ${currencySymbol}${unspentCashToCollect.toFixed(2)} unspent cash from ${item.claimant} for Advance #${item.rawTxn.advanceId}! Cash on hand revised.`);
+            } else if (item.rawTxn) {
+              onPayRequest(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Advance settlement for Voucher #${item.reference} recorded as collected!`);
+            }
+            setConfirmApprovalPopup(null);
+          }
+        });
+        return;
+      } else {
+        setConfirmApprovalPopup({
+          type: 'COMPLETE_SETTLEMENT',
+          item,
+          userName,
+          activeColorBorderClass: 'border-indigo-600',
+          onConfirm: async () => {
+            if (onCollectAdvanceSettlementCash && item.rawTxn) {
+              await onCollectAdvanceSettlementCash(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Voucher #${item.reference} settlement completed! No cash disbursed.`);
+            } else if (item.rawTxn) {
+              onPayRequest(item.rawTxn.id, userName);
+              triggerSuccessAlert(`Voucher #${item.reference} settlement completed!`);
+            }
+            setConfirmApprovalPopup(null);
+          }
+        });
+        return;
+      }
+    }
+
     setConfirmApprovalPopup({
       type: 'PAY',
-      txn,
+      item,
       userName,
       activeColorBorderClass: 'border-blue-600',
-      onConfirm: () => {
-        onPayRequest(txn.id, userName);
-        triggerSuccessAlert(`Voucher #${txn.reference || txn.id} successfully DISBURSED & MARKED AS PAID!`);
+      onConfirm: async () => {
+        if (item.itemType === 'ADVANCE' && item.rawAdv) {
+          if (onDisburseAdvance) await onDisburseAdvance(item.rawAdv.id, 'CASH');
+          triggerSuccessAlert(`Cash Advance ${item.reference} successfully DISBURSED!`);
+        } else if (item.rawTxn) {
+          onPayRequest(item.rawTxn.id, userName);
+          triggerSuccessAlert(`Voucher #${item.reference} successfully DISBURSED & MARKED AS PAID!`);
+        }
         setConfirmApprovalPopup(null);
       }
     });
   };
 
-  const handleConfirmReject = (e: React.FormEvent) => {
+  const handleConfirmReject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rejectingTxnId) return;
+    if (!rejectingItem) return;
     if (!rejectionReason.trim()) {
-      setRejectError('Please enter a reason for rejecting this petty cash claim.');
+      setRejectError(`Please enter a reason for rejecting this ${rejectingItem.itemType === 'ADVANCE' ? 'cash advance' : 'petty cash claim'}.`);
       return;
     }
 
-    onRejectRequest(rejectingTxnId, rejectionReason.trim(), getEffectiveUserFullName());
-    triggerSuccessAlert(`Petty cash claim successfully REJECTED.`);
-    setRejectingTxnId(null);
+    const userName = getEffectiveUserFullName();
+    if (rejectingItem.itemType === 'ADVANCE' && rejectingItem.rawAdv) {
+      if (onRejectAdvance) await onRejectAdvance(rejectingItem.rawAdv.id, rejectionReason.trim(), userName);
+      triggerSuccessAlert(`Cash Advance ${rejectingItem.reference} successfully REJECTED.`);
+    } else if (rejectingItem.rawTxn) {
+      onRejectRequest(rejectingItem.rawTxn.id, rejectionReason.trim(), userName);
+      triggerSuccessAlert(`Petty cash claim #${rejectingItem.reference} successfully REJECTED.`);
+    }
+
+    setRejectingItem(null);
     setRejectionReason('');
     setRejectError('');
   };
@@ -278,7 +503,7 @@ export default function ApprovalsView({
                 ? 'bg-white text-amber-600' 
                 : 'bg-amber-500 text-white'
             }`}>
-              {pendingApprovalTxns.length}
+              {pendingApprovalItems.length}
             </span>
           </button>
 
@@ -297,7 +522,7 @@ export default function ApprovalsView({
                 ? 'bg-white text-blue-600' 
                 : 'bg-blue-600 text-white'
             }`}>
-              {pendingPaymentTxns.length}
+              {pendingPaymentItems.length}
             </span>
           </button>
 
@@ -316,7 +541,7 @@ export default function ApprovalsView({
                 ? 'bg-amber-500 text-white'
                 : 'bg-slate-700 text-white'
             }`}>
-              {historyTxns.length}
+              {historyItems.length}
             </span>
           </button>
         </div>
@@ -332,18 +557,19 @@ export default function ApprovalsView({
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {activeTab === 'HISTORY'
-                ? 'There are currently no paid or rejected petty cash claims recorded for the current month.'
-                : 'There are currently no petty cash items waiting for action in this category.'}
+                ? 'There are currently no paid, disbursed, or rejected claims recorded for the current month.'
+                : 'There are currently no expense or advance items waiting for action in this category.'}
             </p>
           </div>
         ) : (
           <div>
             {/* 1. DESKTOP RESPONSIVE TABLE (MD & UP) */}
             <div className="hidden md:block rounded-xl border border-slate-200 dark:border-slate-800 overflow-x-auto bg-white dark:bg-slate-900 shadow-xs">
-              <table className="w-full min-w-[820px] text-left border-collapse">
+              <table className="w-full min-w-[850px] text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     <th className="py-3 px-2.5 sm:px-3">Voucher #</th>
+                    <th className="py-3 px-2.5 sm:px-3">Type</th>
                     <th className="py-3 px-2.5 sm:px-3">Date</th>
                     <th className="py-3 px-2.5 sm:px-3">Claimant / Paid To</th>
                     <th className="py-3 px-2.5 sm:px-3">Category</th>
@@ -354,41 +580,75 @@ export default function ApprovalsView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
-                  {currentList.map((txn) => {
-                    const isPending = txn.status === 'PENDING';
-                    const isApproved = txn.status === 'APPROVED';
-                    const isPaid = txn.status === 'PAID';
-                    const isRejected = txn.status === 'REJECTED';
+                  {currentList.map((item) => {
+                    const isPending = item.status === 'PENDING';
+                    const isApproved = item.status === 'APPROVED';
+                    const isPaid = item.status === 'PAID';
+                    const isRejected = item.status === 'REJECTED';
 
                     return (
-                      <tr key={txn.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="py-3 px-2.5 sm:px-3 font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                          #{txn.reference || txn.id}
+                          {item.itemType === 'EXPENSE' && item.rawTxn?.advanceId ? (
+                            <span>{item.rawTxn.advanceId}</span>
+                          ) : (
+                            <div>#{item.reference || item.id}</div>
+                          )}
+                        </td>
+                        <td className="py-3 px-2.5 sm:px-3 whitespace-nowrap">
+                          {item.itemType === 'ADVANCE' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                              Advance
+                            </span>
+                          ) : (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20">
+                                Expense
+                              </span>
+                              {item.rawTxn?.advanceId && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                                  Adv Settlement
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap font-medium">
-                          {formatDateToDMY(txn.date)}
+                          {formatDateToDMY(item.date)}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 font-semibold text-slate-800 dark:text-slate-200 max-w-[150px] truncate">
-                          <span className="font-bold text-slate-900 dark:text-slate-100">{txn.merchant || txn.requestedBy}</span>
+                          <span className="font-bold text-slate-900 dark:text-slate-100">{item.claimant}</span>
                           {isPending && (
                             <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-semibold truncate mt-0.5">
-                              Approver: {getAssignedManagerName(txn)}
+                              Approver: {getAssignedManagerName(item.claimant, item.approverTarget)}
                             </span>
-                          )}
-                          {!isPending && txn.requestedBy && txn.requestedBy !== txn.merchant && (
-                            <span className="block text-[10px] text-slate-400 font-normal truncate">Req: {txn.requestedBy}</span>
                           )}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 whitespace-nowrap">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                            {txn.category}
+                            {item.category}
                           </span>
                         </td>
-                        <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 max-w-[180px] truncate" title={txn.description}>
-                          {txn.description || 'N/A'}
+                        <td className="py-3 px-2.5 sm:px-3 text-slate-600 dark:text-slate-400 max-w-[200px]" title={item.particulars}>
+                          <p className="truncate">{item.particulars || 'N/A'}</p>
+                          {isApproved && item.rawTxn?.advanceId && (
+                            item.rawTxn.excessReimburseAmount && item.rawTxn.excessReimburseAmount > 0 ? (
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-300/70">
+                                Intimation: Issue {currencySymbol}{item.rawTxn.excessReimburseAmount.toFixed(2)} extra cash to employee
+                              </span>
+                            ) : item.rawTxn.unspentCashToCollect && item.rawTxn.unspentCashToCollect > 0 ? (
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300/70">
+                                Intimation: Collect {currencySymbol}{item.rawTxn.unspentCashToCollect.toFixed(2)} unspent cash
+                              </span>
+                            ) : (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                Against Advance {item.rawTxn.advanceId} • No cash issue needed
+                              </span>
+                            )
+                          )}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 text-right font-black text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                          {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {currencySymbol}{item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="py-3 px-2.5 sm:px-3 whitespace-nowrap">
                           {isPending && (
@@ -398,15 +658,34 @@ export default function ApprovalsView({
                             </span>
                           )}
                           {isApproved && (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20">
-                              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                              Approved (Unpaid)
-                            </span>
+                            item.rawTxn?.advanceId ? (
+                              item.rawTxn.excessReimburseAmount && item.rawTxn.excessReimburseAmount > 0 ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                                  <IndianRupee className="w-3 h-3 mr-1" />
+                                  Issue Extra Cash
+                                </span>
+                              ) : item.rawTxn.unspentCashToCollect && item.rawTxn.unspentCashToCollect > 0 ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                                  <Clock className="w-3 h-3 mr-1" />
+                                  Collect Unspent Cash
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                                  {item.rawTxn?.isFinalSettlement ? 'Settled (Ready to Close)' : 'Partially Settled (Approved)'}
+                                </span>
+                              )
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20">
+                                <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                                Approved (Unpaid)
+                              </span>
+                            )
                           )}
                           {isPaid && (
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
                               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                              Paid
+                              {item.itemType === 'ADVANCE' ? 'Disbursed' : 'Paid'}
                             </span>
                           )}
                           {isRejected && (
@@ -419,7 +698,7 @@ export default function ApprovalsView({
                         <td className="py-3 px-2.5 sm:px-3 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setSelectedTxn(txn)}
+                              onClick={() => setSelectedItem(item)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                               title="View Details"
                             >
@@ -430,17 +709,21 @@ export default function ApprovalsView({
                             {isPending && (
                               <>
                                 <button
-                                  onClick={() => handleConfirmApprove(txn)}
+                                  onClick={() => handleConfirmApprove(item)}
                                   className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
-                                  title="Approve Request"
+                                  title={`Approve ${item.itemType === 'ADVANCE' ? 'Advance' : 'Request'}`}
                                 >
                                   <Check className="w-4 h-4" />
                                 </button>
 
                                 <button
-                                  onClick={() => setRejectingTxnId(txn.id)}
+                                  onClick={() => {
+                                    setRejectingItem(item);
+                                    setRejectionReason('');
+                                    setRejectError('');
+                                  }}
                                   className="p-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
-                                  title="Reject Request"
+                                  title={`Reject ${item.itemType === 'ADVANCE' ? 'Advance' : 'Request'}`}
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
@@ -449,7 +732,7 @@ export default function ApprovalsView({
                                   <>
                                     <button
                                       onClick={() => {
-                                        setQueryingTxn(txn);
+                                        setQueryingItem(item);
                                         setQueryInputText('');
                                         setQueryError('');
                                       }}
@@ -461,7 +744,7 @@ export default function ApprovalsView({
 
                                     <button
                                       onClick={() => {
-                                        setReRoutingTxn(txn);
+                                        setReRoutingItem(item);
                                         setTargetManager('');
                                         setReRouteReasonInput('');
                                         setReRouteError('');
@@ -476,16 +759,59 @@ export default function ApprovalsView({
                               </>
                             )}
 
-                            {/* Payment Issue Action for Admin / Custodian */}
-                            {isApproved && isAdminOrCustodian && (
-                              <button
-                                onClick={() => handleConfirmPay(txn)}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
-                              >
-                                <IndianRupee className="w-3.5 h-3.5" />
-                                <span>Issue Cash</span>
-                              </button>
-                            )}
+                            {/* Payment Issue / Advance Collection Action for Admin / Custodian */}
+                            {isApproved && isAdminOrCustodian && (() => {
+                              const isAdv = item.itemType === 'EXPENSE' && Boolean(item.rawTxn?.advanceId);
+                              const unspent = item.rawTxn?.unspentCashToCollect || 0;
+                              const excess = item.rawTxn?.excessReimburseAmount || 0;
+
+                              if (isAdv) {
+                                if (excess > 0) {
+                                  return (
+                                    <button
+                                      onClick={() => handleConfirmPay(item)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                                      title={`Issue ${currencySymbol}${excess.toFixed(2)} extra cash reimbursement to ${item.claimant}`}
+                                    >
+                                      <IndianRupee className="w-3.5 h-3.5" />
+                                      <span>Issue Extra Cash ({currencySymbol}{excess.toLocaleString('en-IN')})</span>
+                                    </button>
+                                  );
+                                }
+                                if (unspent > 0) {
+                                  return (
+                                    <button
+                                      onClick={() => handleConfirmPay(item)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                                      title={`Collect ${currencySymbol}${unspent.toFixed(2)} unspent cash from ${item.claimant}`}
+                                    >
+                                      <IndianRupee className="w-3.5 h-3.5" />
+                                      <span>Collect Cash ({currencySymbol}{unspent.toLocaleString('en-IN')})</span>
+                                    </button>
+                                  );
+                                }
+                                return (
+                                  <button
+                                    onClick={() => handleConfirmPay(item)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                                    title={item.rawTxn?.isFinalSettlement ? "Complete advance settlement (No cash payout required)" : "Confirm partial settlement (No cash payout required)"}
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>{item.rawTxn?.isFinalSettlement ? "Complete Settlement" : "Confirm Settlement"}</span>
+                                  </button>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  onClick={() => handleConfirmPay(item)}
+                                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+                                >
+                                  <IndianRupee className="w-3.5 h-3.5" />
+                                  <span>Issue Cash</span>
+                                </button>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>
@@ -497,25 +823,40 @@ export default function ApprovalsView({
 
             {/* 2. MOBILE RESPONSIVE CARDS LAYOUT (SM & BELOW) */}
             <div className="block md:hidden space-y-3">
-              {currentList.map((txn) => {
-                const isPending = txn.status === 'PENDING';
-                const isApproved = txn.status === 'APPROVED';
-                const isPaid = txn.status === 'PAID';
-                const isRejected = txn.status === 'REJECTED';
+              {currentList.map((item) => {
+                const isPending = item.status === 'PENDING';
+                const isApproved = item.status === 'APPROVED';
+                const isPaid = item.status === 'PAID';
+                const isRejected = item.status === 'REJECTED';
 
                 return (
                   <div 
-                    key={txn.id}
+                    key={item.id}
                     className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-3"
                   >
                     {/* CARD HEADER */}
                     <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
-                          #{txn.reference || txn.id}
-                        </span>
+                        {item.itemType === 'EXPENSE' && item.rawTxn?.advanceId ? (
+                          <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                            {item.rawTxn.advanceId}
+                          </span>
+                        ) : (
+                          <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                            #{item.reference || item.id}
+                          </span>
+                        )}
+                        {item.itemType === 'ADVANCE' ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                            Advance
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20">
+                            Expense
+                          </span>
+                        )}
                         <span className="text-[11px] text-slate-500 font-medium">
-                          {formatDateToDMY(txn.date)}
+                          {formatDateToDMY(item.date)}
                         </span>
                       </div>
 
@@ -533,7 +874,7 @@ export default function ApprovalsView({
                         )}
                         {isPaid && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                            Paid
+                            {item.itemType === 'ADVANCE' ? 'Disbursed' : 'Paid'}
                           </span>
                         )}
                         {isRejected && (
@@ -548,30 +889,46 @@ export default function ApprovalsView({
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                          {txn.merchant}
+                          {item.claimant}
                         </h4>
                         <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {txn.category}
+                          {item.category}
                         </span>
                       </div>
 
                       <div className="text-right shrink-0">
                         <span className="text-lg font-black text-slate-900 dark:text-slate-100 block">
-                          {currencySymbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {currencySymbol}{item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     </div>
 
-                    {txn.description && (
+                    {item.particulars && (
                       <p className="text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg leading-relaxed">
-                        {txn.description}
+                        {item.particulars}
                       </p>
+                    )}
+
+                    {isApproved && item.rawTxn?.advanceId && (
+                      item.rawTxn.excessReimburseAmount && item.rawTxn.excessReimburseAmount > 0 ? (
+                        <div className="text-[11px] font-black text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-200 dark:border-rose-900/50 flex items-center gap-1.5">
+                          <span>⚠️ Excess Claim: Issue {currencySymbol}{item.rawTxn.excessReimburseAmount.toFixed(2)} extra cash to {item.claimant} for Advance #{item.rawTxn.advanceId}.</span>
+                        </div>
+                      ) : item.rawTxn.unspentCashToCollect && item.rawTxn.unspentCashToCollect > 0 ? (
+                        <div className="text-[11px] font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg border border-amber-200 dark:border-amber-900/50 flex items-center gap-1.5">
+                          <span>⚠️ Intimation: Collect {currencySymbol}{item.rawTxn.unspentCashToCollect.toFixed(2)} unspent cash from {item.claimant} for Advance #{item.rawTxn.advanceId}.</span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                          ℹ️ Settled against Advance #{item.rawTxn.advanceId}. No cash issue required.
+                        </div>
+                      )
                     )}
 
                     {/* CARD ACTION FOOTER */}
                     <div className="pt-2 flex items-center gap-2 border-t border-slate-100 dark:border-slate-800">
                       <button
-                        onClick={() => setSelectedTxn(txn)}
+                        onClick={() => setSelectedItem(item)}
                         className="p-2 rounded-lg text-slate-500 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 cursor-pointer"
                         title="View Details"
                       >
@@ -581,14 +938,18 @@ export default function ApprovalsView({
                       {isPending && (
                         <div className="flex items-center gap-2 w-full">
                           <button
-                            onClick={() => handleConfirmApprove(txn)}
+                            onClick={() => handleConfirmApprove(item)}
                             className="flex-1 py-2 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                             title="Approve Request"
                           >
                             <Check className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => setRejectingTxnId(txn.id)}
+                            onClick={() => {
+                              setRejectingItem(item);
+                              setRejectionReason('');
+                              setRejectError('');
+                            }}
                             className="flex-1 py-2 px-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                             title="Reject Request"
                           >
@@ -598,7 +959,7 @@ export default function ApprovalsView({
                             <>
                               <button
                                 onClick={() => {
-                                  setQueryingTxn(txn);
+                                  setQueryingItem(item);
                                   setQueryInputText('');
                                   setQueryError('');
                                 }}
@@ -609,7 +970,7 @@ export default function ApprovalsView({
                               </button>
                               <button
                                 onClick={() => {
-                                  setReRoutingTxn(txn);
+                                  setReRoutingItem(item);
                                   setTargetManager('');
                                   setReRouteReasonInput('');
                                   setReRouteError('');
@@ -624,15 +985,55 @@ export default function ApprovalsView({
                         </div>
                       )}
 
-                      {isApproved && isAdminOrCustodian && (
-                        <button
-                          onClick={() => handleConfirmPay(txn)}
-                          className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                        >
-                          <IndianRupee className="w-4 h-4" />
-                          <span>Issue Cash</span>
-                        </button>
-                      )}
+                      {isApproved && isAdminOrCustodian && (() => {
+                        const isAdv = item.itemType === 'EXPENSE' && Boolean(item.rawTxn?.advanceId);
+                        const unspent = item.rawTxn?.unspentCashToCollect || 0;
+                        const excess = item.rawTxn?.excessReimburseAmount || 0;
+
+                        if (isAdv) {
+                          if (excess > 0) {
+                            return (
+                              <button
+                                onClick={() => handleConfirmPay(item)}
+                                className="w-full py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                              >
+                                <IndianRupee className="w-4 h-4" />
+                                <span>Issue Extra Cash ({currencySymbol}{excess.toLocaleString('en-IN')})</span>
+                              </button>
+                            );
+                          }
+                          if (unspent > 0) {
+                            return (
+                              <button
+                                onClick={() => handleConfirmPay(item)}
+                                className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                              >
+                                <IndianRupee className="w-4 h-4" />
+                                <span>Collect Cash ({currencySymbol}{unspent.toLocaleString('en-IN')})</span>
+                              </button>
+                            );
+                          }
+                          return (
+                            <button
+                              onClick={() => handleConfirmPay(item)}
+                              className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                            >
+                              <Check className="w-4 h-4" />
+                              <span>Complete Settlement</span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <button
+                            onClick={() => handleConfirmPay(item)}
+                            className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <IndianRupee className="w-4 h-4" />
+                            <span>Issue Cash</span>
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
@@ -644,7 +1045,7 @@ export default function ApprovalsView({
 
       {/* Reject Reason Modal */}
       <AnimatePresence>
-        {rejectingTxnId && (
+        {rejectingItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -655,9 +1056,9 @@ export default function ApprovalsView({
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-2">
                   <XCircle className="w-5 h-5 text-red-600" />
-                  <span>Reject Petty Cash Claim</span>
+                  <span>Reject {rejectingItem.itemType === 'ADVANCE' ? 'Cash Advance' : 'Petty Cash Claim'}</span>
                 </h3>
-                <button onClick={() => setRejectingTxnId(null)} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                <button onClick={() => setRejectingItem(null)} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
                   <X className="w-5 h-5 text-slate-400" />
                 </button>
               </div>
@@ -675,7 +1076,7 @@ export default function ApprovalsView({
                   </label>
                   <textarea
                     rows={3}
-                    placeholder="Enter reason for rejecting this claim..."
+                    placeholder={`Enter reason for rejecting this ${rejectingItem.itemType === 'ADVANCE' ? 'cash advance' : 'claim'}...`}
                     value={rejectionReason}
                     onChange={(e) => setRejectionReason(e.target.value)}
                     className="w-full p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -685,7 +1086,7 @@ export default function ApprovalsView({
                 <div className="flex items-center justify-end space-x-3 pt-2">
                   <button
                     type="button"
-                    onClick={() => setRejectingTxnId(null)}
+                    onClick={() => setRejectingItem(null)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                   >
                     Cancel
@@ -703,9 +1104,9 @@ export default function ApprovalsView({
         )}
       </AnimatePresence>
 
-      {/* Voucher Details View Modal */}
+      {/* Details View Modal (Expense or Advance) */}
       <AnimatePresence>
-        {selectedTxn && (
+        {selectedItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -715,227 +1116,355 @@ export default function ApprovalsView({
             >
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div>
-                  <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">Voucher Details</p>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 font-mono">
-                    #{selectedTxn.reference || selectedTxn.id}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">
+                      {selectedItem.itemType === 'ADVANCE' ? 'Cash Advance Details' : 'Voucher Details'}
+                    </p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      selectedItem.itemType === 'ADVANCE'
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                        : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20'
+                    }`}>
+                      {selectedItem.itemType === 'ADVANCE' ? 'Advance' : 'Expense'}
+                    </span>
+                    {selectedItem.itemType === 'EXPENSE' && selectedItem.rawTxn?.advanceId && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                        This Voucher against the advance ({selectedItem.rawTxn.advanceId})
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 font-mono mt-0.5">
+                    #{selectedItem.reference || selectedItem.id}
                   </h3>
                 </div>
-                <button onClick={() => setSelectedTxn(null)} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                <button onClick={() => setSelectedItem(null)} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
                   <X className="w-5 h-5 text-slate-400" />
                 </button>
               </div>
 
-              <div className="space-y-4 my-4 text-sm">
-                <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                  <div>
-                    <span className="text-xs text-slate-400 block">Claimant / Paid To</span>
-                    <span className="font-bold text-slate-800 dark:text-slate-200">{selectedTxn.merchant}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block">Amount</span>
-                    <span className="font-black text-amber-600 dark:text-amber-400 text-base">
-                      {currencySymbol}{selectedTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block">Date</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">{formatDateToDMY(selectedTxn.date)}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block">Category</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedTxn.category}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block">Payment Mode</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      {selectedTxn.paymentType || 'CASH'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block">Project Ref. No.</span>
-                    {selectedTxn.projectRefNo && selectedTxn.projectRefNo.trim() ? (
-                      <span className="font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 px-2 py-0.5 rounded text-xs inline-block">
-                        {selectedTxn.projectRefNo.trim()}
+              {/* BODY: ADVANCE DETAILS */}
+              {selectedItem.itemType === 'ADVANCE' && (
+                <div className="space-y-4 my-4 text-sm">
+                  <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <div>
+                      <span className="text-xs text-slate-400 block">Requester / Employee</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{selectedItem.claimant}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 block">Advance Amount</span>
+                      <span className="font-black text-amber-600 dark:text-amber-400 text-base">
+                        {currencySymbol}{selectedItem.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
-                    ) : (
-                      <span className="text-xs text-slate-400 italic">None</span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-xs text-slate-400 block font-semibold mb-1">Particulars / Description</span>
-                  <p className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300 text-xs leading-relaxed border border-slate-100 dark:border-slate-800">
-                    {selectedTxn.description || 'No particulars recorded.'}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-xs text-slate-400 block font-semibold mb-1">Remarks</span>
-                  <p className={`p-3 rounded-lg text-xs border ${selectedTxn.remarks && selectedTxn.remarks.trim() ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800'}`}>
-                    {selectedTxn.remarks && selectedTxn.remarks.trim() ? selectedTxn.remarks.trim() : 'N/A'}
-                  </p>
-                </div>
-
-                {/* Attachment Section */}
-                {(selectedTxn.receiptUrl || selectedTxn.receiptName) && (
-                  <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Attachment / Receipt</span>
-                    <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center space-x-2 truncate pr-2">
-                        <Paperclip className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                          {selectedTxn.receiptName || 'Attached Receipt File'}
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 block">Date</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">{formatDateToDMY(selectedItem.date)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 block">Category</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedItem.category}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 block">Status</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{selectedItem.rawAdv?.status || selectedItem.status}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 block">Project Ref. No.</span>
+                      {selectedItem.rawAdv?.projectRefNo ? (
+                        <span className="font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 px-2 py-0.5 rounded text-xs inline-block">
+                          {selectedItem.rawAdv.projectRefNo}
                         </span>
-                      </div>
-                      {selectedTxn.receiptUrl ? (
-                        <button
-                          type="button"
-                          onClick={() => openAttachmentInNewTab(selectedTxn.receiptUrl, selectedTxn.receiptName || undefined)}
-                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center space-x-1 shrink-0 shadow-xs cursor-pointer"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>View Attachment</span>
-                        </button>
                       ) : (
-                        <span className="text-[11px] text-slate-400 italic shrink-0">Attached</span>
+                        <span className="text-xs text-slate-400 italic">None</span>
                       )}
                     </div>
                   </div>
-                )}
 
-                {/* Detailed Workflow Status Timeline */}
-                <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Workflow Status</span>
-                  <div className="space-y-2 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-500 font-medium">Requested By:</span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {selectedTxn.requestedBy || selectedTxn.recordedBy}
-                      </span>
+                  <div>
+                    <span className="text-xs text-slate-400 block font-semibold mb-1">Purpose / Particulars</span>
+                    <p className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300 text-xs leading-relaxed border border-slate-100 dark:border-slate-800">
+                      {selectedItem.particulars || 'No purpose recorded.'}
+                    </p>
+                  </div>
+
+                  {selectedItem.rawAdv?.notes && (
+                    <div>
+                      <span className="text-xs text-slate-400 block font-semibold mb-1">Notes</span>
+                      <p className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300 text-xs leading-relaxed border border-slate-100 dark:border-slate-800">
+                        {selectedItem.rawAdv.notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Advance Settlement Info if applicable */}
+                  {selectedItem.rawAdv && (selectedItem.rawAdv.status === 'DISBURSED' || selectedItem.rawAdv.status === 'SETTLED') && (
+                    <div className="bg-emerald-50 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-100 dark:border-emerald-900/40 space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Settled Amount:</span>
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                          {currencySymbol}{(selectedItem.rawAdv.settledAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Remaining Balance:</span>
+                        <span className="font-extrabold text-amber-700 dark:text-amber-400">
+                          {currencySymbol}{(selectedItem.rawAdv.remainingAmount ?? (selectedItem.rawAdv.amount - (selectedItem.rawAdv.settledAmount || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rejection reason if rejected */}
+                  {selectedItem.rawAdv?.status === 'REJECTED' && selectedItem.rawAdv.rejectedReason && (
+                    <div className="bg-red-50 dark:bg-red-950/30 p-3.5 rounded-xl border border-red-200 dark:border-red-900/40 space-y-1 text-xs">
+                      <span className="font-bold text-red-700 dark:text-red-400">Rejection Reason:</span>
+                      <p className="text-slate-700 dark:text-slate-300 italic">"{selectedItem.rawAdv.rejectedReason}"</p>
+                      {selectedItem.rawAdv.rejectedBy && (
+                        <p className="text-[11px] text-red-600 dark:text-red-400">By: {selectedItem.rawAdv.rejectedBy}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* BODY: EXPENSE VOUCHER DETAILS */}
+              {selectedItem.itemType === 'EXPENSE' && selectedItem.rawTxn && (() => {
+                const selectedTxn = selectedItem.rawTxn;
+                return (
+                  <div className="space-y-4 my-4 text-sm">
+                    {/* Advance Settlement Notice */}
+                    {selectedTxn.advanceId && (
+                      <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-extrabold flex items-center gap-1.5">
+                            📌 This Voucher is against Cash Advance #{selectedTxn.advanceId}
+                          </span>
+                          {selectedTxn.unspentCashToCollect && selectedTxn.unspentCashToCollect > 0 ? (
+                            <span className="font-black text-amber-800 dark:text-amber-200 bg-amber-200/80 dark:bg-amber-900/60 px-2 py-0.5 rounded text-xs">
+                              Unspent Cash to Collect: {currencySymbol}{selectedTxn.unspentCashToCollect.toFixed(2)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                          This voucher is submitted to settle Cash Advance #{selectedTxn.advanceId}. Cash was previously issued on this advance.
+                          {selectedTxn.unspentCashToCollect && selectedTxn.unspentCashToCollect > 0
+                            ? ` Upon final settlement approval, collect ${currencySymbol}${selectedTxn.unspentCashToCollect.toFixed(2)} unspent cash back from ${selectedTxn.merchant || selectedTxn.requestedBy}.`
+                            : ' No cash disbursal is required.'}
+                        </p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <div>
+                        <span className="text-xs text-slate-400 block">Claimant / Paid To</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{selectedTxn.merchant}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block">Amount</span>
+                        <span className="font-black text-amber-600 dark:text-amber-400 text-base">
+                          {currencySymbol}{selectedTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block">Date</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">{formatDateToDMY(selectedTxn.date)}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block">Category</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedTxn.category}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block">Payment Mode</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          {selectedTxn.paymentType || 'CASH'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-slate-400 block">Project Ref. No.</span>
+                        {selectedTxn.projectRefNo && selectedTxn.projectRefNo.trim() ? (
+                          <span className="font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 px-2 py-0.5 rounded text-xs inline-block">
+                            {selectedTxn.projectRefNo.trim()}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">None</span>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Render Re-Route History steps */}
-                    {selectedTxn.workflowHistory && selectedTxn.workflowHistory.length > 0 ? (
-                      selectedTxn.workflowHistory
-                        .filter(step => step.action === 'RE_ROUTED')
-                        .map((step, sIdx) => (
-                          <div key={step.id || sIdx} className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
-                                <ArrowRightLeft className="w-3.5 h-3.5" />
-                                <span>Re-Routed to {step.target}:</span>
-                              </span>
-                              <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
-                                {formatISTDateTime(step.timestamp)}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
-                              By: <span className="font-bold">{step.actor}</span>
-                            </div>
-                            {step.reason && (
-                              <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
-                                "{step.reason}"
-                              </div>
-                            )}
-                          </div>
-                        ))
-                    ) : (
-                      selectedTxn.reRoutedBy && (
-                        <div className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
-                              <ArrowRightLeft className="w-3.5 h-3.5" />
-                              <span>Re-Routed to {selectedTxn.approverName}:</span>
+                    <div>
+                      <span className="text-xs text-slate-400 block font-semibold mb-1">Particulars / Description</span>
+                      <p className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-700 dark:text-slate-300 text-xs leading-relaxed border border-slate-100 dark:border-slate-800">
+                        {selectedTxn.description || 'No particulars recorded.'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <span className="text-xs text-slate-400 block font-semibold mb-1">Remarks</span>
+                      <p className={`p-3 rounded-lg text-xs border ${selectedTxn.remarks && selectedTxn.remarks.trim() ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800'}`}>
+                        {selectedTxn.remarks && selectedTxn.remarks.trim() ? selectedTxn.remarks.trim() : 'N/A'}
+                      </p>
+                    </div>
+
+                    {/* Attachment Section */}
+                    {(selectedTxn.receiptUrl || selectedTxn.receiptName) && (
+                      <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Attachment / Receipt</span>
+                        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <div className="flex items-center space-x-2 truncate pr-2">
+                            <Paperclip className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                              {selectedTxn.receiptName || 'Attached Receipt File'}
                             </span>
-                            {selectedTxn.reRoutedAt && (
-                              <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
-                                {formatISTDateTime(selectedTxn.reRoutedAt)}
-                              </span>
-                            )}
                           </div>
-                          <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
-                            By: <span className="font-bold">{selectedTxn.reRoutedBy}</span>
-                          </div>
-                          {selectedTxn.reRouteReason && (
-                            <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
-                              "{selectedTxn.reRouteReason}"
-                            </div>
+                          {selectedTxn.receiptUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => openAttachmentInNewTab(selectedTxn.receiptUrl, selectedTxn.receiptName || undefined)}
+                              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center space-x-1 shrink-0 shadow-xs cursor-pointer"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>View Attachment</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic shrink-0">Attached</span>
                           )}
                         </div>
-                      )
+                      </div>
                     )}
 
-                    {(selectedTxn.approvedBy || selectedTxn.approverName || selectedTxn.approvedAt || selectedTxn.status === 'APPROVED' || selectedTxn.status === 'PAID') && (
-                      <>
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
-                          <span className="text-slate-500 font-medium">Approved By:</span>
-                          <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                            {resolveApproverName(selectedTxn)}
+                    {/* Detailed Workflow Status Timeline */}
+                    <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Workflow Status</span>
+                      <div className="space-y-2 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500 font-medium">Requested By:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                            {selectedTxn.requestedBy || selectedTxn.recordedBy}
                           </span>
                         </div>
-                        {selectedTxn.approvedAt && (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500 font-medium">Approved At:</span>
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
-                              {formatISTDateTime(selectedTxn.approvedAt)}
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    )}
 
-                    {(selectedTxn.paidBy || selectedTxn.paidAt || selectedTxn.status === 'PAID') && (
-                      <>
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
-                          <span className="text-slate-500 font-medium">Issued / Paid By:</span>
-                          <span className="font-bold text-blue-600 dark:text-blue-400">
-                            {resolvePayerName(selectedTxn)}
-                          </span>
-                        </div>
-                        {selectedTxn.paidAt && (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500 font-medium">Issued / Paid At:</span>
-                            <span className="font-semibold text-blue-600 dark:text-blue-400 font-mono">
-                              {formatISTDateTime(selectedTxn.paidAt)}
-                            </span>
-                          </div>
+                        {selectedTxn.workflowHistory && selectedTxn.workflowHistory.length > 0 ? (
+                          selectedTxn.workflowHistory
+                            .filter(step => step.action === 'RE_ROUTED')
+                            .map((step, sIdx) => (
+                              <div key={step.id || sIdx} className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                                    <span>Re-Routed to {step.target}:</span>
+                                  </span>
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
+                                    {formatISTDateTime(step.timestamp)}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
+                                  By: <span className="font-bold">{step.actor}</span>
+                                </div>
+                                {step.reason && (
+                                  <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
+                                    "{step.reason}"
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                        ) : (
+                          selectedTxn.reRoutedBy && (
+                            <div className="pt-1.5 border-t border-slate-200/50 dark:border-slate-700/50 space-y-1">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                                  <span>Re-Routed to {selectedTxn.approverName}:</span>
+                                </span>
+                                {selectedTxn.reRoutedAt && (
+                                  <span className="font-semibold text-amber-600 dark:text-amber-400 font-mono text-[10px]">
+                                    {formatISTDateTime(selectedTxn.reRoutedAt)}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium pl-4">
+                                By: <span className="font-bold">{selectedTxn.reRoutedBy}</span>
+                              </div>
+                              {selectedTxn.reRouteReason && (
+                                <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 italic ml-4">
+                                  "{selectedTxn.reRouteReason}"
+                                </div>
+                              )}
+                            </div>
+                          )
                         )}
-                      </>
-                    )}
 
-                    {(selectedTxn.rejectedBy || selectedTxn.rejectedAt || selectedTxn.status === 'REJECTED') && (
-                      <>
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
-                          <span className="text-slate-500 font-medium">Rejected By:</span>
-                          <span className="font-bold text-red-600 dark:text-red-400">
-                            {resolveRejecterName(selectedTxn)}
-                          </span>
-                        </div>
-                        {selectedTxn.rejectedAt && (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500 font-medium">Rejected At:</span>
-                            <span className="font-semibold text-red-600 dark:text-red-400 font-mono">
-                              {formatISTDateTime(selectedTxn.rejectedAt)}
-                            </span>
-                          </div>
+                        {(selectedTxn.approvedBy || selectedTxn.approverName || selectedTxn.approvedAt || selectedTxn.status === 'APPROVED' || selectedTxn.status === 'PAID') && (
+                          <>
+                            <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
+                              <span className="text-slate-500 font-medium">Approved By:</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                {resolveApproverName(selectedTxn)}
+                              </span>
+                            </div>
+                            {selectedTxn.approvedAt && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-500 font-medium">Approved At:</span>
+                                <span className="font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+                                  {formatISTDateTime(selectedTxn.approvedAt)}
+                                </span>
+                              </div>
+                            )}
+                          </>
                         )}
-                      </>
-                    )}
+
+                        {(selectedTxn.paidBy || selectedTxn.paidAt || selectedTxn.status === 'PAID') && (
+                          <>
+                            <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
+                              <span className="text-slate-500 font-medium">Issued / Paid By:</span>
+                              <span className="font-bold text-blue-600 dark:text-blue-400">
+                                {resolvePayerName(selectedTxn)}
+                              </span>
+                            </div>
+                            {selectedTxn.paidAt && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-500 font-medium">Issued / Paid At:</span>
+                                <span className="font-semibold text-blue-600 dark:text-blue-400 font-mono">
+                                  {formatISTDateTime(selectedTxn.paidAt)}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {(selectedTxn.rejectedBy || selectedTxn.rejectedAt || selectedTxn.status === 'REJECTED') && (
+                          <>
+                            <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
+                              <span className="text-slate-500 font-medium">Rejected By:</span>
+                              <span className="font-bold text-red-600 dark:text-red-400">
+                                {resolveRejecterName(selectedTxn)}
+                              </span>
+                            </div>
+                            {selectedTxn.rejectedAt && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-500 font-medium">Rejected At:</span>
+                                <span className="font-semibold text-red-600 dark:text-red-400 font-mono">
+                                  {formatISTDateTime(selectedTxn.rejectedAt)}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
 
+              {/* ACTION FOOTER OF DETAILS MODAL */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-2">
-                  {selectedTxn.status === 'PENDING' && isAssignedManagerForTxn(selectedTxn, currentUser, users) && (
+                  {selectedItem.status === 'PENDING' && (
                     <>
                       <button
                         type="button"
                         onClick={() => {
-                          const t = selectedTxn;
-                          setSelectedTxn(null);
-                          handleConfirmApprove(t);
+                          const item = selectedItem;
+                          setSelectedItem(null);
+                          handleConfirmApprove(item);
                         }}
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
                       >
@@ -945,9 +1474,11 @@ export default function ApprovalsView({
                       <button
                         type="button"
                         onClick={() => {
-                          const id = selectedTxn.id;
-                          setSelectedTxn(null);
-                          setRejectingTxnId(id);
+                          const item = selectedItem;
+                          setSelectedItem(null);
+                          setRejectingItem(item);
+                          setRejectionReason('');
+                          setRejectError('');
                         }}
                         className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
                       >
@@ -959,9 +1490,9 @@ export default function ApprovalsView({
                           <button
                             type="button"
                             onClick={() => {
-                              const t = selectedTxn;
-                              setSelectedTxn(null);
-                              setQueryingTxn(t);
+                              const itm = selectedItem;
+                              setSelectedItem(null);
+                              setQueryingItem(itm);
                               setQueryInputText('');
                               setQueryError('');
                             }}
@@ -974,9 +1505,9 @@ export default function ApprovalsView({
                           <button
                             type="button"
                             onClick={() => {
-                              const t = selectedTxn;
-                              setSelectedTxn(null);
-                              setReRoutingTxn(t);
+                              const itm = selectedItem;
+                              setSelectedItem(null);
+                              setReRoutingItem(itm);
                               setTargetManager('');
                               setReRouteReasonInput('');
                               setReRouteError('');
@@ -991,23 +1522,78 @@ export default function ApprovalsView({
                       )}
                     </>
                   )}
-                  {selectedTxn.status === 'APPROVED' && isAdminOrCustodian && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const t = selectedTxn;
-                        setSelectedTxn(null);
-                        handleConfirmPay(t);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
-                    >
-                      <IndianRupee className="w-3.5 h-3.5" />
-                      <span>Issue Cash</span>
-                    </button>
-                  )}
+                  {selectedItem.status === 'APPROVED' && isAdminOrCustodian && (() => {
+                    const isAdv = selectedItem.itemType === 'EXPENSE' && Boolean(selectedItem.rawTxn?.advanceId);
+                    const unspent = selectedItem.rawTxn?.unspentCashToCollect || 0;
+                    const excess = selectedItem.rawTxn?.excessReimburseAmount || 0;
+
+                    if (isAdv) {
+                      if (excess > 0) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const item = selectedItem;
+                              setSelectedItem(null);
+                              handleConfirmPay(item);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <IndianRupee className="w-3.5 h-3.5" />
+                            <span>Issue Extra Cash ({currencySymbol}{excess.toLocaleString('en-IN')})</span>
+                          </button>
+                        );
+                      }
+                      if (unspent > 0) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const item = selectedItem;
+                              setSelectedItem(null);
+                              handleConfirmPay(item);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <IndianRupee className="w-3.5 h-3.5" />
+                            <span>Collect Cash ({currencySymbol}{unspent.toLocaleString('en-IN')})</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const item = selectedItem;
+                            setSelectedItem(null);
+                            handleConfirmPay(item);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Complete Settlement</span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const item = selectedItem;
+                          setSelectedItem(null);
+                          handleConfirmPay(item);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <IndianRupee className="w-3.5 h-3.5" />
+                        <span>Issue Cash</span>
+                      </button>
+                    );
+                  })()}
                 </div>
                 <button
-                  onClick={() => setSelectedTxn(null)}
+                  onClick={() => setSelectedItem(null)}
                   className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                 >
                   Close
@@ -1018,7 +1604,7 @@ export default function ApprovalsView({
         )}
       </AnimatePresence>
 
-      {/* Dynamic Confirmation Popup for Approvals / Cash Issue */}
+      {/* Dynamic Confirmation Popup for Approvals / Cash Issue / Cash Collection */}
       <AnimatePresence>
         {confirmApprovalPopup && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
@@ -1032,7 +1618,15 @@ export default function ApprovalsView({
                 <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-slate-500" />
                   <span>
-                    {confirmApprovalPopup.type === 'APPROVE' ? 'Confirm Approval' : 'Confirm Cash Disbursement'}
+                    {confirmApprovalPopup.type === 'APPROVE' 
+                      ? `Confirm Approval (${confirmApprovalPopup.item.itemType === 'ADVANCE' ? 'Cash Advance' : 'Expense Claim'})` 
+                      : confirmApprovalPopup.type === 'ISSUE_EXCESS_CASH'
+                      ? `Confirm Extra Cash Payout (${confirmApprovalPopup.item.rawTxn?.advanceId || 'Advance Settlement'})`
+                      : confirmApprovalPopup.type === 'COLLECT'
+                      ? `Confirm Cash Collection (${confirmApprovalPopup.item.rawTxn?.advanceId})`
+                      : confirmApprovalPopup.type === 'COMPLETE_SETTLEMENT'
+                      ? `Confirm Settlement Completion (${confirmApprovalPopup.item.rawTxn?.advanceId})`
+                      : `Confirm Cash Disbursement (${confirmApprovalPopup.item.itemType === 'ADVANCE' ? 'Cash Advance' : 'Expense Claim'})`}
                   </span>
                 </h3>
                 <button
@@ -1047,17 +1641,49 @@ export default function ApprovalsView({
               <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed py-1">
                 {confirmApprovalPopup.type === 'APPROVE' ? (
                   <>
-                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to approve Voucher{' '}
-                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> for{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> requested by{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.txn.requestedBy || confirmApprovalPopup.txn.merchant || 'User'}</strong> for{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.txn.category}</strong>.
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to approve {confirmApprovalPopup.item.itemType === 'ADVANCE' ? 'Cash Advance' : 'Voucher'}{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.item.reference || confirmApprovalPopup.item.id}</strong> for{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.item.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> requested by{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.item.claimant || 'User'}</strong> for{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.item.category}</strong>.
+                    {confirmApprovalPopup.item.rawTxn?.advanceId && (
+                      <p className="mt-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 text-[11px]">
+                        Note: This expense settles Advance {confirmApprovalPopup.item.rawTxn.advanceId}.
+                      </p>
+                    )}
+                  </>
+                ) : confirmApprovalPopup.type === 'ISSUE_EXCESS_CASH' ? (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to issue extra cash reimbursement of{' '}
+                    <strong className="font-extrabold text-amber-700 dark:text-amber-400">{currencySymbol}{(confirmApprovalPopup.item.rawTxn?.excessReimburseAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> to{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.item.claimant || 'Employee'}</strong> for Advance{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">{confirmApprovalPopup.item.rawTxn?.advanceId}</strong>.
+                    <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border border-amber-200 text-[11px] leading-relaxed">
+                      Expense Voucher #{confirmApprovalPopup.item.reference} is for <strong>{currencySymbol}{confirmApprovalPopup.item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>, exceeding the advance amount. Please hand over <strong>{currencySymbol}{(confirmApprovalPopup.item.rawTxn?.excessReimburseAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> extra cash to complete settlement.
+                    </div>
+                  </>
+                ) : confirmApprovalPopup.type === 'COLLECT' ? (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to confirm physical collection of{' '}
+                    <strong className="font-extrabold text-emerald-700 dark:text-emerald-400">{currencySymbol}{(confirmApprovalPopup.item.rawTxn?.unspentCashToCollect || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> unspent cash from{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.item.claimant || 'Employee'}</strong> for Advance{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">{confirmApprovalPopup.item.rawTxn?.advanceId}</strong>.
+                  </>
+                ) : confirmApprovalPopup.type === 'COMPLETE_SETTLEMENT' ? (
+                  <>
+                    Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to complete and close settlement for Voucher{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.item.reference || confirmApprovalPopup.item.id}</strong> of{' '}
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.item.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> against Advance{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">{confirmApprovalPopup.item.rawTxn?.advanceId}</strong>.
+                    <div className="mt-2 p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300 border border-indigo-200 text-[11px] leading-relaxed">
+                      ✓ Cash was already disbursed when the advance was issued. No further cash will be paid out.
+                    </div>
                   </>
                 ) : (
                   <>
                     Hi <strong className="font-extrabold text-slate-900 dark:text-white">{confirmApprovalPopup.userName}</strong>, you are about to issue cash of{' '}
-                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for Voucher{' '}
-                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.txn.reference || confirmApprovalPopup.txn.id}</strong> ({confirmApprovalPopup.txn.category}).
+                    <strong className="font-extrabold text-slate-900 dark:text-white">{currencySymbol}{confirmApprovalPopup.item.amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong> for {confirmApprovalPopup.item.itemType === 'ADVANCE' ? 'Cash Advance' : 'Voucher'}{' '}
+                    <strong className="font-mono font-bold text-slate-900 dark:text-white">#{confirmApprovalPopup.item.reference || confirmApprovalPopup.item.id}</strong> ({confirmApprovalPopup.item.category}).
                   </>
                 )}
               </div>
@@ -1073,9 +1699,25 @@ export default function ApprovalsView({
                 <button
                   type="button"
                   onClick={() => confirmApprovalPopup.onConfirm()}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer"
+                  className={`px-4 py-2 text-white font-bold rounded-xl text-xs transition-colors shadow-xs cursor-pointer ${
+                    confirmApprovalPopup.type === 'ISSUE_EXCESS_CASH'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : confirmApprovalPopup.type === 'COLLECT'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : confirmApprovalPopup.type === 'COMPLETE_SETTLEMENT'
+                      ? 'bg-indigo-600 hover:bg-indigo-700'
+                      : 'bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900'
+                  }`}
                 >
-                  {confirmApprovalPopup.type === 'APPROVE' ? 'Submit & Confirm' : 'Confirm Cash Issue'}
+                  {confirmApprovalPopup.type === 'APPROVE' 
+                    ? 'Submit & Confirm' 
+                    : confirmApprovalPopup.type === 'ISSUE_EXCESS_CASH'
+                    ? 'Confirm Extra Cash Issue'
+                    : confirmApprovalPopup.type === 'COLLECT'
+                    ? 'Confirm Cash Collected'
+                    : confirmApprovalPopup.type === 'COMPLETE_SETTLEMENT'
+                    ? 'Confirm & Complete'
+                    : 'Confirm Cash Issue'}
                 </button>
               </div>
             </motion.div>
@@ -1085,7 +1727,7 @@ export default function ApprovalsView({
 
       {/* Re-Route Request Modal Dialog */}
       <AnimatePresence>
-        {reRoutingTxn && (
+        {reRoutingItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1106,7 +1748,7 @@ export default function ApprovalsView({
                 <button
                   type="button"
                   onClick={() => {
-                    setReRoutingTxn(null);
+                    setReRoutingItem(null);
                     setTargetManager('');
                     setReRouteReasonInput('');
                     setReRouteError('');
@@ -1117,19 +1759,21 @@ export default function ApprovalsView({
                 </button>
               </div>
 
-              {/* Voucher Info Summary */}
+              {/* Info Summary */}
               <div className="bg-amber-50/50 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-100 dark:border-amber-900/30 space-y-1 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Voucher Reference:</span>
-                  <span className="font-bold font-mono text-slate-900 dark:text-slate-100">#{reRoutingTxn.reference || reRoutingTxn.id}</span>
+                  <span className="text-slate-500">{reRoutingItem.itemType === 'ADVANCE' ? 'Advance ID:' : 'Voucher Reference:'}</span>
+                  <span className="font-bold font-mono text-slate-900 dark:text-slate-100">
+                    {reRoutingItem.itemType === 'ADVANCE' ? reRoutingItem.id : `#${reRoutingItem.reference || reRoutingItem.id}`}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Claimant / Paid To:</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">{reRoutingTxn.merchant}</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{reRoutingItem.claimant}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Amount:</span>
-                  <span className="font-extrabold text-amber-700 dark:text-amber-400">{currencySymbol}{reRoutingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-extrabold text-amber-700 dark:text-amber-400">{currencySymbol}{reRoutingItem.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
@@ -1146,7 +1790,11 @@ export default function ApprovalsView({
                 </label>
                 {(() => {
                   const availableManagers = users.filter(u => 
-                    u.role === 'MANAGER' && 
+                    u.role?.toUpperCase() === 'MANAGER' && 
+                    u.role !== 'ADMIN' &&
+                    u.role !== 'CUSTODIAN' &&
+                    u.role !== 'AUDITOR' &&
+                    u.role !== 'USER' &&
                     u.fullName &&
                     !isMatchUserIdentifier(u.username, currentUser.username) &&
                     !isMatchUserIdentifier(u.fullName, currentUser.fullName)
@@ -1196,7 +1844,7 @@ export default function ApprovalsView({
                 <button
                   type="button"
                   onClick={() => {
-                    setReRoutingTxn(null);
+                    setReRoutingItem(null);
                     setTargetManager('');
                     setReRouteReasonInput('');
                     setReRouteError('');
@@ -1216,15 +1864,25 @@ export default function ApprovalsView({
                       setReRouteError('Please provide a reason for re-routing this request.');
                       return;
                     }
-                    if (onReRouteRequest && reRoutingTxn) {
-                      onReRouteRequest(
-                        reRoutingTxn.id, 
-                        targetManager, 
-                        reRouteReasonInput.trim(), 
-                        getEffectiveUserFullName()
-                      );
-                      triggerSuccessAlert(`Voucher #${reRoutingTxn.reference || reRoutingTxn.id} successfully re-routed to ${targetManager}!`);
-                      setReRoutingTxn(null);
+                    if (reRoutingItem) {
+                      if (reRoutingItem.itemType === 'EXPENSE' && onReRouteRequest) {
+                        onReRouteRequest(
+                          reRoutingItem.id, 
+                          targetManager, 
+                          reRouteReasonInput.trim(), 
+                          getEffectiveUserFullName()
+                        );
+                        triggerSuccessAlert(`Voucher #${reRoutingItem.reference || reRoutingItem.id} successfully re-routed to ${targetManager}!`);
+                      } else if (reRoutingItem.itemType === 'ADVANCE' && onReRouteAdvance) {
+                        onReRouteAdvance(
+                          reRoutingItem.id,
+                          targetManager,
+                          reRouteReasonInput.trim(),
+                          getEffectiveUserFullName()
+                        );
+                        triggerSuccessAlert(`Advance ${reRoutingItem.id} successfully re-routed to ${targetManager}!`);
+                      }
+                      setReRoutingItem(null);
                       setTargetManager('');
                       setReRouteReasonInput('');
                       setReRouteError('');
@@ -1242,7 +1900,7 @@ export default function ApprovalsView({
       </AnimatePresence>
       {/* Raise Query Modal Dialog */}
       <AnimatePresence>
-        {queryingTxn && (
+        {queryingItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1266,28 +1924,28 @@ export default function ApprovalsView({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setQueryingTxn(null)}
+                  onClick={() => setQueryingItem(null)}
                   className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Target Voucher summary */}
+              {/* Target summary */}
               <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                    #{queryingTxn.reference || queryingTxn.id}
+                    {queryingItem.itemType === 'ADVANCE' ? queryingItem.id : `#${queryingItem.reference || queryingItem.id}`}
                   </span>
                   <span className="font-extrabold text-rose-600 dark:text-rose-400">
-                    {currencySymbol}{queryingTxn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {currencySymbol}{queryingItem.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                <p className="text-slate-700 dark:text-slate-300 font-semibold">{queryingTxn.description}</p>
+                <p className="text-slate-700 dark:text-slate-300 font-semibold">{queryingItem.particulars}</p>
                 <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-0.5">
-                  <span>Claimant: <strong className="text-slate-700 dark:text-slate-300">{queryingTxn.requestedBy || queryingTxn.recordedBy || queryingTxn.merchant}</strong></span>
+                  <span>Claimant: <strong className="text-slate-700 dark:text-slate-300">{queryingItem.claimant}</strong></span>
                   <span>•</span>
-                  <span>Category: <strong className="text-slate-700 dark:text-slate-300">{queryingTxn.category}</strong></span>
+                  <span>Category: <strong className="text-slate-700 dark:text-slate-300">{queryingItem.category}</strong></span>
                 </div>
               </div>
 
@@ -1314,7 +1972,7 @@ export default function ApprovalsView({
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setQueryingTxn(null)}
+                  onClick={() => setQueryingItem(null)}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >
                   Cancel
@@ -1327,12 +1985,17 @@ export default function ApprovalsView({
                       setQueryError('Please enter what clarification is needed.');
                       return;
                     }
-                    if (onRaiseQuery && queryingTxn) {
+                    if (queryingItem) {
                       setIsSubmittingQuery(true);
                       try {
-                        await onRaiseQuery(queryingTxn, queryInputText.trim());
-                        triggerSuccessAlert(`Query sent to ${queryingTxn.requestedBy || queryingTxn.merchant} for voucher #${queryingTxn.reference || queryingTxn.id}!`);
-                        setQueryingTxn(null);
+                        if (queryingItem.itemType === 'EXPENSE' && onRaiseQuery && queryingItem.rawTxn) {
+                          await onRaiseQuery(queryingItem.rawTxn, queryInputText.trim());
+                          triggerSuccessAlert(`Query sent to ${queryingItem.claimant} for voucher #${queryingItem.reference || queryingItem.id}!`);
+                        } else if (queryingItem.itemType === 'ADVANCE' && onRaiseAdvanceQuery && queryingItem.rawAdv) {
+                          await onRaiseAdvanceQuery(queryingItem.rawAdv, queryInputText.trim());
+                          triggerSuccessAlert(`Query sent to ${queryingItem.claimant} for advance ${queryingItem.id}!`);
+                        }
+                        setQueryingItem(null);
                         setQueryInputText('');
                       } finally {
                         setIsSubmittingQuery(false);

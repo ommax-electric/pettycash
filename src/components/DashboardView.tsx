@@ -2,8 +2,9 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, Clock, ChevronRight, Wallet, Landmark, Activity, Calendar, ChevronDown } from 'lucide-react';
-import { Transaction, CategoryLimit, User, AppSettings } from '../types';
+import { Transaction, CategoryLimit, User, AppSettings, CashAdvance, TransactionType, TransactionStatus } from '../types';
 import { MOCK_MONTHLY_TRENDS } from '../data';
+import { isMatchUserIdentifier } from '../utils';
 
 const formatDateFormatted = (dateStr: string, formatStr: string = 'DD/MM/YYYY') => {
   if (!dateStr) return '';
@@ -29,13 +30,21 @@ const formatDateFormatted = (dateStr: string, formatStr: string = 'DD/MM/YYYY') 
 
 interface DashboardViewProps {
   transactions: Transaction[];
+  advances?: CashAdvance[];
   categories: CategoryLimit[];
   currentUser: User;
   onNavigateToRegister: () => void;
   appSettings?: AppSettings;
 }
 
-export default function DashboardView({ transactions, categories, currentUser, onNavigateToRegister, appSettings }: DashboardViewProps) {
+export default function DashboardView({ 
+  transactions, 
+  advances = [], 
+  categories, 
+  currentUser, 
+  onNavigateToRegister, 
+  appSettings 
+}: DashboardViewProps) {
   const symbol = appSettings?.currencySymbol || '₹';
   const dateFormat = appSettings?.dateFormat || 'DD/MM/YYYY';
 
@@ -50,7 +59,19 @@ export default function DashboardView({ transactions, categories, currentUser, o
       const recBy = (t.recordedBy || '').toLowerCase();
       const reqBy = (t.requestedBy || '').toLowerCase();
       const merch = (t.merchant || '').toLowerCase();
-      return recBy === uName || reqBy === uName || merch === uName || reqBy === uId;
+      return (
+        recBy === uName || 
+        reqBy === uName || 
+        merch === uName || 
+        reqBy === uId ||
+        (t.advanceId && (
+          isMatchUserIdentifier(t.requestedBy, currentUser.fullName) ||
+          isMatchUserIdentifier(t.merchant, currentUser.fullName) ||
+          isMatchUserIdentifier(t.requestedBy, currentUser.username) ||
+          isMatchUserIdentifier(t.merchant, currentUser.username) ||
+          (currentUser.empId && (isMatchUserIdentifier(t.requestedBy, currentUser.empId) || isMatchUserIdentifier(t.merchant, currentUser.empId)))
+        ))
+      );
     });
   }, [transactions, currentUser, isStandardUser]);
 
@@ -90,17 +111,29 @@ export default function DashboardView({ transactions, categories, currentUser, o
     .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Overall Expenses / User Total Paid Expenses (for selected year) - ONLY PAID expenses
+  // Helper to identify real corporate expenses (excluding advance cash disbursals):
+  // 1. Regular expenses when PAID
+  // 2. Advance settlement bills when PAID or APPROVED (includes full expense even when exceeding advance)
+  const isEffectiveExpense = (t: Transaction) => {
+    if (t.type !== 'OUT') return false;
+    if (t.isAdvanceDisbursal || t.category === 'Cash Advance') return false;
+    if (t.isAdvanceSettlement) {
+      return t.status === 'PAID' || t.status === 'APPROVED';
+    }
+    return isPaidOutflow(t.status);
+  };
+
+  // Overall Expenses / User Total Paid Expenses (for selected year) - ONLY completed expenses (excluding advance disbursals)
   const overallExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
+    .filter(t => isEffectiveExpense(t) && t.date.startsWith(effectiveYear))
     .reduce((sum, t) => sum + t.amount, 0);
 
   const cashExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
+    .filter(t => isEffectiveExpense(t) && t.date.startsWith(effectiveYear) && t.paymentType !== 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const onlineExpensesSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
+    .filter(t => isEffectiveExpense(t) && t.date.startsWith(effectiveYear) && t.paymentType === 'ONLINE')
     .reduce((sum, t) => sum + t.amount, 0);
 
   // User pending requests (for standard users)
@@ -121,15 +154,27 @@ export default function DashboardView({ transactions, categories, currentUser, o
     .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date && t.date <= `${effectiveYear}-12-31`)
     .reduce((sum, t) => sum + t.amount, 0);
 
+  // Physical cash leaving vault: regular cash expenses + advance cash disbursals + excess cash reimbursement paid on advance settlements
   const approvedOutflowCashUpToSelectedYear = visibleTransactions
-    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => t.type === 'OUT' && (isPaidOutflow(t.status) || (t.isAdvanceSettlement && t.status === 'APPROVED')) && t.paymentType !== 'ONLINE' && t.date && t.date <= `${effectiveYear}-12-31`)
+    .reduce((sum, t) => {
+      if (t.isAdvanceSettlement) {
+        // Physical cash leaving vault for advance settlement is the excess reimbursement paid
+        return sum + (t.excessReimburseAmount || 0);
+      }
+      return sum + t.amount;
+    }, 0);
 
-  const cashOnHandSelectedYear = approvedInflowUpToSelectedYear - approvedOutflowCashUpToSelectedYear;
+  // Cash returned to vault from advances (collected upon final settlement)
+  const returnedAdvanceCashUpToSelectedYear = advances
+    .filter(a => a.returnedCashAmount && a.returnedCashAmount > 0)
+    .reduce((sum, a) => sum + (a.returnedCashAmount || 0), 0);
 
-  // Avg. Expenses for the selected year (ONLY PAID expenses)
+  const cashOnHandSelectedYear = (approvedInflowUpToSelectedYear + returnedAdvanceCashUpToSelectedYear) - approvedOutflowCashUpToSelectedYear;
+
+  // Avg. Expenses for the selected year (ONLY PAID / approved expenses)
   const selectedYearExpenses = visibleTransactions
-    .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear));
+    .filter(t => isEffectiveExpense(t) && t.date.startsWith(effectiveYear));
   const avgExpensesSelectedYear = selectedYearExpenses.length > 0
     ? selectedYearExpenses.reduce((sum, t) => sum + t.amount, 0) / selectedYearExpenses.length
     : 0;
@@ -144,19 +189,19 @@ export default function DashboardView({ transactions, categories, currentUser, o
         .filter(t => t.type === 'IN' && isCompletedInflow(t.status) && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
       const outflow = visibleTransactions
-        .filter(t => t.type === 'OUT' && isPaidOutflow(t.status) && t.date && t.date.startsWith(prefix))
+        .filter(t => isEffectiveExpense(t) && t.date && t.date.startsWith(prefix))
         .reduce((sum, t) => sum + t.amount, 0);
       return { month: m, inflow, outflow };
     });
   }, [visibleTransactions, effectiveYear]);
 
-  // Format Category Spent data for Pie Chart (ONLY PAID expenses)
+  // Format Category Spent data for Pie Chart (ONLY PAID / approved expenses)
   const categoryChartData = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => ({
       name: cat.name,
       value: visibleTransactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
+        .filter(t => t.category === cat.name && isEffectiveExpense(t) && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0),
       color: cat.color
     })).filter(data => data.value > 0);
@@ -166,12 +211,12 @@ export default function DashboardView({ transactions, categories, currentUser, o
     { name: 'No Expenses', value: 1, color: '#cbd5e1' }
   ];
 
-  // Dynamic calculations for progress bars (ONLY PAID expenses)
+  // Dynamic calculations for progress bars (ONLY PAID / approved expenses)
   const computedCategories = categories
     .filter(cat => cat.type !== 'IN')
     .map(cat => {
       const currentSpent = visibleTransactions
-        .filter(t => t.category === cat.name && t.type === 'OUT' && isPaidOutflow(t.status) && t.date.startsWith(effectiveYear))
+        .filter(t => t.category === cat.name && isEffectiveExpense(t) && t.date.startsWith(effectiveYear))
         .reduce((sum, t) => sum + t.amount, 0);
       return {
         ...cat,
@@ -180,9 +225,59 @@ export default function DashboardView({ transactions, categories, currentUser, o
     })
     .sort((a, b) => b.spent - a.spent);
 
-  const recentTransactions = [...visibleTransactions]
-    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
-    .slice(0, 5);
+  const recentTransactions = React.useMemo(() => {
+    const combined = [...visibleTransactions];
+
+    // Guarantee that any active/disbursed or settled advances are reflected in recent transactions
+    advances.forEach(adv => {
+      if (adv.status === 'DISBURSED' || adv.status === 'SETTLED') {
+        const alreadyInTxns = visibleTransactions.some(t => 
+          (t.advanceId && (t.advanceId === adv.id || t.advanceId.split(',').map(s => s.trim()).includes(adv.id))) ||
+          t.id === adv.disbursalTransactionId ||
+          (adv.disbursalVoucherNo && t.reference === adv.disbursalVoucherNo)
+        );
+
+        if (!alreadyInTxns) {
+          let matchesUser = true;
+          if (isStandardUser) {
+            matchesUser = Boolean(
+              isMatchUserIdentifier(adv.requestedBy, currentUser.fullName) ||
+              isMatchUserIdentifier(adv.requestedBy, currentUser.username) ||
+              (adv.requesterEmpId && isMatchUserIdentifier(adv.requesterEmpId, currentUser.empId)) ||
+              (adv.requesterEmail && isMatchUserIdentifier(adv.requesterEmail, currentUser.email))
+            );
+          }
+          if (matchesUser) {
+            combined.push({
+              id: adv.disbursalTransactionId || `ADV-${adv.id}`,
+              reference: adv.disbursalVoucherNo || adv.id,
+              date: adv.disbursedAt ? adv.disbursedAt.split('T')[0] : (adv.requestDate || adv.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0]),
+              amount: adv.amount,
+              type: 'OUT' as TransactionType,
+              category: 'Cash Advance',
+              merchant: adv.requestedBy,
+              requestedBy: adv.requestedBy,
+              description: `Cash Advance: ${adv.purpose}`,
+              status: 'PAID' as TransactionStatus,
+              paymentType: adv.paymentType || 'CASH',
+              advanceId: adv.id,
+              isAdvanceDisbursal: true,
+              workflowHistory: []
+            });
+          }
+        }
+      }
+    });
+
+    return combined
+      .sort((a, b) => {
+        const dateA = a.date ? new Date(a.date).getTime() : 0;
+        const dateB = b.date ? new Date(b.date).getTime() : 0;
+        if (dateB !== dateA) return dateB - dateA;
+        return (b.id || '').localeCompare(a.id || '');
+      })
+      .slice(0, 5);
+  }, [visibleTransactions, advances, isStandardUser, currentUser]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 auto-rows-auto pb-10 sm:pb-14">
@@ -607,13 +702,27 @@ export default function DashboardView({ transactions, categories, currentUser, o
                         {formattedId}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${
-                          isInflow 
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}>
-                          {isInflow ? 'Deposit' : 'Expense'}
-                        </span>
+                        {txn.isAdvanceDisbursal ? (
+                          <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border bg-amber-50 text-amber-700 border-amber-200">
+                            Advance
+                          </span>
+                        ) : txn.isAdvanceReturn ? (
+                          <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border bg-blue-50 text-blue-700 border-blue-200">
+                            Adv Return
+                          </span>
+                        ) : txn.isAdvanceSettlement ? (
+                          <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border bg-purple-50 text-purple-700 border-purple-200">
+                            Settlement
+                          </span>
+                        ) : isInflow ? (
+                          <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            Deposit
+                          </span>
+                        ) : (
+                          <span className="inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold border bg-rose-50 text-rose-700 border-rose-200">
+                            Expense
+                          </span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="text-xs font-semibold text-slate-800 line-clamp-1 max-w-[250px]" title={txn.description}>
@@ -624,12 +733,12 @@ export default function DashboardView({ transactions, categories, currentUser, o
                         </div>
                       </td>
                       <td className={`py-3.5 px-4 text-xs font-extrabold text-right whitespace-nowrap ${
-                        isInflow ? 'text-emerald-600' : 'text-rose-600'
+                        isInflow ? 'text-emerald-600' : (txn.isAdvanceDisbursal ? 'text-amber-700' : 'text-rose-600')
                       }`}>
                         {symbol}{txn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="py-3.5 px-4 text-xs font-medium text-slate-600 whitespace-nowrap">
-                        {isInflow ? 'Cash Source' : txn.category}
+                        {txn.isAdvanceDisbursal ? 'Cash Advance' : (isInflow ? 'Cash Source' : txn.category)}
                       </td>
                     </tr>
                   );

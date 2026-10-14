@@ -33,6 +33,22 @@
       },
       "required": ["name"]
     },
+    "advances": {
+      "title": "Cash Advances",
+      "description": "Employee cash advance requests, 2-step approvals, disbursals, and settlements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestDate": { "type": "string" },
+        "requestedBy": { "type": "string" },
+        "amount": { "type": "number" },
+        "purpose": { "type": "string" },
+        "status": { "type": "string" },
+        "settledAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" }
+      },
+      "required": ["id", "requestDate", "requestedBy", "amount", "purpose", "status"]
+    },
     "audit_logs": {
       "title": "Audit Logs",
       "description": "System audit trail logs",

@@ -1,5 +1,22 @@
-import { AppSettings, IntegrationSettings, Transaction, User } from '../types';
-import { buildModernHtmlEmailFromText, buildModernCRMEmailFromText } from '../utils/emailTemplate';
+import { AppSettings, IntegrationSettings, Transaction, User, CashAdvance, formatDateToDMY } from '../types';
+import { 
+  buildModernHtmlEmailFromText, 
+  buildModernCRMEmailFromText,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST,
+  DEFAULT_EMAIL_BODY_ADVANCE_REQUEST,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED,
+  DEFAULT_EMAIL_BODY_ADVANCE_APPROVED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED,
+  DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED,
+  DEFAULT_EMAIL_BODY_ADVANCE_REJECTED,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY,
+  DEFAULT_EMAIL_BODY_ADVANCE_QUERY,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE,
+  DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE,
+  DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED,
+  DEFAULT_EMAIL_BODY_ADVANCE_REROUTED
+} from '../utils/emailTemplate';
 
 /**
  * Joins array of changed field names with proper commas and 'and'
@@ -774,4 +791,366 @@ export async function sendCRMEmailNotification(
     return { success: false, message: err.message || 'Failed to dispatch CRM email' };
   }
 }
+
+/**
+ * Dispatches Corporate Email notification for Cash Advances via Microsoft Graph API
+ */
+export async function sendAdvanceEmailNotification(
+  type: 'ADVANCE_REQUEST' | 'ADVANCE_APPROVED' | 'ADVANCE_DISBURSED' | 'ADVANCE_REJECTED' | 'ADVANCE_QUERY' | 'ADVANCE_QUERY_RESPONSE' | 'ADVANCE_REROUTED',
+  advance: CashAdvance,
+  currentUser: User | null,
+  appSettings: AppSettings,
+  integrationSettings?: IntegrationSettings | null,
+  usersList?: User[],
+  extraData?: {
+    queryText?: string;
+    managerName?: string;
+    reRouteReason?: string;
+    reRoutedTo?: string;
+    reRoutedBy?: string;
+    rejectedBy?: string;
+    rejectionReason?: string;
+    approvedBy?: string;
+    issuedBy?: string;
+  }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const isEmailEnabled = integrationSettings 
+      ? integrationSettings.emailEnabled
+      : (localStorage.getItem('petty_cash_email_enabled') !== 'false');
+    if (!isEmailEnabled) {
+      return { success: false, message: 'Corporate Email alerts disabled in settings.' };
+    }
+
+    const rawRecipients = integrationSettings
+      ? (integrationSettings.pettyCashRecipients || integrationSettings.emailRecipients || '')
+      : (localStorage.getItem('petty_cash_email_recipients') || '');
+    const defaultRecipients = rawRecipients.split(',').map(r => r.trim()).filter(Boolean);
+
+    const tenantId = (integrationSettings?.msTenantId || localStorage.getItem('ms_graph_tenant_id') || 'a63883ba-4173-48a2-a29d-247ca0c8e59a').trim();
+    const clientId = (integrationSettings?.msClientId || localStorage.getItem('ms_graph_client_id') || 'cf54c887-7846-4cc7-8c4c-ed9d407d07d6').trim();
+    const clientSecret = (integrationSettings?.msClientSecret || localStorage.getItem('ms_graph_client_secret') || 'G0_8Q~QEhThZjfB8yvfs2eVIWan_GQ2_toG4kcUz').trim();
+    const senderEmail = (integrationSettings?.msSenderEmail || localStorage.getItem('ms_graph_sender_email') || 'mail@ommaxelectric.com').trim();
+    const senderName = (integrationSettings?.msSenderName || localStorage.getItem('ms_graph_sender_name') || 'Petty Cash Desk').trim();
+
+    if (!tenantId || !clientId || !clientSecret) {
+      return {
+        success: false,
+        message: 'Microsoft Graph API configuration incomplete.'
+      };
+    }
+
+    // Identify user emails
+    let claimantEmail = '';
+    let managerEmail = '';
+    let cashAdminEmail = (integrationSettings?.cashAdminEmail || localStorage.getItem('petty_cash_cash_admin_email') || '').trim();
+    let adminEmail = '';
+
+    if (usersList && usersList.length > 0) {
+      const reqStr = (advance.requestedBy || '').trim().toLowerCase();
+      const claimantUser = usersList.find(u => {
+        if (reqStr) {
+          const uFull = (u.fullName || '').toLowerCase();
+          const uUser = (u.username || '').toLowerCase();
+          const uEmail = (u.email || '').toLowerCase();
+          const uEmp = (u.empId || '').toLowerCase();
+          if (
+            uFull === reqStr ||
+            uUser === reqStr ||
+            uEmail === reqStr ||
+            uEmp === reqStr ||
+            (reqStr.length > 2 && (uFull.includes(reqStr) || reqStr.includes(uFull)))
+          ) {
+            return true;
+          }
+        }
+        if (currentUser && (
+          (u.username && u.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+          (u.fullName && u.fullName.toLowerCase() === currentUser.fullName.toLowerCase()) ||
+          (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
+        )) {
+          return true;
+        }
+        return false;
+      });
+
+      if (claimantUser?.email) claimantEmail = claimantUser.email;
+      else if (currentUser?.email) claimantEmail = currentUser.email;
+
+      const mgrTarget = (extraData?.managerName || advance.approverName || claimantUser?.reportingTo || currentUser?.reportingTo || '').trim().toLowerCase();
+      if (mgrTarget) {
+        const mgrUser = usersList.find(u => {
+          const uFull = (u.fullName || '').toLowerCase();
+          const uUser = (u.username || '').toLowerCase();
+          const uEmail = (u.email || '').toLowerCase();
+          return uFull === mgrTarget || uUser === mgrTarget || uEmail === mgrTarget;
+        });
+        if (mgrUser?.email) managerEmail = mgrUser.email;
+      }
+
+      const adminUser = usersList.find(u => u.role === 'ADMIN' && u.email);
+      if (adminUser?.email) adminEmail = adminUser.email;
+    }
+
+    const currencySymbol = appSettings?.currencySymbol || '₹';
+    const formattedAmount = `${currencySymbol}${advance.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const reqDateFormatted = formatDateToDMY(advance.requestDate || advance.createdAt);
+    const expSettlementFormatted = formatDateToDMY(advance.expectedSettlementDate) || 'N/A';
+    const todayFormatted = formatDateToDMY(new Date().toISOString());
+
+    let subjectTemplate = '';
+    let bodyTemplate = '';
+    let cardTitle = '';
+    let cardBorderColor = '#ff7900';
+    const targetRecipients: string[] = [];
+
+    if (type === 'ADVANCE_REQUEST') {
+      cardTitle = 'Cash Advance Request Pending Approval';
+      cardBorderColor = '#ff7900';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceRequest : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_request') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_REQUEST;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceRequest : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_request') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_REQUEST;
+
+      // When user requests advance, reporting manager gets email
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      } else if (cashAdminEmail && cashAdminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(cashAdminEmail);
+      } else if (adminEmail && adminEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(adminEmail);
+      } else if (defaultRecipients.length > 0) {
+        targetRecipients.push(...defaultRecipients.filter(e => e.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()));
+      }
+    } else if (type === 'ADVANCE_APPROVED') {
+      cardTitle = 'Cash Advance Approved - Disburse Cash';
+      cardBorderColor = '#2563eb';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceApproved : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_approved') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_APPROVED;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceApproved : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_approved') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_APPROVED;
+
+      // Once manager approved, user and cash admin get email to issue cash
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+      if (cashAdminEmail) targetRecipients.push(cashAdminEmail);
+      else if (adminEmail) targetRecipients.push(adminEmail);
+      else if (defaultRecipients.length > 0) targetRecipients.push(defaultRecipients[0]);
+    } else if (type === 'ADVANCE_DISBURSED') {
+      cardTitle = 'Cash Advance Disbursed';
+      cardBorderColor = '#10b981';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceDisbursed : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_disbursed') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_DISBURSED;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceDisbursed : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_disbursed') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_DISBURSED;
+
+      // Once cash issued, then user gets email
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+      if (managerEmail && managerEmail.trim().toLowerCase() !== claimantEmail.trim().toLowerCase()) {
+        targetRecipients.push(managerEmail);
+      }
+    } else if (type === 'ADVANCE_REJECTED') {
+      cardTitle = 'Cash Advance Request Rejected';
+      cardBorderColor = '#ef4444';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceRejected : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_rejected') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_REJECTED;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceRejected : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_rejected') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_REJECTED;
+
+      // If rejected, then only user gets email
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+    } else if (type === 'ADVANCE_QUERY') {
+      cardTitle = 'Cash Advance Clarification Required';
+      cardBorderColor = '#7c3aed';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceQuery : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_query') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceQuery : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_query') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_QUERY;
+
+      // Manager to employee query -> user gets email
+      if (claimantEmail) targetRecipients.push(claimantEmail);
+    } else if (type === 'ADVANCE_QUERY_RESPONSE') {
+      cardTitle = 'Cash Advance Query Response Submitted';
+      cardBorderColor = '#7c3aed';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceQueryResponse : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_query_response') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_QUERY_RESPONSE;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceQueryResponse : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_query_response') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_QUERY_RESPONSE;
+
+      // Employee to manager query response -> manager gets email
+      if (managerEmail) targetRecipients.push(managerEmail);
+      else if (cashAdminEmail) targetRecipients.push(cashAdminEmail);
+      else if (adminEmail) targetRecipients.push(adminEmail);
+      else if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+    } else if (type === 'ADVANCE_REROUTED') {
+      cardTitle = 'Cash Advance Request Re-Routed';
+      cardBorderColor = '#f59e0b';
+      subjectTemplate = (integrationSettings ? integrationSettings.emailSubjectAdvanceRerouted : null) ||
+        localStorage.getItem('petty_cash_email_subject_adv_rerouted') ||
+        DEFAULT_EMAIL_SUBJECT_ADVANCE_REROUTED;
+      bodyTemplate = (integrationSettings ? integrationSettings.emailBodyAdvanceRerouted : null) ||
+        localStorage.getItem('petty_cash_email_body_adv_rerouted') ||
+        DEFAULT_EMAIL_BODY_ADVANCE_REROUTED;
+
+      // Re-routed advance -> newly assigned approver gets email
+      const targetMgrName = (extraData?.reRoutedTo || advance.approverName || '').trim().toLowerCase();
+      let targetMgrEmail = '';
+      if (usersList && targetMgrName) {
+        const mgrUser = usersList.find(u => 
+          (u.fullName && u.fullName.toLowerCase() === targetMgrName) ||
+          (u.username && u.username.toLowerCase() === targetMgrName) ||
+          (u.email && u.email.toLowerCase() === targetMgrName)
+        );
+        if (mgrUser?.email) targetMgrEmail = mgrUser.email;
+      }
+      if (targetMgrEmail) targetRecipients.push(targetMgrEmail);
+      else if (adminEmail) targetRecipients.push(adminEmail);
+      else if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+    }
+
+    // Fallback if targetRecipients is empty
+    if (targetRecipients.length === 0) {
+      if (defaultRecipients.length > 0) targetRecipients.push(...defaultRecipients);
+      else if (adminEmail) targetRecipients.push(adminEmail);
+    }
+
+    // Deduplicate
+    const uniqueRecipientsMap = new Map<string, string>();
+    targetRecipients.forEach(r => {
+      const clean = (r || '').trim();
+      if (clean) uniqueRecipientsMap.set(clean.toLowerCase(), clean);
+    });
+    const finalRecipients = Array.from(uniqueRecipientsMap.values());
+
+    if (finalRecipients.length === 0) {
+      return { success: false, message: 'No email recipients resolved for this advance notification.' };
+    }
+
+    // Substitute tags in subject and body
+    const finalSubject = subjectTemplate
+      .replace(/\{advance_id\}/g, advance.id)
+      .replace(/\{amount\}/g, formattedAmount)
+      .replace(/\{requested_by\}/g, advance.requestedBy || 'N/A')
+      .replace(/\{purpose\}/g, advance.purpose || 'N/A')
+      .replace(/\{category\}/g, advance.category || 'General')
+      .replace(/\{request_date\}/g, reqDateFormatted)
+      .replace(/\{expected_settlement_date\}/g, expSettlementFormatted)
+      .replace(/\{project_ref\}/g, advance.projectRefNo || 'N/A')
+      .replace(/\{approved_by\}/g, extraData?.approvedBy || advance.approvedBy || 'Manager')
+      .replace(/\{issued_by\}/g, extraData?.issuedBy || advance.disbursedBy || 'Cash Admin')
+      .replace(/\{rejected_by\}/g, extraData?.rejectedBy || advance.rejectedBy || 'Manager')
+      .replace(/\{reason\}/g, extraData?.rejectionReason || advance.rejectionReason || 'N/A')
+      .replace(/\{manager_name\}/g, extraData?.managerName || advance.approverName || 'Manager')
+      .replace(/\{query_text\}/g, extraData?.queryText || '')
+      .replace(/\{re_routed_to\}/g, extraData?.reRoutedTo || advance.approverName || 'Approver')
+      .replace(/\{re_routed_by\}/g, extraData?.reRoutedBy || advance.reRoutedBy || 'Manager')
+      .replace(/\{re_route_reason\}/g, extraData?.reRouteReason || advance.reRouteReason || 'N/A')
+      .replace(/\{date\}/g, todayFormatted);
+
+    const finalBodyText = bodyTemplate
+      .replace(/\{advance_id\}/g, advance.id)
+      .replace(/\{amount\}/g, formattedAmount)
+      .replace(/\{requested_by\}/g, advance.requestedBy || 'N/A')
+      .replace(/\{purpose\}/g, advance.purpose || 'N/A')
+      .replace(/\{category\}/g, advance.category || 'General')
+      .replace(/\{request_date\}/g, reqDateFormatted)
+      .replace(/\{expected_settlement_date\}/g, expSettlementFormatted)
+      .replace(/\{project_ref\}/g, advance.projectRefNo || 'N/A')
+      .replace(/\{approved_by\}/g, extraData?.approvedBy || advance.approvedBy || 'Manager')
+      .replace(/\{issued_by\}/g, extraData?.issuedBy || advance.disbursedBy || 'Cash Admin')
+      .replace(/\{rejected_by\}/g, extraData?.rejectedBy || advance.rejectedBy || 'Manager')
+      .replace(/\{reason\}/g, extraData?.rejectionReason || advance.rejectionReason || 'N/A')
+      .replace(/\{manager_name\}/g, extraData?.managerName || advance.approverName || 'Manager')
+      .replace(/\{query_text\}/g, extraData?.queryText || '')
+      .replace(/\{re_routed_to\}/g, extraData?.reRoutedTo || advance.approverName || 'Approver')
+      .replace(/\{re_routed_by\}/g, extraData?.reRoutedBy || advance.reRoutedBy || 'Manager')
+      .replace(/\{re_route_reason\}/g, extraData?.reRouteReason || advance.reRouteReason || 'N/A')
+      .replace(/\{date\}/g, todayFormatted);
+
+    const emailHtml = buildModernHtmlEmailFromText(cardTitle, finalBodyText, cardBorderColor, type);
+
+    // 1. Server proxy dispatch
+    try {
+      const serverRes = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: finalRecipients.join(','),
+          subject: finalSubject,
+          html: emailHtml,
+          module: 'ADVANCE',
+          tenantId,
+          clientId,
+          clientSecret,
+          senderEmail,
+          senderName
+        })
+      });
+      const serverData = await serverRes.json().catch(() => null);
+      if (serverRes.ok && serverData && serverData.success) {
+        return { success: true, message: serverData.message || 'Advance email sent via server' };
+      }
+    } catch (e) {
+      console.warn('[AdvanceEmailAlert] Server proxy notice:', e);
+    }
+
+    // 2. Direct client fallback via Microsoft Graph
+    try {
+      const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`;
+      const tokenParams = new URLSearchParams();
+      tokenParams.append("client_id", clientId);
+      tokenParams.append("client_secret", clientSecret);
+      tokenParams.append("scope", "https://graph.microsoft.com/.default");
+      tokenParams.append("grant_type", "client_credentials");
+
+      const tokenRes = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenParams.toString()
+      });
+      const tokenData = await tokenRes.json();
+      if (tokenData.access_token) {
+        const graphMailUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
+        const directPayload = {
+          message: {
+            subject: finalSubject,
+            body: { contentType: "HTML", content: emailHtml },
+            toRecipients: finalRecipients.map((email: string) => ({ emailAddress: { address: email } }))
+          },
+          saveToSentItems: true
+        };
+        const mailRes = await fetch(graphMailUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${tokenData.access_token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(directPayload)
+        });
+        if (mailRes.ok || mailRes.status === 202) {
+          return { success: true, message: 'Advance notification email dispatched directly via Microsoft Graph API' };
+        }
+      }
+    } catch (err) {
+      console.warn('[AdvanceEmailAlert] Direct dispatch exception:', err);
+    }
+
+    return { success: true, message: 'Advance notification process complete.' };
+  } catch (err: any) {
+    console.error('[AdvanceEmailAlert] Exception:', err);
+    return { success: false, message: err.message || 'Failed to dispatch Advance email' };
+  }
+}
+
 
