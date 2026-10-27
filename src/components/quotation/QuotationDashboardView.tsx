@@ -839,37 +839,59 @@ function createCompleteQuotation(
     }
   }
 
-  const generatedSubject = interpolateSubject(masterConfig.defaultSubjectTemplate, {
-    capacityKw: acCapacityKw,
-    capacityKwp: dcCapacityKwp,
-    connectionType: formData.connectionType,
-    clientName: formData.clientName,
-    projectName: formData.clientName,
-    location: formData.location,
-    scheme: formData.scheme
-  });
+    const isCapacityChanged = Boolean(
+      existingQuotation && (
+        (existingQuotation.capacityKw !== undefined && existingQuotation.capacityKw !== acCapacityKw) ||
+        (existingQuotation.capacityKwp !== undefined && existingQuotation.capacityKwp !== dcCapacityKwp)
+      )
+    );
 
-  return {
-    id,
-    quotationNo,
-    offerNo: formData.offerNo,
-    revisionIndex,
-    revisionCode,
-    revisionHistory: historyList,
-    letterhead: existingQuotation?.letterhead || masterConfig.letterhead || DEFAULT_LETTERHEAD_CONFIG,
-    title: `Solar Proposal – ${formData.clientName} (${acCapacityKw} kW)`,
-    type: 'SOLAR_EPC',
-    status,
-    
-    opportunityId: formData.opportunityId,
-    clientName: formData.clientName,
-    projectName: formData.clientName,
-    location: formData.location,
-    state: existingQuotation?.state || 'Tamil Nadu',
-    scheme: formData.scheme || existingQuotation?.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)',
-    targetSegment: formData.targetSegment || existingQuotation?.targetSegment,
-    connectionType: formData.connectionType || existingQuotation?.connectionType,
-    subject: existingQuotation?.subject || generatedSubject,
+    const isStandardSubject = !existingQuotation?.subject ||
+      /^proposal for\s+[\d\.]+\s*(?:kwp|kw)\s+roof\s*top solar/i.test(existingQuotation.subject.trim());
+
+    const generatedSubject = interpolateSubject(masterConfig.defaultSubjectTemplate, {
+      capacityKw: acCapacityKw,
+      capacityKwp: dcCapacityKwp,
+      connectionType: formData.connectionType,
+      clientName: formData.clientName,
+      projectName: formData.clientName,
+      location: formData.location,
+      scheme: formData.scheme
+    });
+
+    const finalSubject = (isCapacityChanged || isStandardSubject || !existingQuotation?.subject)
+      ? generatedSubject
+      : interpolateSubject(existingQuotation.subject, {
+          capacityKw: acCapacityKw,
+          capacityKwp: dcCapacityKwp,
+          connectionType: formData.connectionType,
+          clientName: formData.clientName,
+          projectName: formData.clientName,
+          location: formData.location,
+          scheme: formData.scheme
+        });
+
+    return {
+      id,
+      quotationNo,
+      offerNo: formData.offerNo,
+      revisionIndex,
+      revisionCode,
+      revisionHistory: historyList,
+      letterhead: existingQuotation?.letterhead || masterConfig.letterhead || DEFAULT_LETTERHEAD_CONFIG,
+      title: `Solar Proposal – ${formData.clientName} (${acCapacityKw} kW)`,
+      type: 'SOLAR_EPC',
+      status,
+      
+      opportunityId: formData.opportunityId,
+      clientName: formData.clientName,
+      projectName: formData.clientName,
+      location: formData.location,
+      state: existingQuotation?.state || 'Tamil Nadu',
+      scheme: formData.scheme || existingQuotation?.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)',
+      targetSegment: formData.targetSegment || existingQuotation?.targetSegment,
+      connectionType: formData.connectionType || existingQuotation?.connectionType,
+      subject: finalSubject,
     salutation: existingQuotation?.salutation || masterConfig.defaultToSalutation || 'Dear Valued Customer,',
     introOpeningText: existingQuotation?.introOpeningText || masterConfig.introOpeningText || 'In support of your Green Energy initiatives, we at Ommax Electric are pleased to submit our offer for the supply, installation, testing, and commissioning of a Solar PV Power Plant.',
     date: dateStr,

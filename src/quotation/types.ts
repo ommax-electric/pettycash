@@ -1206,6 +1206,13 @@ export function interpolateSubject(
   const conn = params.connectionType || params.systemType || '';
   const scheme = params.scheme || '';
 
+  // If template is already an evaluated standard subject (e.g. "Proposal for 3.3 kWp Roof top Solar Power Plant")
+  // and contains no {capacityKwp} variable tags, dynamically refresh the capacity number with the new capacity
+  const hasBraces = /\{{1,2}.*?\}{1,2}/.test(template);
+  if (!hasBraces && capStr && /^proposal for\s+[\d\.]+\s*(?:kwp|kw)\s+roof\s*top solar/i.test(template.trim())) {
+    return template.replace(/^(proposal for\s+)[\d\.]+\s*(?:kwp|kw)\s*(roof\s*top solar)/i, `$1${capStr} kWp $2`);
+  }
+
   return template
     .replace(/\{{1,2}\s*(?:capacityKwp|capacityKw|capacity|capacity\s*kwp|capacity\s*kw)\s*\}{1,2}/gi, capStr)
     .replace(/\{{1,2}\s*(?:client\s*name|clientname)\s*\}{1,2}/gi, clientName)

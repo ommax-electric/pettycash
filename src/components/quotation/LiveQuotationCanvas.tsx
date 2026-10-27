@@ -357,12 +357,22 @@ export default function LiveQuotationCanvas({
       return item;
     });
 
+    const newSubject = interpolateSubject(masterConfig.defaultSubjectTemplate, {
+      capacityKw: validCap,
+      capacityKwp: dcKwp,
+      connectionType: formData.connectionType || formData.systemType,
+      clientName: formData.clientName,
+      projectName: formData.projectName || formData.clientName,
+      location: formData.location,
+      scheme: formData.scheme
+    });
+
     setFormData(prev => ({
       ...prev,
       capacityKw: validCap,
       capacityKwp: dcKwp,
       title: `${validCap} kW Rooftop Solar PV Power Plant Proposal`,
-      subject: `Proposal for ${validCap} kW Roof top Solar`,
+      subject: newSubject,
       boqItems: updatedBOQ,
       basicCost: newBasic,
       gstGoodsAmount: pricing.gstGoods,

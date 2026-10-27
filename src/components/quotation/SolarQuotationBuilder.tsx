@@ -374,7 +374,7 @@ export default function SolarQuotationBuilder({
       ...prev,
       capacityKw: kw,
       capacityKwp: dcKwp,
-      subject: `Proposal for ${kw} kW Roof top Solar`,
+      subject: `Proposal for ${dcKwp} kWp Roof top Solar Power Plant`,
       subsidyNote: subsidyText,
       boqItems: updatedBOQ
     }));
