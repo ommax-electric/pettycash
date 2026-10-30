@@ -425,7 +425,7 @@ export default function QuotationToolsView({
     { id: 'GENERAL', label: 'General', icon: Sliders },
     { id: 'INTRO', label: 'Intro', icon: FileText },
     { id: 'SCOPE_OF_WORK', label: 'Scope of Work', icon: CheckSquare },
-    { id: 'ADDON_PRICING', label: 'Pricing', icon: Sparkles },
+    { id: 'ADDON_PRICING', label: 'Pricing', icon: IndianRupee },
     { id: 'PAYMENT_TERMS', label: 'Payment Terms', icon: CreditCard },
     { id: 'BANKING_DETAILS', label: 'Banking Details', icon: Landmark },
     { id: 'TERMS_AND_CONDITIONS', label: 'Terms & Conditions', icon: ShieldAlert },
@@ -629,9 +629,6 @@ export default function QuotationToolsView({
               <h2 className="text-base font-extrabold text-slate-900">
                 Solar Quotation Master Configuration
               </h2>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                Live Studio Templates
-              </span>
               {hasUnsavedChanges && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
                   <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />

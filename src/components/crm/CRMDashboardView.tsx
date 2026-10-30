@@ -219,7 +219,7 @@ export default function CRMDashboardView({
     })).sort((a, b) => b.value - a.value);
   }, [opportunities]);
 
-  // Recent 10 Opportunities (Sorted by latest createdAt/date)
+  // Recent 5 Opportunities (Sorted by latest createdAt/date)
   const recentOpportunities = useMemo(() => {
     return [...opportunities]
       .sort((a, b) => {
@@ -228,7 +228,7 @@ export default function CRMDashboardView({
         if (timeB !== timeA) return timeB - timeA;
         return (b.id || '').localeCompare(a.id || '');
       })
-      .slice(0, 10);
+      .slice(0, 5);
   }, [opportunities]);
 
   return (
@@ -244,7 +244,7 @@ export default function CRMDashboardView({
               Total Pipeline
             </span>
             <span className="text-sky-600 bg-sky-50 p-1.5 rounded-lg shrink-0">
-              <Target className="w-4 h-4" />
+              <Briefcase className="w-4 h-4" />
             </span>
           </div>
           <div className="mt-2">

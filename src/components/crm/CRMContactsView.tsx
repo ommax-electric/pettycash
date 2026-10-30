@@ -348,6 +348,11 @@ export default function CRMContactsView({
       }
 
       return true;
+    }).sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (timeB !== timeA) return timeB - timeA;
+      return (b.id || '').localeCompare(a.id || '', undefined, { numeric: true });
     });
   }, [contacts, accounts, filterAccounts, filterStatus, filterLocation, filterOwner]);
 

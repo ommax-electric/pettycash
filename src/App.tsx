@@ -3588,7 +3588,7 @@ export default function App() {
 
               {/* Quotation Headers */}
               {activeTab === 'QUOTATION_PROPOSAL' && 'Quotations & Proposals'}
-              {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Studio'}
+              {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Tools'}
 
               {/* HRMS Header */}
               {activeTab === 'HRMS' && 'Human Resources Management System'}
@@ -3918,7 +3918,7 @@ export default function App() {
 
                 {/* Quotation Headers */}
                 {activeTab === 'QUOTATION_PROPOSAL' && 'Quotations & Proposals'}
-                {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Studio'}
+                {activeTab === 'QUOTATION_TOOLS' && 'Quotation & Proposal Tools'}
 
                 {/* HRMS Header */}
                 {activeTab === 'HRMS' && 'Human Resources Management System'}
