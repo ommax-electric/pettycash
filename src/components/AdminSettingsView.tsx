@@ -1923,14 +1923,16 @@ export default function AdminSettingsView({
       ]);
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.map(val => `"${val}"`).join(",")).join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = "\uFEFF" + csvRows.map(e => e.map(val => `"${val}"`).join(",")).join("\r\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `system_audit_report_${new Date().toISOString().slice(0,10)}.csv`);
+    link.href = url;
+    link.setAttribute("download", `system_audit_report_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleClearLogsConfirm = async () => {
@@ -2006,17 +2008,19 @@ export default function AdminSettingsView({
 
   // Helper to determine parent module from log item
   const getLogParentModule = (log: ActivityLog): string => {
-    if (log.module) {
-      if (log.module === 'Petty Cash' || log.module === 'Queries') return 'Cash Book';
-      if (log.module === 'System Ops') return 'Admin Settings';
-      return log.module;
-    }
+    // Check specific known action codes first to correctly handle historical or mislabeled logs
     if (log.action.startsWith('CRM_') || log.action.includes('ACCOUNT') || log.action.includes('CONTACT') || log.action.includes('OPPORTUNITY')) return 'CRM';
     if (log.action.startsWith('QUOTATION_') || log.action.includes('QUOTATION')) return 'Quotation';
     if (log.action.startsWith('HRMS_')) return 'HRMS';
     if (log.action.startsWith('SETTINGS_') || log.action === 'CHANGE_PASSWORD') return 'Settings';
-    if (log.action.startsWith('QUERY_') || log.action.startsWith('EXPENSE_QUERY')) return 'Cash Book';
     if (log.action.startsWith('USER_') || log.action.startsWith('APP_') || log.action.startsWith('SYSTEM_') || log.action.startsWith('LOGS_') || log.action.startsWith('CATEGORY_') || log.action.startsWith('INTEGRATION_')) return 'Admin Settings';
+    if (log.action.startsWith('QUERY_') || log.action.startsWith('EXPENSE_QUERY')) return 'Cash Book';
+
+    if (log.module) {
+      if (log.module === 'Petty Cash' || log.module === 'Queries' || log.module === 'Cash Book') return 'Cash Book';
+      if (log.module === 'System Ops') return 'Admin Settings';
+      return log.module;
+    }
     return 'Cash Book';
   };
 
@@ -2049,8 +2053,8 @@ export default function AdminSettingsView({
   // Filter audit logs
   const filteredLogs = logs.filter(log => {
     // Parent Module Filter
+    const parentMod = getLogParentModule(log);
     if (auditFilterModule !== 'ALL') {
-      const parentMod = getLogParentModule(log);
       if (parentMod.toLowerCase() !== auditFilterModule.toLowerCase()) return false;
     }
 
@@ -2059,11 +2063,26 @@ export default function AdminSettingsView({
       if (log.user !== auditFilterUser) return false;
     }
 
-    // Action Category Filter
-    if (auditFilterAction === 'LOGIN') return log.action === 'LOGIN_SUCCESS' || log.action === 'LOGOUT';
-    if (auditFilterAction === 'LEDGER') return log.action.startsWith('TXN_');
-    if (auditFilterAction === 'USER_ADMIN') return log.action.startsWith('USER_');
-    if (auditFilterAction === 'SYSTEM') return log.action.startsWith('SYSTEM_') || log.action.startsWith('APP_') || log.action.startsWith('CATEGORY_') || log.action.startsWith('LOGS_');
+    // Action Category Filter (dynamic & comprehensive)
+    if (auditFilterAction === 'ALL') return true;
+    if (auditFilterAction === 'LOGIN') {
+      return log.action === 'LOGIN_SUCCESS' || log.action === 'LOGOUT';
+    }
+    if (auditFilterAction === 'LEDGER') {
+      return log.action.startsWith('TXN_') || log.action === 'PAY' || log.action === 'APPROVE' || log.action === 'UPDATE_TRANSACTION';
+    }
+    if (auditFilterAction === 'CRM_OPS') {
+      return log.action.startsWith('CRM_') || log.action.includes('ACCOUNT') || log.action.includes('CONTACT') || log.action.includes('OPPORTUNITY');
+    }
+    if (auditFilterAction === 'QUOTATION_OPS') {
+      return log.action.startsWith('QUOTATION_') || log.action.includes('QUOTATION');
+    }
+    if (auditFilterAction === 'USER_ADMIN') {
+      return log.action.startsWith('USER_');
+    }
+    if (auditFilterAction === 'SYSTEM') {
+      return log.action.startsWith('SYSTEM_') || log.action.startsWith('APP_') || log.action.startsWith('CATEGORY_') || log.action.startsWith('LOGS_') || log.action.startsWith('INTEGRATION_');
+    }
     return true;
   });
 
@@ -3331,17 +3350,31 @@ export default function AdminSettingsView({
                     ))}
                   </select>
 
-                  {/* Filter category */}
+                  {/* Filter category (Module-aware action filter) */}
                   <select
                     value={auditFilterAction}
                     onChange={(e) => setAuditFilterAction(e.target.value)}
                     className="py-2 px-3 bg-slate-50 border border-slate-200 focus:border-[#f7b944] focus:bg-white focus:outline-hidden rounded-xl text-xs text-slate-700 font-medium cursor-pointer"
                   >
                     <option value="ALL">All Actions</option>
-                    <option value="LOGIN">Security & Auth</option>
-                    <option value="LEDGER">Ledger Movements</option>
-                    <option value="USER_ADMIN">User Management</option>
-                    <option value="SYSTEM">System Operations</option>
+                    {(auditFilterModule === 'ALL' || auditFilterModule === 'Cash Book') && (
+                      <option value="LEDGER">Ledger Movements & Vouchers</option>
+                    )}
+                    {(auditFilterModule === 'ALL' || auditFilterModule === 'CRM') && (
+                      <option value="CRM_OPS">CRM Accounts, Contacts & Deals</option>
+                    )}
+                    {(auditFilterModule === 'ALL' || auditFilterModule === 'Quotation') && (
+                      <option value="QUOTATION_OPS">Quotations & Proposals</option>
+                    )}
+                    {(auditFilterModule === 'ALL' || auditFilterModule === 'Admin Settings') && (
+                      <>
+                        <option value="USER_ADMIN">User Management</option>
+                        <option value="SYSTEM">System Operations & Config</option>
+                      </>
+                    )}
+                    {(auditFilterModule === 'ALL' || auditFilterModule === 'Settings') && (
+                      <option value="LOGIN">Security & Auth</option>
+                    )}
                   </select>
 
                   {/* Clear Logs Button */}

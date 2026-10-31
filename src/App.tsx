@@ -624,6 +624,25 @@ export default function App() {
   const addLog = (action: string, details: string, module?: string) => {
     if (!currentUser) return;
     const logId = `LOG-0${Date.now().toString().slice(-5)}`;
+
+    // Resolve parent module intelligently based on action type
+    let resolvedModule = module;
+    if (!resolvedModule) {
+      if (action.startsWith('CRM_') || action.includes('ACCOUNT') || action.includes('CONTACT') || action.includes('OPPORTUNITY')) {
+        resolvedModule = 'CRM';
+      } else if (action.startsWith('QUOTATION_') || action.includes('QUOTATION')) {
+        resolvedModule = 'Quotation';
+      } else if (action.startsWith('HRMS_')) {
+        resolvedModule = 'HRMS';
+      } else if (action.startsWith('USER_') || action.startsWith('APP_') || action.startsWith('SYSTEM_') || action.startsWith('LOGS_') || action.startsWith('CATEGORY_') || action.startsWith('INTEGRATION_')) {
+        resolvedModule = 'Admin Settings';
+      } else if (action.startsWith('SETTINGS_') || action === 'CHANGE_PASSWORD') {
+        resolvedModule = 'Settings';
+      } else {
+        resolvedModule = 'Cash Book';
+      }
+    }
+
     const newLog: ActivityLog = {
       id: logId,
       timestamp: new Date().toISOString(),
@@ -631,7 +650,7 @@ export default function App() {
       role: currentUser.role,
       action,
       details,
-      module: module || 'Cash Book'
+      module: resolvedModule
     };
     setLogs(prev => [newLog, ...prev]);
     setDoc(doc(db, 'logs', logId), newLog).catch(e => console.warn('Log save error:', e));
@@ -3868,6 +3887,7 @@ export default function App() {
               onBackupData={handleBackupData}
               onRestoreData={handleRestoreData}
               onWipeAllData={handleWipeAllData}
+              onClearLogs={handleClearLogs}
               activeSubTab={adminSubTab}
               onSubTabChange={setAdminSubTab}
             />

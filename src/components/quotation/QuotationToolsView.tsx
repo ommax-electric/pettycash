@@ -37,6 +37,7 @@ import {
   Edit2,
   Save, 
   RotateCcw, 
+  History,
   Check, 
   Layers, 
   HelpCircle,
@@ -57,6 +58,16 @@ import {
 } from 'lucide-react';
 
 const STORAGE_KEY = 'ommax_solar_quotation_master_config';
+const SNAPSHOTS_STORAGE_KEY = 'ommax_solar_quotation_master_config_snapshots';
+
+export interface ConfigSnapshot {
+  id: string;
+  timestamp: string;
+  formattedTime: string;
+  savedBy: string;
+  modifiedTabLabel: string;
+  config: QuotationMasterConfig;
+}
 
 interface QuotationToolsViewProps {
   opportunities?: CRMOpportunity[];
@@ -188,6 +199,20 @@ export default function QuotationToolsView({
   const [pendingTabChange, setPendingTabChange] = useState<MasterConfigTab | null>(null);
   const [showDiscardConfirmDialog, setShowDiscardConfirmDialog] = useState(false);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
+
+  // Version Snapshots State
+  const [snapshots, setSnapshots] = useState<ConfigSnapshot[]>(() => {
+    try {
+      const saved = localStorage.getItem(SNAPSHOTS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse config snapshots', e);
+    }
+    return [];
+  });
+  const [showSnapshotsDialog, setShowSnapshotsDialog] = useState(false);
+  const [selectedSnapshotToRestore, setSelectedSnapshotToRestore] = useState<ConfigSnapshot | null>(null);
+  const [snapshotSuccessMsg, setSnapshotSuccessMsg] = useState('');
 
   // Temporary item add states
   const [newSupplyItem, setNewSupplyItem] = useState('');
@@ -333,6 +358,72 @@ export default function QuotationToolsView({
     });
   };
 
+  const getTabLabel = (tabId: MasterConfigTab): string => {
+    const tabMap: Record<MasterConfigTab, string> = {
+      GENERAL: 'General',
+      INTRO: 'Intro',
+      SCOPE_OF_WORK: 'Scope of Work',
+      ADDON_PRICING: 'Pricing',
+      PAYMENT_TERMS: 'Payment Terms',
+      BANKING_DETAILS: 'Banking Details',
+      TERMS_AND_CONDITIONS: 'Terms & Conditions',
+      WARRANTY: 'Warranty',
+      PROJECT_COMPLETION: 'Project Completion',
+      ESTIMATED_SOLAR_BENEFITS: 'Estimated Solar Benefits',
+      BRAND_DECLARATION: 'Brand Declaration',
+      TECHNICAL_ASSUMPTIONS: 'Technical Assumptions',
+      EXCLUSIONS: 'Exclusions',
+      DISCLAIMER: 'Disclaimer'
+    };
+    return tabMap[tabId] || tabId;
+  };
+
+  const formatSnapshotDateTime = (date: Date): string => {
+    try {
+      const dd = String(date.getDate()).padStart(2, '0');
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const yyyy = date.getFullYear();
+      let hours = date.getHours();
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12; // hour '0' should be '12'
+      const strHours = String(hours).padStart(2, '0');
+      return `${dd}-${mm}-${yyyy} ${strHours}:${minutes} ${ampm}`;
+    } catch {
+      return date.toLocaleString('en-IN');
+    }
+  };
+
+  const createAndStoreSnapshot = (savedConfig: QuotationMasterConfig, modifiedTab: MasterConfigTab) => {
+    try {
+      const now = new Date();
+      const author = currentUser?.fullName || currentUser?.username || 'Admin';
+      const tabLabel = getTabLabel(modifiedTab);
+      const newSnapshot: ConfigSnapshot = {
+        id: `snap-${Date.now()}`,
+        timestamp: now.toISOString(),
+        formattedTime: formatSnapshotDateTime(now),
+        savedBy: author,
+        modifiedTabLabel: tabLabel,
+        config: JSON.parse(JSON.stringify(savedConfig))
+      };
+
+      setSnapshots(prev => {
+        // Keep up to 15 recent snapshots
+        const updated = [newSnapshot, ...prev.filter(s => s.id !== newSnapshot.id)].slice(0, 15);
+        try {
+          localStorage.setItem(SNAPSHOTS_STORAGE_KEY, JSON.stringify(updated));
+        } catch (e) {
+          console.warn('Failed to store snapshot in localStorage', e);
+        }
+        return updated;
+      });
+    } catch (err) {
+      console.warn('Error creating snapshot', err);
+    }
+  };
+
   const handleSaveConfig = () => {
     try {
       const stringified = JSON.stringify(config);
@@ -341,6 +432,7 @@ export default function QuotationToolsView({
         onUpdateMasterConfig(config);
       }
       setLastSavedJson(stringified);
+      createAndStoreSnapshot(config, activeTab);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err) {
@@ -362,6 +454,34 @@ export default function QuotationToolsView({
     setShowDiscardConfirmDialog(false);
   };
 
+  const handleRestoreSnapshot = (snap: ConfigSnapshot) => {
+    setSelectedSnapshotToRestore(snap);
+  };
+
+  const executeRestoreSnapshot = () => {
+    if (!selectedSnapshotToRestore) return;
+    try {
+      const restoredConfig = JSON.parse(JSON.stringify(selectedSnapshotToRestore.config));
+      const stringified = JSON.stringify(restoredConfig);
+      setConfig(restoredConfig);
+      localStorage.setItem(STORAGE_KEY, stringified);
+      if (onUpdateMasterConfig) {
+        onUpdateMasterConfig(restoredConfig);
+      }
+      setLastSavedJson(stringified);
+      // Create a new snapshot of this restoration action
+      createAndStoreSnapshot(restoredConfig, activeTab);
+      setSelectedSnapshotToRestore(null);
+      setShowSnapshotsDialog(false);
+      setSnapshotSuccessMsg(`Successfully restored snapshot from ${selectedSnapshotToRestore.formattedTime}`);
+      setTimeout(() => setSnapshotSuccessMsg(''), 4000);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    } catch (err) {
+      console.error('Failed to restore snapshot', err);
+    }
+  };
+
   const handleResetToDefaults = () => {
     setShowResetConfirmDialog(true);
   };
@@ -374,6 +494,7 @@ export default function QuotationToolsView({
       onUpdateMasterConfig(DEFAULT_QUOTATION_MASTER_CONFIG);
     }
     setLastSavedJson(stringified);
+    createAndStoreSnapshot(DEFAULT_QUOTATION_MASTER_CONFIG, activeTab);
     setShowResetConfirmDialog(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2500);
@@ -525,20 +646,164 @@ export default function QuotationToolsView({
         </div>
       )}
 
+      {/* Version Snapshots List Modal */}
+      {showSnapshotsDialog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-4 sm:p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+                    Version Snapshots & Restore
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Safe backups captured automatically on every saved change
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSnapshotsDialog(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* List of Snapshots */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {snapshots.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-700">No snapshots recorded yet</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Snapshots are automatically created whenever an Admin saves changes in any tab.
+                  </p>
+                </div>
+              ) : (
+                snapshots.map((snap, idx) => (
+                  <div
+                    key={snap.id}
+                    className="p-3 sm:p-3.5 bg-slate-50 hover:bg-amber-50/50 border border-slate-200/90 hover:border-amber-300 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900">
+                          Saved on {snap.formattedTime}
+                        </span>
+                        {idx === 0 && (
+                          <span className="text-[9.5px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            Latest Version
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-600 flex items-center gap-1.5 flex-wrap">
+                        <span>by <strong className="text-slate-800">{snap.savedBy}</strong></span>
+                        <span className="text-slate-300">•</span>
+                        <span>changes made in <strong className="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60 font-semibold">{snap.modifiedTabLabel}</strong></span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRestoreSnapshot(snap)}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200 hover:border-blue-600 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs shrink-0 self-end sm:self-auto"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Restore This Snapshot</span>
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer with Factory Reset option in a safe air-gapped area */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-[11px] text-slate-500">
+              <span className="text-center sm:text-left">
+                Restoring a snapshot will safely load all previous pricing, brands, and template rules.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSnapshotsDialog(false);
+                    setShowResetConfirmDialog(true);
+                  }}
+                  className="text-rose-600 hover:text-rose-800 text-[11px] font-bold underline cursor-pointer"
+                  title="Factory Reset (Erases all data back to original installation)"
+                >
+                  Factory Defaults
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Snapshot Restore Confirmation Modal */}
+      {selectedSnapshotToRestore && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-5 sm:p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-black text-slate-900 tracking-tight">
+                  Restore Selected Configuration Snapshot?
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  This will safely restore the master configuration back to:
+                </p>
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-1">
+                  <div className="font-extrabold text-slate-900">
+                    Saved on {selectedSnapshotToRestore.formattedTime}
+                  </div>
+                  <div className="text-slate-600 text-[11px]">
+                    by <strong className="text-slate-800">{selectedSnapshotToRestore.savedBy}</strong> • changes made in <strong className="text-blue-700">{selectedSnapshotToRestore.modifiedTabLabel}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSelectedSnapshotToRestore(null)}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeRestoreSnapshot}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Confirm Restore</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reset to Defaults Confirmation Modal */}
       {showResetConfirmDialog && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150 space-y-4">
             <div className="flex items-start gap-3.5">
               <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
-                <RotateCcw className="w-5 h-5" />
+                <AlertTriangle className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-black text-slate-900 tracking-tight">
                   Reset Master Configuration to Factory Defaults?
                 </h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  This will restore all default system dropdowns, standard pricing rates, clauses, and template text to their original factory defaults.
+                  This will restore all default system dropdowns, standard pricing rates, clauses, and template text to their original factory defaults. Custom prices and brand libraries will be reset.
                 </p>
               </div>
             </div>
@@ -618,6 +883,23 @@ export default function QuotationToolsView({
         </div>
       )}
 
+      {/* Snapshot Restore Success Banner */}
+      {snapshotSuccessMsg && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-bold text-emerald-800 shadow-xs animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{snapshotSuccessMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSnapshotSuccessMsg('')}
+            className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-600 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Master Configuration Hub Top Bar */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -642,16 +924,21 @@ export default function QuotationToolsView({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {currentUser?.role === 'ADMIN' && (
             <button
               type="button"
-              onClick={handleResetToDefaults}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              title="Reset to factory defaults (Admin Only)"
+              onClick={() => setShowSnapshotsDialog(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+              title="View and restore previous configuration snapshots (Admin Only)"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              <span>Reset Defaults</span>
+              <History className="w-3.5 h-3.5 text-blue-600" />
+              <span>Version Snapshots</span>
+              {snapshots.length > 0 && (
+                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-blue-100 text-blue-800">
+                  {snapshots.length}
+                </span>
+              )}
             </button>
           )}
 
