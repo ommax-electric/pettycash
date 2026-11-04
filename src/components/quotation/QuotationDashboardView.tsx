@@ -62,7 +62,8 @@ import {
   CheckSquare,
   Square,
   Save,
-  AlertTriangle
+  AlertTriangle,
+  GitFork
 } from 'lucide-react';
 import Quotation5PagePrintView from './Quotation5PagePrintView';
 
@@ -77,7 +78,12 @@ interface QuotationDashboardViewProps {
   masterConfig?: QuotationMasterConfig;
   onNavigateToTools: (quotationToEdit?: SolarQuotation) => void;
   onSaveQuotation?: (quotation: SolarQuotation, isSubmit?: boolean) => void;
-  onUpdateQuotationStatus: (quotationId: string, status: QuotationStatus, reason?: string) => void;
+  onUpdateQuotationStatus: (
+    quotationId: string, 
+    status: QuotationStatus, 
+    reason?: string,
+    alternativeDetails?: { alternativeToId?: string; alternativeToOfferNo?: string; alternativeNotes?: string }
+  ) => void;
   onDeleteQuotation?: (quotationId: string) => void;
   initialOpportunity?: CRMOpportunity | null;
   onClearInitialOpportunity?: () => void;
@@ -88,6 +94,7 @@ const ALL_STATUSES: { id: QuotationStatus; label: string }[] = [
   { id: 'SENT', label: 'Submitted' },
   { id: 'UNDER_REVISION', label: 'Under Revision' },
   { id: 'WON', label: 'Won / Converted' },
+  { id: 'ALTERNATIVE', label: 'Alternative Option' },
   { id: 'LOST', label: 'Lost' }
 ];
 
@@ -1113,6 +1120,28 @@ export default function QuotationDashboardView({
     lostReason: ''
   });
 
+  // Alternative Option Dialog
+  const [alternativeDialog, setAlternativeDialog] = useState<{
+    isOpen: boolean;
+    quotation: SolarQuotation | null;
+    selectedTargetId: string;
+    alternativeNotes: string;
+  }>({
+    isOpen: false,
+    quotation: null,
+    selectedTargetId: '',
+    alternativeNotes: ''
+  });
+
+  // Reopen / Undo Alternative Dialog
+  const [undoAlternativeDialog, setUndoAlternativeDialog] = useState<{
+    isOpen: boolean;
+    quotation: SolarQuotation | null;
+  }>({
+    isOpen: false,
+    quotation: null
+  });
+
   // Admin Delete Proposal Dialog
   const [deleteProposalDialog, setDeleteProposalDialog] = useState<{
     isOpen: boolean;
@@ -1286,6 +1315,10 @@ export default function QuotationDashboardView({
     const lostCount = lostList.length;
     const lostValue = lostList.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
 
+    const alternativeList = quotations.filter(q => q.status === 'ALTERNATIVE');
+    const alternativeCount = alternativeList.length;
+    const alternativeValue = alternativeList.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
+
     const activeList = quotations.filter(q => q.status === 'SENT' || q.status === 'UNDER_REVISION' || q.status === 'DRAFT');
     const activeCount = activeList.length;
     const activeValue = activeList.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
@@ -1297,6 +1330,8 @@ export default function QuotationDashboardView({
       wonValue,
       lostCount,
       lostValue,
+      alternativeCount,
+      alternativeValue,
       activeCount,
       activeValue
     };
@@ -2123,6 +2158,65 @@ export default function QuotationDashboardView({
     setStatusDialog({ isOpen: false, quotation: null, targetStatus: null, lostReason: '' });
   };
 
+  const handleOpenAlternativeDialog = (quo: SolarQuotation) => {
+    setAlternativeDialog({
+      isOpen: true,
+      quotation: quo,
+      selectedTargetId: '',
+      alternativeNotes: ''
+    });
+  };
+
+  const handleConfirmAlternative = () => {
+    if (!alternativeDialog.quotation || !alternativeDialog.selectedTargetId) return;
+    const targetQuote = quotations.find(q => q.id === alternativeDialog.selectedTargetId);
+    const targetOfferNo = targetQuote?.offerNo || targetQuote?.quotationNo || '';
+    
+    onUpdateQuotationStatus(
+      alternativeDialog.quotation.id,
+      'ALTERNATIVE',
+      undefined,
+      {
+        alternativeToId: alternativeDialog.selectedTargetId,
+        alternativeToOfferNo: targetOfferNo,
+        alternativeNotes: alternativeDialog.alternativeNotes
+      }
+    );
+    setAlternativeDialog({
+      isOpen: false,
+      quotation: null,
+      selectedTargetId: '',
+      alternativeNotes: ''
+    });
+  };
+
+  const handleConfirmUndoAlternative = () => {
+    if (!undoAlternativeDialog.quotation) return;
+    onUpdateQuotationStatus(undoAlternativeDialog.quotation.id, 'SENT');
+    setUndoAlternativeDialog({ isOpen: false, quotation: null });
+  };
+
+  // Helper to find other proposals for the same account, contact, or client
+  const getOtherQuotesForClient = (quo: SolarQuotation): SolarQuotation[] => {
+    const norm = (s?: string) => (s || '').trim().toLowerCase();
+    const qAccId = norm(quo.accountId);
+    const qAccName = norm(quo.accountName);
+    const qConId = norm(quo.contactId);
+    const qClientName = norm(quo.clientName);
+    const qOppId = norm(quo.opportunityId);
+
+    return quotations.filter(other => {
+      if (other.id === quo.id) return false;
+      // Match by account ID, contact ID, opportunity ID, or identical Account/Client name
+      if (qAccId && norm(other.accountId) === qAccId) return true;
+      if (qConId && norm(other.contactId) === qConId) return true;
+      if (qOppId && norm(other.opportunityId) === qOppId) return true;
+      if (qAccName && norm(other.accountName) === qAccName) return true;
+      if (qClientName && norm(other.clientName) === qClientName) return true;
+      return false;
+    });
+  };
+
   // Live master configuration options for dropdowns and defaults
   const masterConfig = getMasterConfig(propMasterConfig);
 
@@ -2784,15 +2878,28 @@ export default function QuotationDashboardView({
 
                     {/* Status */}
                     <td className="py-3 px-3 text-center">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-                        quo.status === 'WON' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                        quo.status === 'LOST' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
-                        quo.status === 'SENT' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                        quo.status === 'UNDER_REVISION' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                        'bg-slate-100 text-slate-700 border border-slate-200'
-                      }`}>
-                        {quo.status === 'SENT' ? 'Submitted' : quo.status === 'UNDER_REVISION' ? 'Under Revision' : quo.status === 'DRAFT' ? 'Draft' : quo.status === 'WON' ? 'Won' : quo.status === 'LOST' ? 'Lost' : quo.status}
-                      </span>
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+                          quo.status === 'WON' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                          quo.status === 'LOST' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                          quo.status === 'SENT' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                          quo.status === 'UNDER_REVISION' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                          quo.status === 'ALTERNATIVE' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                          'bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}>
+                          {quo.status === 'SENT' ? 'Submitted' : 
+                           quo.status === 'UNDER_REVISION' ? 'Under Revision' : 
+                           quo.status === 'DRAFT' ? 'Draft' : 
+                           quo.status === 'WON' ? 'Won' : 
+                           quo.status === 'LOST' ? 'Lost' : 
+                           quo.status === 'ALTERNATIVE' ? 'Alternative' : quo.status}
+                        </span>
+                        {quo.status === 'ALTERNATIVE' && quo.alternativeToOfferNo && (
+                          <span className="text-[9px] font-mono text-purple-700 font-semibold truncate max-w-[110px]" title={`Alternative to ${quo.alternativeToOfferNo}`}>
+                            ↳ {quo.alternativeToOfferNo}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Date / Validity */}
@@ -2803,66 +2910,96 @@ export default function QuotationDashboardView({
 
                     {/* Actions (Left to Right) */}
                     <td className="py-3 px-4 text-left">
-                      <div className="flex items-center justify-start gap-1.5">
-                        {/* 1. 5-Page Live Preview Modal */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPreviewQuotation(quo);
-                            setIsPreviewUnsaved(false);
-                          }}
-                          className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
-                          title="View Proposal"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                      {(() => {
+                        const siblingQuotes = getOtherQuotesForClient(quo);
+                        const hasMultipleQuotes = siblingQuotes.length > 0;
+                        return (
+                          <div className="flex items-center justify-start gap-1.5">
+                            {/* 1. 5-Page Live Preview Modal */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewQuotation(quo);
+                                setIsPreviewUnsaved(false);
+                              }}
+                              className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
+                              title="View Proposal"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
 
-                        {/* 2. Edit in Simplified Questionnaire (With Revision Intercept for Submitted) */}
-                        <button
-                          type="button"
-                          onClick={() => handleEditClick(quo)}
-                          className="p-1.5 hover:bg-amber-50 rounded-lg text-slate-500 hover:text-amber-700 transition-colors cursor-pointer"
-                          title={quo.status === 'SENT' ? 'Edit Submitted Quotation (Generates Revision)' : 'Edit Quotation Parameters'}
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+                            {/* 2. Edit in Simplified Questionnaire (With Revision Intercept for Submitted) */}
+                            <button
+                              type="button"
+                              onClick={() => handleEditClick(quo)}
+                              className="p-1.5 hover:bg-amber-50 rounded-lg text-slate-500 hover:text-amber-700 transition-colors cursor-pointer"
+                              title={quo.status === 'SENT' ? 'Edit Submitted Quotation (Generates Revision)' : 'Edit Quotation Parameters'}
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
 
-                        {/* 3. Mark Won (Only visible after submission and if not yet won) */}
-                        {quo.status !== 'DRAFT' && quo.status !== 'WON' && (
-                          <button
-                            type="button"
-                            onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'WON', lostReason: '' })}
-                            className="p-1.5 hover:bg-emerald-50 rounded-lg text-slate-500 hover:text-emerald-600 transition-colors cursor-pointer"
-                            title="Mark Won"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                          </button>
-                        )}
+                            {/* 3. Mark Won (Visible after submission and if not yet won) */}
+                            {quo.status !== 'DRAFT' && quo.status !== 'WON' && (
+                              <button
+                                type="button"
+                                onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'WON', lostReason: '' })}
+                                className="p-1.5 hover:bg-emerald-50 rounded-lg text-slate-500 hover:text-emerald-600 transition-colors cursor-pointer"
+                                title="Mark Won"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                            )}
 
-                        {/* 4. Mark Lost (Only visible after submission and if not yet lost) */}
-                        {quo.status !== 'DRAFT' && quo.status !== 'LOST' && (
-                          <button
-                            type="button"
-                            onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'LOST', lostReason: '' })}
-                            className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Mark Lost"
-                          >
-                            <XCircle className="w-4 h-4" />
-                          </button>
-                        )}
+                            {/* 4. Dynamic GitFork: Mark as Alternative (Shown when client has multiple quotes & quote is not won/alternative) */}
+                            {hasMultipleQuotes && quo.status !== 'DRAFT' && quo.status !== 'WON' && quo.status !== 'ALTERNATIVE' && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAlternativeDialog(quo)}
+                                className="p-1.5 hover:bg-purple-50 rounded-lg text-purple-600 hover:text-purple-700 transition-colors cursor-pointer"
+                                title="Mark as Alternative Option for this Client"
+                              >
+                                <GitFork className="w-4 h-4" />
+                              </button>
+                            )}
 
-                        {/* 5. Admin Delete Proposal Action (Admin only) */}
-                        {Boolean(onDeleteQuotation) && isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => setDeleteProposalDialog({ isOpen: true, quotation: quo })}
-                            className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
-                            title="Delete Proposal (Releases Offer No.)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+                            {/* 5. Undo Alternative (Shown when quote is currently ALTERNATIVE) */}
+                            {quo.status === 'ALTERNATIVE' && (
+                              <button
+                                type="button"
+                                onClick={() => setUndoAlternativeDialog({ isOpen: true, quotation: quo })}
+                                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                                title="Reopen / Undo Alternative status"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* 6. Mark Lost (Visible after submission and if not yet lost or alternative) */}
+                            {quo.status !== 'DRAFT' && quo.status !== 'LOST' && quo.status !== 'ALTERNATIVE' && (
+                              <button
+                                type="button"
+                                onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'LOST', lostReason: '' })}
+                                className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
+                                title="Mark Lost"
+                              >
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* 7. Admin Delete Proposal Action (Admin only) */}
+                            {Boolean(onDeleteQuotation) && isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteProposalDialog({ isOpen: true, quotation: quo })}
+                                className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
+                                title="Delete Proposal (Releases Offer No.)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))
@@ -2916,15 +3053,28 @@ export default function QuotationDashboardView({
                     </span>
                   </div>
 
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0 ${
-                    quo.status === 'WON' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                    quo.status === 'LOST' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
-                    quo.status === 'SENT' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                    quo.status === 'UNDER_REVISION' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                    'bg-slate-100 text-slate-700 border border-slate-200'
-                  }`}>
-                    {quo.status === 'SENT' ? 'Submitted' : quo.status === 'UNDER_REVISION' ? 'Under Revision' : quo.status === 'DRAFT' ? 'Draft' : quo.status === 'WON' ? 'Won' : quo.status === 'LOST' ? 'Lost' : quo.status}
-                  </span>
+                  <div className="flex flex-col items-end gap-0.5 shrink-0">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+                      quo.status === 'WON' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                      quo.status === 'LOST' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                      quo.status === 'SENT' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                      quo.status === 'UNDER_REVISION' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                      quo.status === 'ALTERNATIVE' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                      'bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}>
+                      {quo.status === 'SENT' ? 'Submitted' : 
+                       quo.status === 'UNDER_REVISION' ? 'Under Revision' : 
+                       quo.status === 'DRAFT' ? 'Draft' : 
+                       quo.status === 'WON' ? 'Won' : 
+                       quo.status === 'LOST' ? 'Lost' : 
+                       quo.status === 'ALTERNATIVE' ? 'Alternative' : quo.status}
+                    </span>
+                    {quo.status === 'ALTERNATIVE' && quo.alternativeToOfferNo && (
+                      <span className="text-[9px] font-mono text-purple-700 font-semibold truncate max-w-[120px]">
+                        ↳ {quo.alternativeToOfferNo}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Client Info */}
@@ -2969,58 +3119,90 @@ export default function QuotationDashboardView({
 
                 {/* Mobile Actions Toolbar (Left to Right) */}
                 <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                  <div className="flex items-center gap-1">
-                    {/* View */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewQuotation(quo);
-                        setIsPreviewUnsaved(false);
-                      }}
-                      className="p-2 hover:bg-indigo-50 rounded-lg text-slate-600 hover:text-indigo-600 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
-                      title="View Proposal"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Preview</span>
-                    </button>
+                  {(() => {
+                    const siblingQuotes = getOtherQuotesForClient(quo);
+                    const hasMultipleQuotes = siblingQuotes.length > 0;
+                    return (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {/* View */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewQuotation(quo);
+                            setIsPreviewUnsaved(false);
+                          }}
+                          className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-600 hover:text-indigo-600 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                          title="View Proposal"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Preview</span>
+                        </button>
 
-                    {/* Edit */}
-                    <button
-                      type="button"
-                      onClick={() => handleEditClick(quo)}
-                      className="p-2 hover:bg-amber-50 rounded-lg text-slate-600 hover:text-amber-700 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
-                      title={quo.status === 'SENT' ? 'Edit Submitted Quotation (Generates Revision)' : 'Edit Quotation Parameters'}
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
+                        {/* Edit */}
+                        <button
+                          type="button"
+                          onClick={() => handleEditClick(quo)}
+                          className="p-1.5 hover:bg-amber-50 rounded-lg text-slate-600 hover:text-amber-700 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                          title={quo.status === 'SENT' ? 'Edit Submitted Quotation (Generates Revision)' : 'Edit Quotation Parameters'}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
 
-                    {/* Mark Won (Only after submission) */}
-                    {quo.status !== 'DRAFT' && quo.status !== 'WON' && (
-                      <button
-                        type="button"
-                        onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'WON', lostReason: '' })}
-                        className="p-2 hover:bg-emerald-50 rounded-lg text-emerald-700 hover:text-emerald-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
-                        title="Mark Won"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Won</span>
-                      </button>
-                    )}
+                        {/* Mark Won (Only after submission) */}
+                        {quo.status !== 'DRAFT' && quo.status !== 'WON' && (
+                          <button
+                            type="button"
+                            onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'WON', lostReason: '' })}
+                            className="p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-700 hover:text-emerald-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                            title="Mark Won"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Won</span>
+                          </button>
+                        )}
 
-                    {/* Mark Lost (Only after submission) */}
-                    {quo.status !== 'DRAFT' && quo.status !== 'LOST' && (
-                      <button
-                        type="button"
-                        onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'LOST', lostReason: '' })}
-                        className="p-2 hover:bg-rose-50 rounded-lg text-rose-700 hover:text-rose-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
-                        title="Mark Lost"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Lost</span>
-                      </button>
-                    )}
-                  </div>
+                        {/* Dynamic GitFork: Mark as Alternative (Shown when client has multiple quotes) */}
+                        {hasMultipleQuotes && quo.status !== 'DRAFT' && quo.status !== 'WON' && quo.status !== 'ALTERNATIVE' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAlternativeDialog(quo)}
+                            className="p-1.5 hover:bg-purple-50 rounded-lg text-purple-700 hover:text-purple-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                            title="Mark as Alternative Option"
+                          >
+                            <GitFork className="w-3.5 h-3.5" />
+                            <span>Alternative</span>
+                          </button>
+                        )}
+
+                        {/* Undo Alternative */}
+                        {quo.status === 'ALTERNATIVE' && (
+                          <button
+                            type="button"
+                            onClick={() => setUndoAlternativeDialog({ isOpen: true, quotation: quo })}
+                            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                            title="Reopen / Undo Alternative status"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reopen</span>
+                          </button>
+                        )}
+
+                        {/* Mark Lost (Only after submission) */}
+                        {quo.status !== 'DRAFT' && quo.status !== 'LOST' && quo.status !== 'ALTERNATIVE' && (
+                          <button
+                            type="button"
+                            onClick={() => setStatusDialog({ isOpen: true, quotation: quo, targetStatus: 'LOST', lostReason: '' })}
+                            className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-700 hover:text-rose-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold"
+                            title="Mark Lost"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Lost</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Delete (Admin only) */}
                   {Boolean(onDeleteQuotation) && isAdmin && (
@@ -3740,6 +3922,173 @@ export default function QuotationDashboardView({
                 }`}
               >
                 Confirm {statusDialog.targetStatus}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ALTERNATIVE OPTION DIALOG (LINK AS ALTERNATIVE TO ANOTHER QUOTE)           */}
+      {/* ========================================================================= */}
+      {alternativeDialog.isOpen && alternativeDialog.quotation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-purple-50 text-purple-700 rounded-xl shrink-0">
+                <GitFork className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                  Mark as Alternative Option
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Target Quote: <strong className="font-mono text-slate-800">{alternativeDialog.quotation.offerNo || alternativeDialog.quotation.quotationNo}</strong> ({alternativeDialog.quotation.capacityKw} kW - ₹{(alternativeDialog.quotation.grandTotal || 0).toLocaleString('en-IN')})
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-purple-50/60 border border-purple-200/70 rounded-xl p-3 text-xs text-purple-950 space-y-1">
+              <p className="font-bold">Accurate Win-Rate Protection:</p>
+              <p className="text-[11px] text-purple-800/90 leading-relaxed">
+                Marking this quote as an <strong>Alternative</strong> documents it as a secondary proposal without counting it as Lost, keeping your conversion metrics accurate.
+              </p>
+            </div>
+
+            {/* List sibling proposals to manually choose the primary accepted/counterpart proposal */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Select which proposal this quote was an alternative option to:
+              </label>
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {(() => {
+                  const candidateQuotes = getOtherQuotesForClient(alternativeDialog.quotation);
+                  if (candidateQuotes.length === 0) {
+                    return (
+                      <div className="p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-500">
+                        No other proposals found for this account/client.
+                      </div>
+                    );
+                  }
+                  return candidateQuotes.map((candidate) => {
+                    const isSelected = alternativeDialog.selectedTargetId === candidate.id;
+                    return (
+                      <label
+                        key={candidate.id}
+                        className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-purple-50/70 border-purple-400 text-slate-900 shadow-2xs'
+                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="alternativeTarget"
+                          value={candidate.id}
+                          checked={isSelected}
+                          onChange={() => setAlternativeDialog(prev => ({ ...prev, selectedTargetId: candidate.id }))}
+                          className="mt-0.5 w-4 h-4 text-purple-600 focus:ring-purple-500 border-slate-300 cursor-pointer"
+                        />
+                        <div className="flex-1 min-w-0 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono font-bold text-slate-900">
+                              {candidate.offerNo || candidate.quotationNo} ({candidate.revisionCode || 'R0'})
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              candidate.status === 'WON' ? 'bg-emerald-100 text-emerald-800' :
+                              candidate.status === 'SENT' ? 'bg-blue-100 text-blue-800' :
+                              'bg-slate-100 text-slate-700'
+                            }`}>
+                              {candidate.status}
+                            </span>
+                          </div>
+                          <div className="text-slate-600 text-[11px] mt-0.5 truncate">
+                            {candidate.capacityKw} kW • {candidate.systemType.replace('_', ' ')} • ₹{(candidate.grandTotal || 0).toLocaleString('en-IN')}
+                          </div>
+                          {candidate.title && candidate.title !== 'Solar Rooftop EPC Proposal' && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                              {candidate.title}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
+            {/* Optional Note */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Note / Reason (Optional)
+              </label>
+              <input
+                type="text"
+                value={alternativeDialog.alternativeNotes}
+                onChange={(e) => setAlternativeDialog(prev => ({ ...prev, alternativeNotes: e.target.value }))}
+                placeholder="e.g. Client opted for String Inverter model over Hybrid"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-400 focus:outline-hidden"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setAlternativeDialog({ isOpen: false, quotation: null, selectedTargetId: '', alternativeNotes: '' })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!alternativeDialog.selectedTargetId}
+                onClick={handleConfirmAlternative}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <GitFork className="w-3.5 h-3.5" />
+                <span>Confirm Alternative Option</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* UNDO / REOPEN ALTERNATIVE DIALOG                                          */}
+      {/* ========================================================================= */}
+      {undoAlternativeDialog.isOpen && undoAlternativeDialog.quotation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-slate-100 text-slate-700 rounded-xl shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Reopen Alternative Proposal?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  This will remove the <strong>Alternative</strong> status from proposal <strong className="font-mono text-slate-800">{undoAlternativeDialog.quotation.offerNo}</strong> and restore it to <strong>Submitted / Active</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setUndoAlternativeDialog({ isOpen: false, quotation: null })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUndoAlternative}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reopen Proposal</span>
               </button>
             </div>
           </div>

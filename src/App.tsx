@@ -2818,14 +2818,28 @@ export default function App() {
     setOpenParentModule('QUOTATION');
   };
 
-  const handleUpdateQuotationStatus = async (quotationId: string, status: QuotationStatus, reason?: string) => {
+  const handleUpdateQuotationStatus = async (
+    quotationId: string, 
+    status: QuotationStatus, 
+    reason?: string,
+    alternativeDetails?: { alternativeToId?: string; alternativeToOfferNo?: string; alternativeNotes?: string }
+  ) => {
     const target = quotations.find(q => q.id === quotationId);
     if (!target) return;
 
     const updated: SolarQuotation = {
       ...target,
       status,
-      lostReason: status === 'LOST' ? (reason || target.lostReason) : target.lostReason
+      lostReason: status === 'LOST' ? (reason || target.lostReason) : target.lostReason,
+      alternativeToId: status === 'ALTERNATIVE' 
+        ? (alternativeDetails?.alternativeToId || target.alternativeToId)
+        : undefined,
+      alternativeToOfferNo: status === 'ALTERNATIVE'
+        ? (alternativeDetails?.alternativeToOfferNo || target.alternativeToOfferNo)
+        : undefined,
+      alternativeNotes: status === 'ALTERNATIVE'
+        ? (alternativeDetails?.alternativeNotes || reason || target.alternativeNotes)
+        : undefined
     };
 
     setQuotations(prev => prev.map(q => q.id === quotationId ? updated : q));
@@ -2833,7 +2847,9 @@ export default function App() {
       await setDoc(doc(db, 'solar_quotations', quotationId), updated);
       addLog(
         'UPDATE_QUOTATION_STATUS',
-        `Marked Quotation ${target.offerNo || target.quotationNo} (${target.revisionCode}) as ${status}${reason ? ` - Reason: ${reason}` : ''}`
+        `Marked Quotation ${target.offerNo || target.quotationNo} (${target.revisionCode}) as ${status}${
+          status === 'ALTERNATIVE' && updated.alternativeToOfferNo ? ` (Alternative to ${updated.alternativeToOfferNo})` : ''
+        }${reason ? ` - Reason: ${reason}` : ''}`
       );
     } catch (err) {
       console.error('Error updating quotation status:', err);

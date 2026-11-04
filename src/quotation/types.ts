@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type QuotationStatus = 'DRAFT' | 'SENT' | 'UNDER_REVISION' | 'WON' | 'LOST' | 'EXPIRED';
+export type QuotationStatus = 'DRAFT' | 'SENT' | 'UNDER_REVISION' | 'WON' | 'LOST' | 'EXPIRED' | 'ALTERNATIVE';
 
 export type QuotationType = 'SOLAR_EPC' | 'STANDARD_BOQ';
 
@@ -185,6 +185,9 @@ export interface SolarQuotation {
   wonAt?: string;
   lostAt?: string;
   lostReason?: string;
+  alternativeToId?: string;
+  alternativeToOfferNo?: string;
+  alternativeNotes?: string;
   revisionHistory: QuotationRevision[];
   notes?: string;
 }
