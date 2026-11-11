@@ -1363,18 +1363,18 @@ export default function CRMContactsView({
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         
         {/* Desktop Table View (Hidden on mobile) */}
-        <div className="hidden md:block overflow-x-auto min-w-full">
-          <table className="w-full text-left text-xs border-collapse">
+        <div className="hidden md:block overflow-x-auto w-full">
+          <table className="w-full text-left text-xs border-collapse min-w-full">
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10.5px] tracking-wider">
-                <th className="py-3 px-4 font-bold">ID</th>
-                <th className="py-3 px-4 font-bold">Name</th>
-                <th className="py-3 px-4 font-bold">Account</th>
-                <th className="py-3 px-4 font-bold">Location</th>
-                <th className="py-3 px-4 font-bold">Contacts</th>
-                <th className="py-3 px-4 font-bold">Status</th>
-                <th className="py-3 px-4 font-bold">Contact Owner</th>
-                <th className="py-3 px-4 font-bold text-right">Actions</th>
+              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] xl:text-[10.5px] tracking-wider">
+                <th className="py-2.5 px-2.5 xl:px-3 font-bold">ID</th>
+                <th className="py-2.5 px-2.5 xl:px-3 font-bold">Name</th>
+                <th className="py-2.5 px-2 xl:px-2.5 font-bold">Account</th>
+                <th className="py-2.5 px-2 xl:px-2.5 font-bold">Location</th>
+                <th className="py-2.5 px-2 xl:px-2.5 font-bold">Contacts</th>
+                <th className="py-2.5 px-2 xl:px-2.5 font-bold">Status</th>
+                <th className="py-2.5 px-2 xl:px-2.5 font-bold">Owner</th>
+                <th className="py-2.5 px-2.5 xl:px-3 font-bold text-right sticky right-0 bg-slate-50/95 backdrop-blur-xs shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1385,17 +1385,17 @@ export default function CRMContactsView({
                 const isIndependent = !con.accountId || con.accountId === 'INDEPENDENT';
 
                 return (
-                  <tr key={con.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={con.id} className="hover:bg-slate-50/80 transition-colors group">
                     
                     {/* 1. ID Column (Clickable to view details & audit history) */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
+                    <td className="py-2.5 px-2.5 xl:px-3 whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => {
                           setViewingContact(con);
                           setShowContactHistory(true);
                         }}
-                        className="font-mono font-extrabold text-blue-600 hover:text-blue-800 hover:underline text-[11px] cursor-pointer text-left focus:outline-none"
+                        className="font-mono font-extrabold text-blue-600 hover:text-blue-800 hover:underline text-[10.5px] xl:text-[11px] cursor-pointer text-left focus:outline-none"
                         title="Click to view full details & edit history"
                       >
                         {con.id}
@@ -1403,19 +1403,19 @@ export default function CRMContactsView({
                     </td>
 
                     {/* 2. Name Column */}
-                    <td className="py-3.5 px-4 min-w-[180px]">
-                      <div className="flex items-center gap-2.5">
+                    <td className="py-2.5 px-2.5 xl:px-3 max-w-[150px] xl:max-w-[200px]">
+                      <div className="flex items-center gap-2">
                         <div 
                           onClick={() => {
                             setViewingContact(con);
                             setShowContactHistory(false);
                           }}
-                          className="w-8 h-8 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center font-bold text-xs text-amber-800 shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                          className="w-7 h-7 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center font-bold text-[11px] text-amber-800 shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
                         >
                           {initials}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1">
                             <p 
                               onClick={() => {
                                 setViewingContact(con);
@@ -1441,32 +1441,32 @@ export default function CRMContactsView({
                     </td>
 
                     {/* 3. Account Column */}
-                    <td className="py-3.5 px-4 min-w-[160px]">
-                      <div className="flex items-center gap-2">
+                    <td className="py-2.5 px-2 xl:px-2.5 max-w-[130px] xl:max-w-[170px]">
+                      <div className="flex items-center gap-1.5 truncate">
                         <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className={`font-semibold text-xs ${isIndependent ? 'text-slate-500 italic' : 'text-slate-800'}`}>
+                        <span className={`font-semibold text-xs truncate ${isIndependent ? 'text-slate-500 italic' : 'text-slate-800'}`}>
                           {con.accountName || (isIndependent ? 'Independent' : '—')}
                         </span>
                       </div>
                     </td>
 
                     {/* 4. Location Column */}
-                    <td className="py-3.5 px-4 min-w-[130px] whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 text-slate-600">
+                    <td className="py-2.5 px-2 xl:px-2.5 max-w-[120px] xl:max-w-[150px] whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 text-slate-600 truncate">
                         <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="font-medium text-xs text-slate-700">
+                        <span className="font-medium text-[11px] xl:text-xs text-slate-700 truncate">
                           {locationStr}
                         </span>
                       </div>
                     </td>
 
                     {/* 5. Contacts Column */}
-                    <td className="py-3.5 px-4 min-w-[180px]">
-                      <div className="space-y-1">
+                    <td className="py-2.5 px-2 xl:px-2.5 max-w-[145px] xl:max-w-[180px]">
+                      <div className="space-y-0.5">
                         {con.email && (
                           <div className="flex items-center gap-1.5 text-slate-700">
                             <Mail className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span className="font-mono text-[11px] truncate max-w-[170px]" title={con.email}>
+                            <span className="font-mono text-[10px] xl:text-[10.5px] truncate max-w-[135px]" title={con.email}>
                               {con.email}
                             </span>
                           </div>
@@ -1474,7 +1474,7 @@ export default function CRMContactsView({
                         {(con.mobile || con.phone) && (
                           <div className="flex items-center gap-1.5 text-slate-700">
                             <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span className="font-mono text-[11px]">
+                            <span className="font-mono text-[10px] xl:text-[10.5px]">
                               {con.mobile || con.phone}
                             </span>
                           </div>
@@ -1482,7 +1482,7 @@ export default function CRMContactsView({
                         {con.altMobile && (
                           <div className="flex items-center gap-1.5 text-slate-400">
                             <Phone className="w-3 h-3 text-slate-300 shrink-0" />
-                            <span className="font-mono text-[10px]">
+                            <span className="font-mono text-[9.5px]">
                               {con.altMobile}
                             </span>
                           </div>
@@ -1491,12 +1491,12 @@ export default function CRMContactsView({
                     </td>
 
                     {/* 6. Status Column (Editable inline dropdown for everyone) */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
+                    <td className="py-2.5 px-2 xl:px-2.5 whitespace-nowrap">
                       <div className="relative inline-block">
                         <select
                           value={con.status || 'ACTIVE'}
                           onChange={e => handleStatusSelect(con, e.target.value as ContactStatus)}
-                          className={`appearance-none pl-2.5 pr-6 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer focus:outline-hidden ${
+                          className={`appearance-none pl-2 pr-5 py-0.5 rounded-md text-[10.5px] font-bold border transition-colors cursor-pointer focus:outline-hidden ${
                             con.status === 'ACTIVE'
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100/70'
                               : con.status === 'INACTIVE'
@@ -1511,37 +1511,37 @@ export default function CRMContactsView({
                           <option value="LEFT_COMPANY">Left Company</option>
                           <option value="DO_NOT_CONTACT">Do Not Contact</option>
                         </select>
-                        <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
+                        <ChevronDown className="w-2.5 h-2.5 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
                       </div>
                     </td>
 
                     {/* 7. Contact Owner Column */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 text-slate-700 font-semibold text-xs">
+                    <td className="py-2.5 px-2 xl:px-2.5 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 text-slate-700 font-semibold text-[11px] xl:text-xs truncate max-w-[95px] xl:max-w-[130px]" title={con.assignedTo || 'Admin Operator'}>
                         <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{con.assignedTo || 'Admin Operator'}</span>
+                        <span className="truncate">{con.assignedTo || 'Admin Operator'}</span>
                       </div>
                     </td>
 
-                    {/* 8. Actions Column */}
-                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1.5">
+                    {/* 8. Actions Column - Sticky so it is always accessible */}
+                    <td className="py-2.5 px-2.5 xl:px-3 text-right whitespace-nowrap sticky right-0 bg-white group-hover:bg-slate-50 transition-colors shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">
+                      <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
                           onClick={() => {
                             setViewingContact(con);
                             setShowContactHistory(false);
                           }}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
+                          className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
                           title="View Details"
                         >
-                          <Eye className="w-4 h-4 text-slate-600" />
+                          <Eye className="w-3.5 h-3.5 text-slate-600" />
                         </button>
                         {canEdit && (
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(con)}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
+                            className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
                             title="Edit Contact"
                           >
                             <Pencil className="w-3.5 h-3.5" />
@@ -1551,7 +1551,7 @@ export default function CRMContactsView({
                           <button
                             type="button"
                             onClick={() => setDeletingContactId(con.id)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
+                            className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
                             title="Delete Contact"
                           >
                             <Trash2 className="w-3.5 h-3.5" />

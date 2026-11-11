@@ -2207,19 +2207,19 @@ export default function CRMOpportunitiesView({
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         
         {/* DESKTOP TABLE VIEW */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="hidden md:block overflow-x-auto w-full">
+          <table className="w-full text-left text-xs min-w-full">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-4">Opportunity & ID</th>
-                <th className="py-3 px-4">Contact & Client Account</th>
-                <th className="py-3 px-3">Pipeline Stage</th>
-                <th className="py-3 px-3 text-right">Deal Value ({currencySymbol})</th>
-                <th className="py-3 px-3 text-center">Win Prob.</th>
-                <th className="py-3 px-3">Expected Close</th>
-                <th className="py-3 px-3">Lead Source</th>
-                <th className="py-3 px-3">Assigned Account</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-2.5 px-2.5 xl:px-3.5">Opportunity & ID</th>
+                <th className="py-2.5 px-2 xl:px-3">Contact & Client Account</th>
+                <th className="py-2.5 px-2 xl:px-2.5">Pipeline Stage</th>
+                <th className="py-2.5 px-2 xl:px-3 text-right">Deal Value ({currencySymbol})</th>
+                <th className="py-2.5 px-2 xl:px-2.5 text-center">Win Prob.</th>
+                <th className="py-2.5 px-2 xl:px-2.5">Expected Close</th>
+                <th className="py-2.5 px-2 xl:px-2.5">Lead Source</th>
+                <th className="py-2.5 px-2 xl:px-2.5">Assigned</th>
+                <th className="py-2.5 px-2.5 xl:px-3 text-right sticky right-0 bg-slate-50/95 backdrop-blur-xs shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -2230,11 +2230,11 @@ export default function CRMOpportunitiesView({
                 return (
                   <tr key={opp.id} className="hover:bg-slate-50/90 transition-colors group">
                     {/* Opportunity Title & ID - Clicking shows Audit History */}
-                    <td className="py-3.5 px-4 max-w-[200px]">
+                    <td className="py-2.5 px-2.5 xl:px-3.5 max-w-[160px] xl:max-w-[210px]">
                       <button
                         type="button"
                         onClick={() => setAuditHistoryOpp(opp)}
-                        className="font-extrabold text-slate-900 leading-snug truncate text-left block w-full hover:text-amber-700 hover:underline cursor-pointer"
+                        className="font-extrabold text-slate-900 leading-snug line-clamp-2 text-left block w-full hover:text-amber-700 hover:underline cursor-pointer"
                         title="Click Title to view Audit & Field History"
                       >
                         {opp.title}
@@ -2242,7 +2242,7 @@ export default function CRMOpportunitiesView({
                       <button
                         type="button"
                         onClick={() => setAuditHistoryOpp(opp)}
-                        className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200/80 transition-colors cursor-pointer hover:underline inline-flex items-center gap-1 mt-0.5"
+                        className="text-[9.5px] font-mono font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded-md border border-amber-200/80 transition-colors cursor-pointer hover:underline inline-flex items-center gap-1 mt-0.5"
                         title="Click ID to view Audit & Field History"
                       >
                         <span>{opp.id}</span>
@@ -2251,24 +2251,24 @@ export default function CRMOpportunitiesView({
                     </td>
 
                     {/* Contact & Client Account (Contact Person is Primary & Visible) */}
-                    <td className="py-3.5 px-4 max-w-[200px]">
+                    <td className="py-2.5 px-2 xl:px-3 max-w-[150px] xl:max-w-[190px]">
                       <p className="font-extrabold text-slate-900 truncate" title={opp.contactName || 'Direct Account'}>
                         {opp.contactName ? opp.contactName : 'Direct Account'}
                       </p>
-                      <p className="text-[11px] text-slate-500 font-medium truncate flex items-center gap-1 mt-0.5" title={opp.accountName}>
+                      <p className="text-[10.5px] text-slate-500 font-medium truncate flex items-center gap-1 mt-0.5" title={opp.accountName}>
                         <Building2 className="w-3 h-3 text-slate-400 shrink-0 inline" />
                         <span className="truncate">{opp.accountName}</span>
                       </p>
                     </td>
 
                     {/* Pipeline Stage Dropdown for Authorized Users & Managers / Badge for others */}
-                    <td className="py-3.5 px-3 whitespace-nowrap">
+                    <td className="py-2.5 px-2 xl:px-2.5 whitespace-nowrap">
                       {canChangeStage ? (
-                        <div className="relative inline-block">
+                        <div className="relative inline-block max-w-[125px]">
                           <select
                             value={opp.stage}
                             onChange={(e) => handleQuickStageChange(opp, e.target.value as OpportunityStage)}
-                            className="appearance-none font-extrabold font-mono text-[10px] pl-2.5 pr-6 py-1 rounded-lg border cursor-pointer focus:outline-none transition-all shadow-2xs hover:opacity-90"
+                            className="appearance-none font-extrabold font-mono text-[9.5px] xl:text-[10px] pl-2 pr-5 py-0.5 rounded-md border cursor-pointer focus:outline-none transition-all shadow-2xs hover:opacity-90 max-w-[125px] truncate"
                             style={{
                               backgroundColor: `${stage.color}15`,
                               color: stage.color,
@@ -2283,13 +2283,13 @@ export default function CRMOpportunitiesView({
                             ))}
                           </select>
                           <ChevronDown 
-                            className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
+                            className="w-2.5 h-2.5 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" 
                             style={{ color: stage.color }} 
                           />
                         </div>
                       ) : (
                         <span 
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-extrabold font-mono"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9.5px] font-extrabold font-mono"
                           style={{ 
                             backgroundColor: `${stage.color}15`,
                             color: stage.color,
@@ -2304,15 +2304,15 @@ export default function CRMOpportunitiesView({
                     </td>
 
                     {/* Commercial Deal Value */}
-                    <td className="py-3.5 px-3 text-right font-black text-slate-900 font-mono whitespace-nowrap">
+                    <td className="py-2.5 px-2 xl:px-3 text-right font-black text-slate-900 font-mono whitespace-nowrap text-[11px] xl:text-xs">
                       {currencySymbol}{Number(opp.amount).toLocaleString('en-IN')}
                     </td>
 
                     {/* Win Probability with mini bar */}
-                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                    <td className="py-2.5 px-2 xl:px-2.5 text-center whitespace-nowrap">
                       <div className="inline-flex flex-col items-center">
-                        <span className="font-bold text-xs text-slate-800">{opp.probability}%</span>
-                        <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-0.5">
+                        <span className="font-bold text-[11px] xl:text-xs text-slate-800">{opp.probability}%</span>
+                        <div className="w-9 h-1 bg-slate-100 rounded-full overflow-hidden mt-0.5">
                           <div 
                             className="h-full rounded-full" 
                             style={{ 
@@ -2325,24 +2325,24 @@ export default function CRMOpportunitiesView({
                     </td>
 
                     {/* Expected Close Date */}
-                    <td className="py-3.5 px-3 text-slate-600 font-medium whitespace-nowrap font-mono text-[11px]">
+                    <td className="py-2.5 px-2 xl:px-2.5 text-slate-600 font-medium whitespace-nowrap font-mono text-[10px] xl:text-[10.5px]">
                       {opp.expectedCloseDate ? formatCRMIDate(opp.expectedCloseDate) : '—'}
                     </td>
 
                     {/* Lead Source */}
-                    <td className="py-3.5 px-3 whitespace-nowrap">
-                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-[10px] font-semibold">
+                    <td className="py-2.5 px-2 xl:px-2.5 whitespace-nowrap">
+                      <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[9.5px] font-semibold truncate max-w-[90px] inline-block" title={opp.leadSource || 'Direct'}>
                         {opp.leadSource || 'Direct'}
                       </span>
                     </td>
 
                     {/* Assigned Account */}
-                    <td className="py-3.5 px-3 text-slate-600 text-[11px] whitespace-nowrap truncate max-w-[120px]" title={opp.assignedTo}>
+                    <td className="py-2.5 px-2 xl:px-2.5 text-slate-600 text-[10.5px] xl:text-[11px] whitespace-nowrap truncate max-w-[85px] xl:max-w-[110px]" title={opp.assignedTo}>
                       {opp.assignedTo || '—'}
                     </td>
 
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                    {/* Actions - Sticky so it is always accessible */}
+                    <td className="py-2.5 px-2.5 xl:px-3 text-right whitespace-nowrap sticky right-0 bg-white group-hover:bg-slate-50 transition-colors shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">
                       {(() => {
                         const existingQuotation = quotations?.find(
                           q => (q.opportunityId && q.opportunityId === opp.id) || (q.opportunityTitle && q.opportunityTitle === opp.title)
