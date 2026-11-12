@@ -1923,9 +1923,9 @@ export default function QuotationToolsView({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <label className="text-[11px] font-extrabold text-amber-950 flex items-center gap-1.5">
-                        <span>Current Solar Plate Rating (Wp)</span>
+                        <span>Default Solar Plate Rating (Wp)</span>
                       </label>
-                      <p className="text-[10px] text-amber-800/80">Used to calculate exact kWp & panel count from system kW</p>
+                      <p className="text-[10px] text-amber-800/80">Sets the default wattage of the plate (e.g. 540 Wp, 545 Wp, 550 Wp, 580 Wp). Used across New Quotations to calculate exact kWp from chosen number of plates.</p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <input
@@ -1969,10 +1969,10 @@ export default function QuotationToolsView({
                   {/* Engineering Formula Visual Banner */}
                   <div className="pt-2 border-t border-amber-200/60 text-[10.5px] text-amber-900 flex items-center justify-between flex-wrap gap-2">
                     <div className="font-mono">
-                      <strong>Formula:</strong> Panels = kW × 2 | <strong>kWp = (Panels × {config.defaultSolarPlateWp || 550} Wp) ÷ 1000</strong>
+                      <strong>Formula:</strong> <strong>kWp = (Number of Plates × {config.defaultSolarPlateWp || 550} Wp) ÷ 1000</strong>
                     </div>
                     <div className="bg-white/80 px-2 py-0.5 rounded border border-amber-200 font-mono font-bold text-slate-800">
-                      e.g. 3 kW → 6 Plates = {((6 * (config.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp
+                      e.g. 6 Plates = {((6 * (config.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp | 19 Plates = {((19 * (config.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp
                     </div>
                   </div>
                 </div>

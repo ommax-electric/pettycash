@@ -648,6 +648,9 @@ function createCompleteQuotation(
     starBattery?: boolean;
     starStructure?: boolean;
     structureFeet?: number;
+    capacityKwp?: number;
+    plateCount?: number;
+    plateWp?: number;
   },
   masterConfig: QuotationMasterConfig,
   currentUser: User | null,
@@ -754,12 +757,18 @@ function createCompleteQuotation(
   }
 
   const acCapacityKw = capacity;
-  const dcCapacityKwp = deriveDcCapacityKwp(capacity, undefined, masterConfig.defaultSolarPlateWp, formData.solarModule);
+  const plateWp = formData.plateWp || masterConfig.defaultSolarPlateWp || 550;
+  const plateCount = formData.plateCount || (formData.capacityKwp ? Math.round((formData.capacityKwp * 1000) / plateWp) : Math.round(capacity * 2));
+  const dcCapacityKwp = formData.capacityKwp 
+    ? formData.capacityKwp 
+    : (plateCount > 0 ? parseFloat(((plateCount * plateWp) / 1000).toFixed(2)) : deriveDcCapacityKwp(capacity, undefined, plateWp, formData.solarModule, plateCount));
 
   // BOQ Items - Standardized base items + configured defaults from Pricing
   const boqItems: BOQItem[] = buildDefaultBOQItems({
     capacityKw: acCapacityKw,
     capacityKwp: dcCapacityKwp,
+    plateCount: plateCount,
+    plateWp: plateWp,
     solarModule: formData.solarModule,
     inverter: formData.inverter,
     battery: formData.battery,
@@ -909,6 +918,8 @@ function createCompleteQuotation(
     
     capacityKw: acCapacityKw,
     capacityKwp: dcCapacityKwp,
+    plateCount: plateCount,
+    plateWp: plateWp,
     systemType: isBatteryActive ? 'HYBRID' : (formData.connectionType?.toLowerCase().includes('off') ? 'OFF_GRID' : 'ON_GRID'),
     gridEvacuationVoltage: capacity > 5 ? '415V Three Phase' : '230V Single Phase',
     
@@ -1076,8 +1087,9 @@ export default function QuotationDashboardView({
   // b. Offer No. (auto-generated, editable)
   const [formOfferNo, setFormOfferNo] = useState<string>('');
 
-  // Project Capacity
+  // Project Capacity & Number of Plates
   const [formCapacityKw, setFormCapacityKw] = useState<number>(0);
+  const [formPlateCount, setFormPlateCount] = useState<number>(0);
 
   // Connection Type, Target Segment, Schemes
   const [formSystemType, setFormSystemType] = useState<string>('');
@@ -1512,6 +1524,7 @@ export default function QuotationDashboardView({
     
     // Default capacity
     setFormCapacityKw(0);
+    setFormPlateCount(0);
 
     // Dropdown fields
     setFormSystemType('');
@@ -1564,6 +1577,9 @@ export default function QuotationDashboardView({
     setFormCapacityKw(quo.capacityKw || 0);
 
     const config = getMasterConfig(propMasterConfig);
+    const defaultWp = config.defaultSolarPlateWp || 550;
+    const existingPlates = quo.plateCount || (quo.capacityKwp ? Math.round((quo.capacityKwp * 1000) / (quo.plateWp || defaultWp)) : Math.round((quo.capacityKw || 0) * 2));
+    setFormPlateCount(existingPlates);
     setFormSystemType(quo.connectionType || (quo.systemType === 'HYBRID' ? 'Hybrid Solar System (BESS)' : quo.systemType === 'OFF_GRID' ? 'Off-Grid Standalone System' : 'On-Grid Net-Metering System'));
     setFormSegment(quo.targetSegment || 'Residential Rooftop');
     setFormScheme(quo.scheme || 'PM Surya Ghar: Muft Bijli Yojana (Central Subsidy)');
@@ -1947,6 +1963,9 @@ export default function QuotationDashboardView({
 
     const config = getMasterConfig(propMasterConfig);
     const capacity = formCapacityKw;
+    const plateWp = config.defaultSolarPlateWp || 550;
+    const plateCount = formPlateCount > 0 ? formPlateCount : Math.round(capacity * 2);
+    const calculatedKwp = parseFloat(((plateCount * plateWp) / 1000).toFixed(2));
     const existingQuotation = pendingRevisionQuotation 
       || pendingDraftSyncQuotation
       || (editingQuotationId ? quotations.find(q => q.id === editingQuotationId) : undefined);
@@ -1960,6 +1979,9 @@ export default function QuotationDashboardView({
         location: formFullAddress.trim() || 'Ariyalur - 621704',
         offerNo: formOfferNo.trim() || generateOfferNo(quotations, config),
         capacityKw: capacity,
+        capacityKwp: calculatedKwp,
+        plateCount: plateCount,
+        plateWp: plateWp,
         connectionType: formSystemType,
         targetSegment: formSegment,
         scheme: formScheme,
@@ -3435,8 +3457,8 @@ export default function QuotationDashboardView({
                 </div>
               </div>
 
-              {/* Grid 2 Columns for Offer No & Capacity */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Grid 3 Columns for Offer No, Project Capacity & Number of Plates */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Offer No. */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -3458,7 +3480,15 @@ export default function QuotationDashboardView({
                   </label>
                   <select
                     value={formCapacityKw}
-                    onChange={(e) => setFormCapacityKw(parseFloat(e.target.value))}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setFormCapacityKw(val);
+                      if (val > 0) {
+                        setFormPlateCount(Math.round(val * 2));
+                      } else {
+                        setFormPlateCount(0);
+                      }
+                    }}
                     className="w-full text-xs font-semibold p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#f7b944] bg-white cursor-pointer"
                   >
                     <option value={0}>Choose Project Capacity</option>
@@ -3471,6 +3501,57 @@ export default function QuotationDashboardView({
                       <option value={formCapacityKw}>{formCapacityKw} kW</option>
                     )}
                   </select>
+                </div>
+
+                {/* Number of Solar Plates (Dynamic & Overrideable) */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Number of Plates (Nos) *
+                    </label>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded font-mono">
+                      @{masterConfig.defaultSolarPlateWp || 550} Wp
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFormPlateCount(prev => Math.max(1, prev - 1))}
+                      disabled={formPlateCount <= 1}
+                      className="w-8 h-8 flex items-center justify-center bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 font-bold text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs shrink-0"
+                      title="Decrease by 1 plate"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10000"
+                      value={formPlateCount || ''}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setFormPlateCount(isNaN(val) ? 0 : Math.max(0, val));
+                      }}
+                      placeholder="e.g. 6, 18, 19, 20"
+                      className="w-full px-2.5 py-1.5 text-xs font-mono font-black text-slate-900 bg-white border border-slate-300 rounded-lg text-center focus:ring-2 focus:ring-[#f7b944]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormPlateCount(prev => (prev || 0) + 1)}
+                      className="w-8 h-8 flex items-center justify-center bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 font-bold text-sm cursor-pointer shadow-2xs shrink-0"
+                      title="Increase by 1 plate"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-[10.5px] pt-0.5">
+                    <span className="text-slate-500 font-medium">System DC:</span>
+                    <span className="font-mono font-black text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60">
+                      {formPlateCount > 0 
+                        ? `${((formPlateCount * (masterConfig.defaultSolarPlateWp || 550)) / 1000).toFixed(2)} kWp`
+                        : '0.00 kWp'}
+                    </span>
+                  </div>
                 </div>
               </div>
 

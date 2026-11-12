@@ -99,6 +99,8 @@ export interface SolarQuotation {
   // Solar Technical Specs
   capacityKw: number; // e.g. 4.95
   capacityKwp: number; // e.g. 4.95
+  plateCount?: number; // e.g. 19
+  plateWp?: number; // e.g. 550
   systemType: SolarSystemType;
   gridEvacuationVoltage: string; // e.g. "415V / 230V"
   
@@ -1291,17 +1293,9 @@ export function deriveDcCapacityKwp(
   capacityKw?: number,
   capacityKwp?: number,
   solarPlateWp: number = 550,
-  solarModuleText?: string
+  solarModuleText?: string,
+  plateCount?: number
 ): number {
-  // If capacityKwp is already set and different from capacityKw (and strictly > 0), respect explicit value
-  if (capacityKwp !== undefined && capacityKwp > 0 && capacityKw !== undefined && capacityKwp !== capacityKw) {
-    return capacityKwp;
-  }
-
-  const acKw = capacityKw || capacityKwp || 0;
-  if (!acKw) return 0;
-
-  // Check if solarModuleText provides a specific wattage rating like "545 Wp", "550 Wp", "540 Wp"
   let plateWp = solarPlateWp || 550;
   if (solarModuleText) {
     const match = solarModuleText.match(/(\d{3,4})\s*Wp?/i);
@@ -1313,7 +1307,20 @@ export function deriveDcCapacityKwp(
     }
   }
 
-  // Standard formula: Panels = System kW * 2, kWp = (Panels * Plate Wp) / 1000
+  // 1. If plateCount is explicitly provided, calculate directly: (plates * plateWp) / 1000
+  if (plateCount !== undefined && plateCount > 0) {
+    return parseFloat(((plateCount * plateWp) / 1000).toFixed(2));
+  }
+
+  // 2. If capacityKwp is already explicitly set and > 0, respect it
+  if (capacityKwp !== undefined && capacityKwp > 0) {
+    return parseFloat(Number(capacityKwp).toFixed(2));
+  }
+
+  const acKw = capacityKw || 0;
+  if (!acKw) return 0;
+
+  // Standard formula fallback: Panels = System kW * 2, kWp = (Panels * Plate Wp) / 1000
   const panels = Math.round(acKw * 2);
   const calculated = (panels * plateWp) / 1000;
   return parseFloat(calculated.toFixed(2));
@@ -1322,6 +1329,8 @@ export function deriveDcCapacityKwp(
 export interface BuildBOQParams {
   capacityKw: number;
   capacityKwp?: number;
+  plateCount?: number;
+  plateWp?: number;
   solarModule?: string;
   inverter?: string;
   inverterQty?: number;

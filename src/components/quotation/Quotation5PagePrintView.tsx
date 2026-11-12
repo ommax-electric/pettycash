@@ -565,7 +565,7 @@ export default function Quotation5PagePrintView({
               {quotation.offerNo} <span className="text-[#f7b944]">({quotation.revisionCode})</span>
             </h2>
             <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
-              {quotation.projectName} • {deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp Solar PV Power Plant
+              {quotation.projectName} • {deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp, quotation.plateWp, quotation.solarModule, quotation.plateCount)} kWp Solar PV Power Plant
             </p>
           </div>
 
@@ -759,7 +759,7 @@ export default function Quotation5PagePrintView({
                 <div className="grid grid-cols-[100px_10px_1fr] items-baseline whitespace-nowrap">
                   <span className="font-bold text-slate-700 whitespace-nowrap">Project Capacity</span>
                   <span className="text-slate-500 font-bold">:</span>
-                  <span className="font-bold text-slate-900 whitespace-nowrap">{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp</span>
+                  <span className="font-bold text-slate-900 whitespace-nowrap">{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp, quotation.plateWp, quotation.solarModule, quotation.plateCount)} kWp</span>
                 </div>
               </div>
 
@@ -785,7 +785,7 @@ export default function Quotation5PagePrintView({
                   {renderFormattedText(
                     interpolateSubject(quotation.subject || `Proposal for ${quotation.capacityKw} kW Roof top Solar`, {
                       capacityKw: deriveAcCapacityKw(quotation.capacityKw, quotation.capacityKwp),
-                      capacityKwp: deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp),
+                      capacityKwp: deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp, quotation.plateWp, quotation.solarModule, quotation.plateCount),
                       connectionType: quotation.connectionType,
                       scheme: quotation.scheme,
                       clientName: quotation.clientName,
@@ -936,7 +936,7 @@ export default function Quotation5PagePrintView({
                   <div className="divide-y divide-slate-300">
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Site Location</span><span className="text-slate-500 font-bold">:</span><span>{siteLocationFormatted}</span></div>
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kW)</span><span className="text-slate-500 font-bold">:</span><span>{deriveAcCapacityKw(quotation.capacityKw, quotation.capacityKwp)} kW</span></div>
-                    <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kWp)</span><span className="text-slate-500 font-bold">:</span><span>{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp)} kWp</span></div>
+                    <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Project Capacity (kWp)</span><span className="text-slate-500 font-bold">:</span><span>{deriveDcCapacityKwp(quotation.capacityKw, quotation.capacityKwp, quotation.plateWp, quotation.solarModule, quotation.plateCount)} kWp</span></div>
                     <div className="grid grid-cols-[160px_12px_1fr] items-baseline p-1.5"><span className="font-bold text-slate-700">Grid Evacuation Voltage (kV)</span><span className="text-slate-500 font-bold">:</span><span>{quotation.gridEvacuationVoltage || '—'}</span></div>
                   </div>
                 </div>

@@ -343,7 +343,7 @@ export default function LiveQuotationCanvas({
   // Recalculate BOQ & Pricing when capacity or basic cost changes
   const handleCapacityChange = (newCapacity: number) => {
     const validCap = Math.max(0.5, newCapacity || 1);
-    const dcKwp = deriveDcCapacityKwp(validCap);
+    const dcKwp = deriveDcCapacityKwp(validCap, undefined, masterConfig.defaultSolarPlateWp, formData.solarModule, formData.plateCount);
     const newBasic = Math.round(validCap * 63000);
     const pricing = calculateSolarPricing(newBasic, formData.specialDiscount || 0);
 
